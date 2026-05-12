@@ -17,6 +17,7 @@ const SECTIONS: {
       { to: '/app/map',       label: 'Шууд газрын зураг', min: 'VIEWER',      icon: <IconMap /> },
       { to: '/app/devices',   label: 'Машин · Төхөөрөмж', min: 'VIEWER',      icon: <IconTruck /> },
       { to: '/app/drivers',   label: 'Жолооч · Ажилчид', min: 'VIEWER',       icon: <IconDriver /> },
+      { to: '/app/service-tasks', label: 'Засвар үйлчилгээ', min: 'VIEWER',   icon: <IconWrench /> },
       { to: '/app/history',   label: 'Маршрут · Түүх', min: 'VIEWER',         icon: <IconRoute /> },
     ],
   },
@@ -243,6 +244,13 @@ function IconChart() {
     <IconBase>
       <path d="M3 3v18h18" />
       <path d="M7 15l4-5 3 3 5-7" />
+    </IconBase>
+  );
+}
+function IconWrench() {
+  return (
+    <IconBase>
+      <path d="M14 7a4 4 0 11-2 7l-7 7-2-2 7-7a4 4 0 014-5z" />
     </IconBase>
   );
 }

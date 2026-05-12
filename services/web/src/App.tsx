@@ -6,6 +6,7 @@ import { Devices } from './pages/Devices';
 import { Drivers } from './pages/Drivers';
 import { EcoDriving } from './pages/EcoDriving';
 import { Places } from './pages/Places';
+import { ServiceTasks } from './pages/ServiceTasks';
 import { LiveMap } from './pages/LiveMap';
 import { History } from './pages/History';
 import { Events } from './pages/Events';
@@ -34,6 +35,7 @@ export function App() {
         <Route path="/app/drivers" element={<Drivers />} />
         <Route path="/app/eco-driving" element={<EcoDriving />} />
         <Route path="/app/places" element={<Places />} />
+        <Route path="/app/service-tasks" element={<ServiceTasks />} />
         <Route path="/app/history/:deviceId?" element={<History />} />
         <Route path="/app/events" element={<Events />} />
         <Route path="/app/geofences" element={<Geofences />} />

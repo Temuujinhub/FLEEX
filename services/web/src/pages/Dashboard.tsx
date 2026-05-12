@@ -20,6 +20,11 @@ export function Dashboard() {
     queryFn: () => api.get('/events?limit=12&ack=false').then((r) => r.data.items),
     refetchInterval: 20_000,
   });
+  const upcomingTasks = useQuery({
+    queryKey: ['service-tasks', 'upcoming'],
+    queryFn: () => api.get('/service-tasks?upcoming=true').then((r) => r.data),
+    refetchInterval: 60_000,
+  });
 
   const list: any[] = devices.data ?? [];
   const evts: any[] = events.data ?? [];
@@ -133,6 +138,9 @@ export function Dashboard() {
         </div>
       </div>
 
+      {/* Service tasks summary */}
+      <ServiceTasksPanel tasks={upcomingTasks.data ?? []} />
+
       {/* Lower row: top devices + recent alerts */}
       <div className="grid lg:grid-cols-5 gap-4">
         <section className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm">
@@ -203,6 +211,71 @@ export function Dashboard() {
           </ul>
         </section>
       </div>
+    </div>
+  );
+}
+
+// ── Service tasks summary ───────────────────────────────────
+function ServiceTasksPanel({ tasks }: { tasks: any[] }) {
+  const counts = useMemo(() => {
+    const m: Record<string, number> = { PLANNED: 0, IN_PROGRESS: 0, OVERDUE: 0 };
+    for (const t of tasks) m[t.status] = (m[t.status] ?? 0) + 1;
+    return m;
+  }, [tasks]);
+  const next = tasks
+    .filter((t) => t.scheduledAt && t.status !== 'COMPLETED' && t.status !== 'CANCELLED')
+    .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())
+    .slice(0, 4);
+
+  if (tasks.length === 0 && counts.OVERDUE === 0) {
+    return null;
+  }
+  return (
+    <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+      <header className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <div className="text-sm font-semibold">Засвар үйлчилгээ</div>
+          <div className="text-xs text-slate-500">Удахгүйх ба хугацаа хэтэрсэн ажлууд</div>
+        </div>
+        <a href="/app/service-tasks" className="text-xs text-brand-700 hover:underline">Бүгдийг үзэх →</a>
+      </header>
+      <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
+        <ServiceStat label="Хугацаа хэтэрсэн" value={counts.OVERDUE} accent="rose" />
+        <ServiceStat label="Хийгдэж байна"    value={counts.IN_PROGRESS} accent="amber" />
+        <ServiceStat label="Төлөвлөгсөн"      value={counts.PLANNED} accent="brand" />
+        <ServiceStat label="Нийт удахгүйх"   value={tasks.length} accent="slate" />
+      </div>
+      {next.length > 0 && (
+        <ul className="mt-4 divide-y divide-slate-100">
+          {next.map((t) => (
+            <li key={t.id} className="py-2.5 flex items-center gap-3 text-sm">
+              <span className="h-2 w-2 rounded-full bg-brand-500 shrink-0" />
+              <span className="flex-1 min-w-0">
+                <span className="font-medium truncate block">{t.title}</span>
+                <span className="text-xs text-slate-500 truncate block">{t.device?.name ?? '—'}</span>
+              </span>
+              <span className="text-xs text-slate-500">
+                {t.scheduledAt && new Date(t.scheduledAt).toLocaleDateString('mn-MN')}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function ServiceStat({ label, value, accent }: { label: string; value: number; accent: 'brand' | 'amber' | 'rose' | 'slate' }) {
+  const tint: Record<string, string> = {
+    brand: 'text-brand-700 bg-brand-50',
+    amber: 'text-amber-700 bg-amber-50',
+    rose:  'text-rose-700 bg-rose-50',
+    slate: 'text-slate-700 bg-slate-100',
+  };
+  return (
+    <div className={`rounded-xl px-3 py-2.5 ${tint[accent]}`}>
+      <div className="text-[10px] uppercase tracking-widest font-semibold opacity-80">{label}</div>
+      <div className="mt-0.5 text-2xl font-extrabold tabular-nums">{value}</div>
     </div>
   );
 }
