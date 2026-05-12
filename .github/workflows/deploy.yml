@@ -1,0 +1,108 @@
+# Fleex auto-deploy. On every push to main/claude branches, SSH into the
+# DigitalOcean host (178.128.27.70) and run infra/deploy/deploy.sh, which
+# performs a `git pull && docker compose up -d --build` with health gating
+# and a rollback on failure.
+#
+# Required GitHub secrets:
+#   DEPLOY_HOST          178.128.27.70
+#   DEPLOY_USER          deploy (or root)
+#   DEPLOY_SSH_KEY       OpenSSH private key with access to the host
+#   DEPLOY_SSH_PORT      (optional, default 22)
+#   DEPLOY_KNOWN_HOSTS   `ssh-keyscan -H 178.128.27.70` output (recommended)
+#
+# Branch policy:
+#   - main                 → production deploy
+#   - claude/saas-auto-* → production deploy (current development branch)
+#   - other branches       → CI build only (no deploy)
+
+name: deploy
+
+on:
+  push:
+    branches:
+      - main
+      - 'claude/saas-auto-**'
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-check:
+    name: Lint & build sanity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Vet GPS ingestor
+        working-directory: services/gps-ingestor
+        run: |
+          go mod tidy
+          go vet ./...
+          go build ./...
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: API – install & build
+        working-directory: services/api
+        run: |
+          npm install --no-audit --no-fund --legacy-peer-deps
+          npx prisma generate
+          npx nest build
+
+      - name: Web – install & build
+        working-directory: services/web
+        env:
+          VITE_API_URL: /api
+          VITE_WS_URL: /ws
+        run: |
+          npm install --no-audit --no-fund --legacy-peer-deps
+          npm run build
+
+  deploy:
+    name: Deploy to 178.128.27.70
+    needs: build-check
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          if [ -n "$DEPLOY_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -H -p "${DEPLOY_SSH_PORT:-22}" "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          fi
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Trigger remote deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          REF: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          PORT="${DEPLOY_SSH_PORT:-22}"
+          ssh -p "$PORT" -o StrictHostKeyChecking=accept-new "$DEPLOY_USER@$DEPLOY_HOST" \
+            "set -e; cd /opt/fleex && sudo -n env REF='$REF' SHA='$SHA' ./infra/deploy/deploy.sh"

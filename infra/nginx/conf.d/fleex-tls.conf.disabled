@@ -1,0 +1,66 @@
+# Renamed to fleex-tls.conf and activated by infra/deploy/enable-tls.sh after
+# certbot succeeds. Kept as `.disabled` here so nginx doesn't load it on a
+# fresh host (which has no certificates yet).
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name fleex.mn www.fleex.mn;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type "text/plain";
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name fleex.mn www.fleex.mn;
+
+    ssl_certificate     /etc/nginx/certs/live/fleex.mn/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/live/fleex.mn/privkey.pem;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:50m;
+    ssl_session_tickets off;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_stapling on;
+    ssl_stapling_verify on;
+
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://maps.googleapis.com 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://*.googleapis.com https://*.gstatic.com; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' wss: https://*.googleapis.com; frame-ancestors 'self';" always;
+
+    limit_conn conn_zone 50;
+
+    location = /api/auth/login {
+        limit_req zone=login_zone burst=5 nodelay;
+        proxy_pass http://fleex_api;
+    }
+
+    location /api/ {
+        limit_req zone=api_zone burst=80 nodelay;
+        proxy_pass http://fleex_api;
+    }
+
+    location /ws {
+        proxy_pass http://fleex_api;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    location / {
+        proxy_pass http://fleex_web;
+    }
+}

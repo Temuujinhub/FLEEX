@@ -1,0 +1,359 @@
+// Fleex GPS SaaS – data model.
+// PostgreSQL with TimescaleDB extension. Raw SQL migrations under
+// `prisma/migrations/` add hypertables, partitions and compression policies
+// that Prisma's declarative schema can't express.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [timescaledb, pg_trgm, btree_gin, pgcrypto]
+}
+
+// ---- Tenancy & users -------------------------------------------------------
+
+enum Role {
+  SUPER_ADMIN
+  COMPANY_ADMIN
+  FLEET_MANAGER
+  DISPATCHER
+  DRIVER
+  VIEWER
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+  LOCKED
+}
+
+model Company {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  slug        String   @unique
+  contactEmail String?
+  contactPhone String?
+  timezone    String   @default("Asia/Ulaanbaatar")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       User[]
+  devices     Device[]
+  groups      DeviceGroup[]
+  geofences   Geofence[]
+  drivers     Driver[]
+
+  @@map("companies")
+}
+
+model User {
+  id            String     @id @default(uuid()) @db.Uuid
+  companyId     String?    @db.Uuid
+  company       Company?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  email         String     @unique
+  username      String?    @unique
+  passwordHash  String
+  fullName      String?
+  phone         String?
+  role          Role       @default(VIEWER)
+  status        UserStatus @default(ACTIVE)
+  lastLoginAt   DateTime?
+  failedLogins  Int        @default(0)
+  lockedUntil   DateTime?
+  mfaEnabled    Boolean    @default(false)
+  mfaSecret     String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  refreshTokens RefreshToken[]
+  apiKeys       ApiKey[]
+  geofences     Geofence[]
+  auditLogs     AuditLog[]
+  sessions      Session[]
+
+  @@index([companyId])
+  @@index([role])
+  @@map("users")
+}
+
+model RefreshToken {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash   String   @unique
+  userAgent   String?
+  ipAddress   String?
+  revokedAt   DateTime?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model Session {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ipAddress  String?
+  userAgent  String?
+  startedAt  DateTime @default(now())
+  endedAt    DateTime?
+
+  @@index([userId, startedAt])
+  @@map("sessions")
+}
+
+model ApiKey {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  keyHash    String   @unique
+  prefix     String   @db.VarChar(12)
+  scopes     String[]
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@map("api_keys")
+}
+
+// ---- Fleet -----------------------------------------------------------------
+
+enum DeviceStatus {
+  ACTIVE
+  INACTIVE
+  MAINTENANCE
+  DECOMMISSIONED
+}
+
+model DeviceGroup {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @db.Uuid
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  parentId    String?  @db.Uuid
+  parent      DeviceGroup?  @relation("GroupTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children    DeviceGroup[] @relation("GroupTree")
+  devices     Device[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([companyId, name])
+  @@index([companyId])
+  @@map("device_groups")
+}
+
+model Device {
+  id           String        @id @default(uuid()) @db.Uuid
+  companyId    String        @db.Uuid
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  groupId      String?       @db.Uuid
+  group        DeviceGroup?  @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  imei         String        @unique
+  name         String
+  model        String?
+  simNumber    String?
+  plateNumber  String?
+  vin          String?
+  status       DeviceStatus  @default(ACTIVE)
+  // Reported telemetry / latest snapshot. Real source of truth for fast UI.
+  lastSeenAt   DateTime?
+  lastLat      Float?
+  lastLng      Float?
+  lastSpeed    Float?
+  lastCourse   Float?
+  lastAltitude Float?
+  ignitionOn   Boolean?
+  odometerKm   Float?
+  engineHours  Float?
+  batteryVolt  Float?
+  protocol     String?       @default("teltonika")
+  attributes   Json?
+  driverId     String?       @db.Uuid
+  driver       Driver?       @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  speedLimit   Float?        // km/h, per-device override
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  events       Event[]
+  commands     Command[]
+
+  @@index([companyId])
+  @@index([groupId])
+  @@index([status])
+  @@index([lastSeenAt])
+  @@map("devices")
+}
+
+model Driver {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @db.Uuid
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  fullName    String
+  rfidCard    String?  @unique
+  licenseNo   String?
+  phone       String?
+  email       String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  devices     Device[]
+
+  @@index([companyId])
+  @@map("drivers")
+}
+
+// ---- Geofences -------------------------------------------------------------
+
+enum GeofenceShape {
+  CIRCLE
+  POLYGON
+}
+
+model Geofence {
+  id          String        @id @default(uuid()) @db.Uuid
+  companyId   String        @db.Uuid
+  company     Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId      String?       @db.Uuid
+  user        User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  name        String
+  description String?
+  shape       GeofenceShape
+  // For CIRCLE: { lat, lng, radiusM }. For POLYGON: { points: [[lng,lat],...] }.
+  geometry    Json
+  speedLimit  Float?
+  active      Boolean       @default(true)
+  alertOnEnter Boolean      @default(true)
+  alertOnExit  Boolean      @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  events      Event[]
+
+  @@index([companyId])
+  @@map("geofences")
+}
+
+// ---- Events & commands ------------------------------------------------------
+
+enum EventType {
+  PANIC
+  OVERSPEED
+  HARSH_ACCEL
+  HARSH_BRAKE
+  HARSH_CORNER
+  GEOFENCE_ENTER
+  GEOFENCE_EXIT
+  IGNITION_ON
+  IGNITION_OFF
+  IDLE_START
+  IDLE_END
+  POWER_CUT
+  LOW_BATTERY
+  DEVICE_OFFLINE
+  DEVICE_ONLINE
+  TAMPER
+  CUSTOM
+}
+
+enum EventSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+model Event {
+  id         BigInt        @id @default(autoincrement())
+  companyId  String        @db.Uuid
+  deviceId   String        @db.Uuid
+  device     Device        @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  geofenceId String?       @db.Uuid
+  geofence   Geofence?     @relation(fields: [geofenceId], references: [id], onDelete: SetNull)
+  type       EventType
+  severity   EventSeverity @default(WARNING)
+  lat        Float?
+  lng        Float?
+  speed      Float?
+  message    String?
+  payload    Json?
+  acknowledged Boolean     @default(false)
+  acknowledgedById String? @db.Uuid
+  acknowledgedAt   DateTime?
+  occurredAt DateTime
+  createdAt  DateTime      @default(now())
+
+  @@index([companyId, occurredAt])
+  @@index([deviceId, occurredAt])
+  @@index([type, occurredAt])
+  @@index([acknowledged])
+  @@map("events")
+}
+
+enum CommandStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+}
+
+model Command {
+  id          BigInt        @id @default(autoincrement())
+  deviceId    String        @db.Uuid
+  device      Device        @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  issuedById  String        @db.Uuid
+  type        String        // e.g. "reset", "setodometer", "engine_block"
+  payload     Json?
+  status      CommandStatus @default(PENDING)
+  result      String?
+  attempts    Int           @default(0)
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  createdAt   DateTime      @default(now())
+
+  @@index([deviceId, status])
+  @@map("commands")
+}
+
+// ---- Audit log (tamper-evident hash chain) ---------------------------------
+
+model AuditLog {
+  id          BigInt   @id @default(autoincrement())
+  occurredAt  DateTime @default(now())
+  actorId     String?  @db.Uuid
+  actor       User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorEmail  String?
+  companyId   String?  @db.Uuid
+  action      String   // e.g. "user.login", "device.update", "geofence.delete"
+  resourceType String?
+  resourceId  String?
+  ipAddress   String?
+  userAgent   String?
+  before      Json?
+  after       Json?
+  metadata    Json?
+  outcome     String   @default("success") // success | failure | denied
+  prevHash    String   @db.VarChar(64)
+  hash        String   @db.VarChar(64)
+
+  @@index([companyId, occurredAt])
+  @@index([actorId, occurredAt])
+  @@index([action, occurredAt])
+  @@map("audit_logs")
+}
+
+// ---- Positions (hypertable; managed via raw SQL migration) -----------------
+// The `positions` table is created via raw SQL and turned into a TimescaleDB
+// hypertable with monthly chunks, compression after 7 days, and retention at
+// 13 months. Prisma sees it via $queryRaw only; we intentionally do not model
+// it here to avoid Prisma trying to manage the hypertable DDL.

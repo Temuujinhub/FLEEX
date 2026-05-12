@@ -1,0 +1,25 @@
+# Optional systemd unit so the stack starts on boot even if Docker is set to
+# not auto-start containers. Install with:
+#   sudo cp infra/deploy/systemd/fleex-stack.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now fleex-stack
+#
+# (You normally don't need this — `restart: unless-stopped` already covers
+# container reboots — but it's handy for "compose pull" on host boot.)
+
+[Unit]
+Description=Fleex GPS SaaS Docker Compose stack
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/fleex
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStop=/usr/bin/docker compose down
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target
