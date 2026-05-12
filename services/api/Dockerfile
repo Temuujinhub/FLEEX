@@ -42,4 +42,10 @@ ENTRYPOINT ["/sbin/tini", "--"]
 # Use the local prisma binary explicitly so npx never tries to fetch a
 # newer release from npm (Prisma 7 changed the schema syntax and would
 # blow up against our 5.x schema).
-CMD ["sh", "-c", "./node_modules/.bin/prisma db push --accept-data-loss --schema=prisma/schema.prisma && node dist/main.js"]
+#
+# db push failures no longer abort the boot. A schema drift used to lock
+# the API in a restart loop (Prisma kept trying to DROP the `positions`
+# hypertable because the continuous aggregate's dependent views blocked
+# it). The relational schema is stable in production; if a real
+# migration is needed, run `prisma db push` manually with eyes on.
+CMD ["sh", "-c", "./node_modules/.bin/prisma db push --accept-data-loss --schema=prisma/schema.prisma || echo '[entrypoint] WARNING: prisma db push failed; booting with existing DB schema'; exec node dist/main.js"]
