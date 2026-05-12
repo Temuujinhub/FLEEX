@@ -48,6 +48,8 @@ model Company {
   garages     Garage[]
   geofences   Geofence[]
   drivers     Driver[]
+  places      Place[]
+  serviceTasks ServiceTask[]
 
   @@map("companies")
 }
@@ -168,6 +170,45 @@ enum FuelType {
   OTHER
 }
 
+// Named point of interest the operator can drop on the map: depots,
+// loading bays, refuelling stations, weighbridges, town offices, etc.
+// Free-form `type` + `color` so the company picks their own vocabulary;
+// `radiusM` is optional and only set when the place is treated like a
+// soft geofence (the hard geofences live on the `Geofence` model).
+enum PlaceType {
+  DEPOT
+  LOADING
+  UNLOADING
+  REFUEL
+  WEIGHBRIDGE
+  WORKSHOP
+  OFFICE
+  CHECKPOINT
+  OTHER
+}
+
+model Place {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @db.Uuid
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name        String
+  type        PlaceType @default(OTHER)
+  latitude    Float
+  longitude   Float
+  radiusM     Int?      // optional buffer; UI draws a circle when set
+  address     String?
+  description String?
+  color       String?   // hex, drives marker / circle colour
+  icon        String?   // optional icon key from the UI palette
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([companyId])
+  @@index([type])
+  @@map("places")
+}
+
 // Physical parking depot / yard. A vehicle lives in one garage; a company
 // can have many. Distinct from DeviceGroup (which represents organisational
 // units / departments — алба нэгж).
@@ -277,6 +318,7 @@ model Device {
 
   events       Event[]
   commands     Command[]
+  serviceTasks ServiceTask[]
 
   @@index([companyId])
   @@index([groupId])
@@ -285,6 +327,83 @@ model Device {
   @@index([vehicleType])
   @@index([lastSeenAt])
   @@map("devices")
+}
+
+// ── Service tasks (засвар үйлчилгээ) ────────────────────────
+enum ServiceTaskStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  OVERDUE
+  CANCELLED
+}
+
+enum ServiceTaskKind {
+  MAINTENANCE   // Урьдчилан сэргийлэх засвар
+  REPAIR        // Засвар
+  INSPECTION    // Үзлэг
+  OIL_CHANGE    // Тос солилт
+  TIRE          // Дугуй солилт / эргүүлэлт
+  WASH          // Угаалга
+  OTHER
+}
+
+model ServiceTask {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @db.Uuid
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  deviceId    String   @db.Uuid
+  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String?
+  kind        ServiceTaskKind   @default(MAINTENANCE)
+  status      ServiceTaskStatus @default(PLANNED)
+  cost        Float?
+  unplanned   Boolean   @default(false)
+
+  // Schedule (any combination — UI picks the most relevant one)
+  scheduledAt          DateTime?
+  scheduledOdometerKm  Float?
+  scheduledEngineHours Float?
+  reminderDays         Int?      // Push reminder N days before
+
+  // Completion
+  completedAt          DateTime?
+  completedOdometerKm  Float?
+  completedEngineHours Float?
+  completionNotes      String?
+  performedBy          String?   // Free-text mechanic / vendor name
+
+  createdByUserId String? @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  attachments ServiceTaskAttachment[]
+
+  @@index([companyId])
+  @@index([deviceId])
+  @@index([status])
+  @@index([scheduledAt])
+  @@map("service_tasks")
+}
+
+// Single attachment ↔ many service tasks (in practice rarely more than a
+// few photos per task). Bytes live in Postgres as bytea — keeps the
+// deploy infra-free; we stream the data only when the user clicks
+// "download".
+model ServiceTaskAttachment {
+  id            String       @id @default(uuid()) @db.Uuid
+  serviceTaskId String       @db.Uuid
+  serviceTask   ServiceTask  @relation(fields: [serviceTaskId], references: [id], onDelete: Cascade)
+  filename      String
+  mimeType      String
+  sizeBytes     Int
+  data          Bytes
+  uploadedAt    DateTime     @default(now())
+
+  @@index([serviceTaskId])
+  @@map("service_task_attachments")
 }
 
 model Driver {

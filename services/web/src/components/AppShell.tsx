@@ -17,15 +17,18 @@ const SECTIONS: {
       { to: '/app/map',       label: 'Шууд газрын зураг', min: 'VIEWER',      icon: <IconMap /> },
       { to: '/app/devices',   label: 'Машин · Төхөөрөмж', min: 'VIEWER',      icon: <IconTruck /> },
       { to: '/app/drivers',   label: 'Жолооч · Ажилчид', min: 'VIEWER',       icon: <IconDriver /> },
+      { to: '/app/service-tasks', label: 'Засвар үйлчилгээ', min: 'VIEWER',   icon: <IconWrench /> },
       { to: '/app/history',   label: 'Маршрут · Түүх', min: 'VIEWER',         icon: <IconRoute /> },
     ],
   },
   {
     title: 'Аналитик',
     items: [
-      { to: '/app/events',    label: 'Дохиоллууд', min: 'VIEWER',             icon: <IconBell /> },
-      { to: '/app/geofences', label: 'Geofence бүс', min: 'FLEET_MANAGER',    icon: <IconShield /> },
-      { to: '/app/reports',   label: 'Тайлан', min: 'VIEWER',                 icon: <IconChart /> },
+      { to: '/app/events',      label: 'Дохиоллууд', min: 'VIEWER',           icon: <IconBell /> },
+      { to: '/app/eco-driving', label: 'Эко жолоодлого', min: 'VIEWER',       icon: <IconEco /> },
+      { to: '/app/places',      label: 'Байршил · Цэгүүд', min: 'VIEWER',     icon: <IconPin /> },
+      { to: '/app/geofences',   label: 'Geofence бүс', min: 'FLEET_MANAGER', icon: <IconShield /> },
+      { to: '/app/reports',     label: 'Тайлан', min: 'VIEWER',               icon: <IconChart /> },
     ],
   },
   {
@@ -241,6 +244,30 @@ function IconChart() {
     <IconBase>
       <path d="M3 3v18h18" />
       <path d="M7 15l4-5 3 3 5-7" />
+    </IconBase>
+  );
+}
+function IconWrench() {
+  return (
+    <IconBase>
+      <path d="M14 7a4 4 0 11-2 7l-7 7-2-2 7-7a4 4 0 014-5z" />
+    </IconBase>
+  );
+}
+function IconEco() {
+  return (
+    <IconBase>
+      <path d="M4 14a8 8 0 1116 0" />
+      <path d="M12 14l4-3" />
+      <circle cx="12" cy="14" r="1.2" fill="currentColor" />
+    </IconBase>
+  );
+}
+function IconPin() {
+  return (
+    <IconBase>
+      <path d="M12 22s7-7 7-12a7 7 0 10-14 0c0 5 7 12 7 12z" />
+      <circle cx="12" cy="10" r="2.5" />
     </IconBase>
   );
 }

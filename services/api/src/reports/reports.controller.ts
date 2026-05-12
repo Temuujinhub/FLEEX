@@ -32,6 +32,27 @@ export class ReportsController {
     return this.svc.eventsReport(id, r.from, r.to, req.user);
   }
 
+  // Eco-driving leaderboard. Weights are supplied as repeated `w=TYPE:NN`
+  // query params so the GET stays cacheable; missing types default to 0.
+  @Get('driver-scores')
+  @Audit('report.driver_scores')
+  driverScores(
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Query('w') w: string | string[] | undefined,
+    @Req() req: any,
+  ) {
+    const r = this.range(from, to);
+    const weights: Record<string, number> = {};
+    const items = Array.isArray(w) ? w : w ? [w] : [];
+    for (const item of items) {
+      const [k, v] = item.split(':');
+      const n = Number(v);
+      if (k && !Number.isNaN(n)) weights[k] = n;
+    }
+    return this.svc.driverScores(req.user, r.from, r.to, weights);
+  }
+
   @Get('trip/:deviceId/excel')
   @Audit('report.trip.excel', { resourceType: 'device', resourceIdParam: 'deviceId' })
   async excel(
