@@ -104,5 +104,9 @@ jobs:
         run: |
           set -euo pipefail
           PORT="${DEPLOY_SSH_PORT:-22}"
+          # `deploy` user is in the `docker` group and owns /opt/fleex, so no
+          # sudo is needed for the build+up cycle. If you later add system-
+          # level commands to deploy.sh, configure /etc/sudoers.d/fleex-deploy
+          # and switch back to `sudo -n env ...`.
           ssh -p "$PORT" -o StrictHostKeyChecking=accept-new "$DEPLOY_USER@$DEPLOY_HOST" \
-            "set -e; cd /opt/fleex && sudo -n env REF='$REF' SHA='$SHA' ./infra/deploy/deploy.sh"
+            "set -e; cd /opt/fleex && env REF='$REF' SHA='$SHA' ./infra/deploy/deploy.sh"
