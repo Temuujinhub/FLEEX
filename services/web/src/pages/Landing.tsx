@@ -63,6 +63,7 @@ export function Landing() {
           </p>
           <div className="mt-12 grid md:grid-cols-3 gap-6">
             <Feature title="Real-time tracking" body="WebSocket + Redis Pub/Sub ашиглан секунд тутмын байршил." />
+            <Feature title="Олон давхаргат газрын зураг" body="OpenStreetMap гудамж, Esri хиймэл дагуул, OpenTopoMap rельеф – нэг товчоор солино." />
             <Feature title="Geofence & alerts" body="Polygon/Circle хашаа, хурд хэтрэлт, panic button, SMS/email." />
             <Feature title="12 сарын тайлан" body="TimescaleDB hypertable, continuous aggregate, Excel/PDF export." />
             <Feature title="RBAC + Audit log" body="6 түвшинт эрх, hash-chained tamper-evident лог." />

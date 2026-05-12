@@ -37,7 +37,11 @@ server {
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://maps.googleapis.com 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://*.googleapis.com https://*.gstatic.com; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' wss: https://*.googleapis.com; frame-ancestors 'self';" always;
+    # CSP allows OpenStreetMap, Esri satellite, OpenTopoMap tile servers. If
+    # you switch back to Google Maps, add https://maps.googleapis.com to
+    # script-src and https://*.googleapis.com / https://*.gstatic.com to
+    # img-src and connect-src.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://server.arcgisonline.com https://*.tile.opentopomap.org https://unpkg.com; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' wss: ws: https://*.tile.openstreetmap.org https://server.arcgisonline.com https://*.tile.opentopomap.org; frame-ancestors 'self';" always;
 
     limit_conn conn_zone 50;
 

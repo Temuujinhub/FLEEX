@@ -1,7 +1,24 @@
-import { useEffect, useRef, useState } from 'react';
-import { Loader } from '@googlemaps/js-api-loader';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, LayersControl, useMap } from 'react-leaflet';
+import L from 'leaflet';
 import { useQuery } from '@tanstack/react-query';
 import { api, WS_URL, getToken } from '../lib/api';
+import 'leaflet/dist/leaflet.css';
+
+// Leaflet's default marker icons are loaded from a CDN that breaks under
+// strict CSP. Inline two small SVG icons (online/offline) instead.
+const onlineIcon = L.divIcon({
+  className: 'fleex-marker',
+  html: '<span style="display:inline-block;width:14px;height:14px;border-radius:9999px;background:#10b981;border:2px solid #064e3b;box-shadow:0 0 0 2px rgba(16,185,129,.25)"></span>',
+  iconSize: [14, 14],
+  iconAnchor: [7, 7],
+});
+const offlineIcon = L.divIcon({
+  className: 'fleex-marker',
+  html: '<span style="display:inline-block;width:14px;height:14px;border-radius:9999px;background:#94a3b8;border:2px solid #334155"></span>',
+  iconSize: [14, 14],
+  iconAnchor: [7, 7],
+});
 
 interface DeviceRow {
   id: string;
@@ -11,13 +28,22 @@ interface DeviceRow {
   lastLat: number | null;
   lastLng: number | null;
   lastSpeed: number | null;
+  lastSeenAt: string | null;
+}
+
+interface LivePosition {
+  deviceId: string;
+  lat: number;
+  lng: number;
+  speed: number;
+  course: number;
+  time: number;
 }
 
 export function LiveMap() {
-  const mapEl = useRef<HTMLDivElement>(null);
-  const [map, setMap] = useState<google.maps.Map | null>(null);
-  const markers = useRef(new Map<string, google.maps.Marker>());
   const [selected, setSelected] = useState<string | null>(null);
+  // Real-time positions arriving over WebSocket override REST snapshots.
+  const [livePos, setLivePos] = useState<Record<string, LivePosition>>({});
 
   const devices = useQuery<DeviceRow[]>({
     queryKey: ['devices'],
@@ -25,48 +51,7 @@ export function LiveMap() {
     refetchInterval: 15_000,
   });
 
-  // Load Google Maps and draw initial markers from the REST snapshot.
-  useEffect(() => {
-    if (!mapEl.current || map) return;
-    const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
-    if (!key) {
-      console.warn('VITE_GOOGLE_MAPS_API_KEY not set — map will not load');
-      return;
-    }
-    const loader = new Loader({ apiKey: key, version: 'weekly' });
-    loader.load().then(() => {
-      const m = new google.maps.Map(mapEl.current!, {
-        center: { lat: 43.0, lng: 106.0 },
-        zoom: 6,
-        mapTypeId: 'hybrid',
-      });
-      setMap(m);
-    });
-  }, [map]);
-
-  useEffect(() => {
-    if (!map || !devices.data) return;
-    for (const d of devices.data) {
-      if (d.lastLat == null || d.lastLng == null) continue;
-      const pos = { lat: d.lastLat, lng: d.lastLng };
-      let mk = markers.current.get(d.id);
-      if (!mk) {
-        mk = new google.maps.Marker({
-          map,
-          position: pos,
-          title: d.name,
-          icon: dotIcon(d.online ? '#10b981' : '#94a3b8'),
-        });
-        mk.addListener('click', () => setSelected(d.id));
-        markers.current.set(d.id, mk);
-      } else {
-        mk.setPosition(pos);
-        mk.setIcon(dotIcon(d.online ? '#10b981' : '#94a3b8'));
-      }
-    }
-  }, [map, devices.data]);
-
-  // Live updates via WebSocket.
+  // WebSocket live updates.
   useEffect(() => {
     const token = getToken();
     if (!token) return;
@@ -79,59 +64,146 @@ export function LiveMap() {
       try {
         const m = JSON.parse(ev.data);
         if (m.type !== 'position') return;
-        const mk = markers.current.get(m.data.deviceId);
-        if (mk) {
-          mk.setPosition({ lat: m.data.lat, lng: m.data.lng });
-          mk.setIcon(dotIcon('#10b981'));
-        }
+        setLivePos((prev) => ({ ...prev, [m.data.deviceId]: m.data }));
       } catch {}
     };
-    ws.onclose = () => undefined;
     return () => ws.close();
-  }, [map]);
+  }, []);
 
-  const sel = devices.data?.find((d) => d.id === selected);
+  // Merge REST snapshot with WS live positions.
+  const merged = useMemo(() => {
+    return (devices.data ?? []).map((d) => {
+      const live = livePos[d.id];
+      return {
+        ...d,
+        lastLat: live?.lat ?? d.lastLat,
+        lastLng: live?.lng ?? d.lastLng,
+        lastSpeed: live?.speed ?? d.lastSpeed,
+        // A live position arrived → treat as online regardless of stale REST.
+        online: live ? true : d.online,
+      };
+    });
+  }, [devices.data, livePos]);
+
+  const withCoords = merged.filter((d) => d.lastLat != null && d.lastLng != null);
+  // Default center: Oyu Tolgoi area in southern Mongolia.
+  const center: [number, number] = withCoords.length
+    ? [withCoords[0].lastLat!, withCoords[0].lastLng!]
+    : [43.0, 106.0];
 
   return (
     <div className="h-full flex">
-      <div ref={mapEl} className="flex-1 bg-slate-200" />
+      <div className="flex-1">
+        <MapContainer
+          center={center}
+          zoom={6}
+          scrollWheelZoom
+          style={{ height: '100%', width: '100%' }}
+        >
+          {/* User can switch between OSM street view and Esri satellite. */}
+          <LayersControl position="topright">
+            <LayersControl.BaseLayer checked name="OpenStreetMap">
+              <TileLayer
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                maxZoom={19}
+              />
+            </LayersControl.BaseLayer>
+            <LayersControl.BaseLayer name="Satellite (Esri)">
+              <TileLayer
+                attribution='Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics'
+                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                maxZoom={19}
+              />
+            </LayersControl.BaseLayer>
+            <LayersControl.BaseLayer name="Topographic (OpenTopoMap)">
+              <TileLayer
+                attribution='Map data: &copy; OpenStreetMap contributors, SRTM | Style: &copy; OpenTopoMap (CC-BY-SA)'
+                url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
+                maxZoom={17}
+              />
+            </LayersControl.BaseLayer>
+          </LayersControl>
+
+          {withCoords.map((d) => (
+            <Marker
+              key={d.id}
+              position={[d.lastLat!, d.lastLng!]}
+              icon={d.online ? onlineIcon : offlineIcon}
+              eventHandlers={{ click: () => setSelected(d.id) }}
+            >
+              <Popup>
+                <div className="text-sm">
+                  <div className="font-semibold">{d.name}</div>
+                  <div className="text-slate-500 text-xs mt-1">IMEI {d.imei}</div>
+                  <div className="mt-2">
+                    Хурд: <b>{d.lastSpeed?.toFixed?.(1) ?? '—'}</b> km/h
+                  </div>
+                  <div>
+                    Сүүлд: {d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString() : '—'}
+                  </div>
+                </div>
+              </Popup>
+            </Marker>
+          ))}
+
+          <FitToBoundsOnce
+            points={withCoords.map((d) => [d.lastLat!, d.lastLng!] as [number, number])}
+          />
+        </MapContainer>
+      </div>
+
       <aside className="w-80 bg-white border-l border-slate-200 overflow-y-auto scrollbar-thin">
-        <div className="p-4 border-b border-slate-200 font-semibold">Төхөөрөмжүүд ({devices.data?.length ?? 0})</div>
+        <div className="p-4 border-b border-slate-200 font-semibold flex items-center justify-between">
+          <span>Төхөөрөмжүүд</span>
+          <span className="text-xs text-slate-500">{merged.length}</span>
+        </div>
         <ul>
-          {(devices.data ?? []).map((d) => (
+          {merged.map((d) => (
             <li
               key={d.id}
               onClick={() => setSelected(d.id)}
-              className={`px-4 py-3 text-sm cursor-pointer border-b border-slate-100 ${selected === d.id ? 'bg-brand-50' : 'hover:bg-slate-50'}`}
+              className={`px-4 py-3 text-sm cursor-pointer border-b border-slate-100 ${
+                selected === d.id ? 'bg-brand-50' : 'hover:bg-slate-50'
+              }`}
             >
               <div className="flex items-center gap-2">
-                <span className={`h-2 w-2 rounded-full ${d.online ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    d.online ? 'bg-emerald-500' : 'bg-slate-300'
+                  }`}
+                />
                 <span className="font-medium">{d.name}</span>
               </div>
-              <div className="text-xs text-slate-500 mt-0.5">IMEI {d.imei}</div>
+              <div className="text-xs text-slate-500 mt-0.5">
+                {d.lastLat != null && d.lastLng != null
+                  ? `${d.lastLat.toFixed(4)}, ${d.lastLng.toFixed(4)}`
+                  : 'Байршил алга'}
+              </div>
             </li>
           ))}
+          {merged.length === 0 && (
+            <li className="p-6 text-sm text-slate-400 text-center">Төхөөрөмж бүртгэгдээгүй</li>
+          )}
         </ul>
-        {sel && (
-          <div className="p-4 border-t border-slate-200 text-sm bg-slate-50">
-            <div className="font-semibold">{sel.name}</div>
-            <div className="mt-1 text-slate-600">
-              Хурд: {sel.lastSpeed?.toFixed?.(1) ?? '—'} km/h
-            </div>
-          </div>
-        )}
       </aside>
     </div>
   );
 }
 
-function dotIcon(color: string): google.maps.Symbol {
-  return {
-    path: google.maps.SymbolPath.CIRCLE,
-    fillColor: color,
-    fillOpacity: 1,
-    strokeColor: '#0f172a',
-    strokeWeight: 1.5,
-    scale: 8,
-  };
+// Fit map bounds to the device set the first time we have coordinates.
+function FitToBoundsOnce({ points }: { points: [number, number][] }) {
+  const map = useMap();
+  const fitted = useRef(false);
+  useEffect(() => {
+    if (fitted.current) return;
+    if (points.length === 0) return;
+    if (points.length === 1) {
+      map.setView(points[0], 12);
+    } else {
+      map.fitBounds(L.latLngBounds(points), { padding: [40, 40] });
+    }
+    fitted.current = true;
+  }, [points, map]);
+  return null;
 }

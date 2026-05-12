@@ -10,7 +10,7 @@ WebSocket fanout, tamper-evident audit log, hierarchical RBAC.
 | ------------ | --------------------------------------------------------------------- |
 | Ingest       | **Go 1.22** TCP server (Teltonika Codec 8 / 8E), batched `COPY FROM`  |
 | API          | **NestJS** (Node 20, TypeScript) — REST + WebSocket + auth + audit    |
-| Frontend     | **React 18 + Vite + Tailwind**, Google Maps, TanStack Query           |
+| Frontend     | **React 18 + Vite + Tailwind**, Leaflet + OpenStreetMap (key-free)    |
 | Database     | **PostgreSQL 15 + TimescaleDB 2.16** (hypertable, compression 7d, retention 13mo, continuous aggregate) |
 | Cache / Bus  | **Redis 7** — device cache, Pub/Sub, command queue, presence          |
 | Edge         | **Nginx** — TLS, rate limit, security headers, WS upgrade             |

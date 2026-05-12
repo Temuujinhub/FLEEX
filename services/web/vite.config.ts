@@ -11,7 +11,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           react: ['react', 'react-dom', 'react-router-dom'],
-          maps: ['@googlemaps/js-api-loader'],
+          maps: ['leaflet', 'react-leaflet'],
         },
       },
     },
