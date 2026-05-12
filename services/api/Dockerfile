@@ -39,4 +39,7 @@ ENTRYPOINT ["/sbin/tini", "--"]
 # every relational table). It's idempotent and safe to re-run. The
 # TimescaleDB-specific DDL (hypertable, retention) runs inside the app on
 # startup via TimescaleInitService.
-CMD ["sh", "-c", "npx prisma db push --accept-data-loss --schema=prisma/schema.prisma && node dist/main.js"]
+# Use the local prisma binary explicitly so npx never tries to fetch a
+# newer release from npm (Prisma 7 changed the schema syntax and would
+# blow up against our 5.x schema).
+CMD ["sh", "-c", "./node_modules/.bin/prisma db push --accept-data-loss --schema=prisma/schema.prisma && node dist/main.js"]
