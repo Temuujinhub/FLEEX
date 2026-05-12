@@ -1,6 +1,6 @@
 import { Module, Controller, Get, Post, Patch, Delete, Body, Param, Req, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { IsBoolean, IsEnum, IsNumber, IsObject, IsOptional, IsString, Length } from 'class-validator';
-import { GeofenceShape, Role } from '@prisma/client';
+import { GeofenceShape, Prisma, Role } from '@prisma/client';
 import { Roles } from '../auth/roles.decorator';
 import { Audit } from '../audit/audit.decorator';
 import { PrismaService } from '../prisma/prisma.service';
@@ -38,9 +38,21 @@ class GeofencesService {
   async create(actor: { id: string; role: Role; companyId: string | null }, dto: CreateGeofenceDto) {
     if (!actor.companyId) throw new ForbiddenException();
     this.validateGeometry(dto.shape, dto.geometry);
-    return this.prisma.geofence.create({
-      data: { ...dto, companyId: actor.companyId, userId: actor.id },
-    });
+    // Prisma's `data` is a strict XOR of CreateInput vs UncheckedCreateInput.
+    // We use foreign-key IDs (companyId, userId) so the unchecked form is the
+    // right shape — annotate explicitly so TS picks the right union member.
+    const data: Prisma.GeofenceUncheckedCreateInput = {
+      name: dto.name,
+      description: dto.description,
+      shape: dto.shape,
+      geometry: dto.geometry as Prisma.InputJsonValue,
+      speedLimit: dto.speedLimit,
+      alertOnEnter: dto.alertOnEnter ?? true,
+      alertOnExit: dto.alertOnExit ?? true,
+      companyId: actor.companyId,
+      userId: actor.id,
+    };
+    return this.prisma.geofence.create({ data });
   }
 
   async update(id: string, actor: { role: Role; companyId: string | null }, dto: UpdateGeofenceDto) {
@@ -48,7 +60,16 @@ class GeofencesService {
     if (!g) throw new NotFoundException();
     if (actor.role !== 'SUPER_ADMIN' && g.companyId !== actor.companyId) throw new ForbiddenException();
     if (dto.geometry) this.validateGeometry(g.shape, dto.geometry);
-    return this.prisma.geofence.update({ where: { id }, data: dto });
+    const data: Prisma.GeofenceUncheckedUpdateInput = {
+      name: dto.name,
+      description: dto.description,
+      geometry: dto.geometry ? (dto.geometry as Prisma.InputJsonValue) : undefined,
+      speedLimit: dto.speedLimit,
+      active: dto.active,
+      alertOnEnter: dto.alertOnEnter,
+      alertOnExit: dto.alertOnExit,
+    };
+    return this.prisma.geofence.update({ where: { id }, data });
   }
 
   async remove(id: string, actor: { role: Role; companyId: string | null }) {
