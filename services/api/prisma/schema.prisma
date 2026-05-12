@@ -45,6 +45,7 @@ model Company {
   users       User[]
   devices     Device[]
   groups      DeviceGroup[]
+  garages     Garage[]
   geofences   Geofence[]
   drivers     Driver[]
 
@@ -135,6 +136,61 @@ enum DeviceStatus {
   DECOMMISSIONED
 }
 
+// Mining-flavoured vehicle taxonomy. `OTHER` exists so the UI never traps
+// a user when their equipment doesn't match a preset.
+enum VehicleType {
+  HAUL_TRUCK      // БелАЗ / CAT 793 ангиллын хэт том самосвал
+  DUMP_TRUCK      // Энгийн самосвал
+  EXCAVATOR       // Экскаватор
+  BULLDOZER       // Бульдозер
+  GRADER          // Грейдер
+  WHEEL_LOADER    // Дугуйт ачигч
+  CRANE           // Кран
+  DRILL_RIG       // Өрөмдөгч
+  FUEL_TANKER     // Шатхуун цистерн
+  WATER_TANKER    // Усны цистерн
+  BUS             // Автобус / зорчигчийн машин
+  PICKUP          // Пикап
+  VAN             // Фургон
+  SEDAN           // Хөнгөн тэрэг
+  TRACTOR         // Трактор
+  MOTORBIKE       // Мотоцикл
+  OTHER
+}
+
+enum FuelType {
+  DIESEL
+  GASOLINE
+  LPG
+  CNG
+  ELECTRIC
+  HYBRID
+  OTHER
+}
+
+// Physical parking depot / yard. A vehicle lives in one garage; a company
+// can have many. Distinct from DeviceGroup (which represents organisational
+// units / departments — алба нэгж).
+model Garage {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @db.Uuid
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name        String
+  address     String?
+  latitude    Float?
+  longitude   Float?
+  capacity    Int?     // нийт зогсоох багтаамж
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  devices     Device[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+  @@map("garages")
+}
+
 model DeviceGroup {
   id          String   @id @default(uuid()) @db.Uuid
   companyId   String   @db.Uuid
@@ -145,6 +201,7 @@ model DeviceGroup {
   parent      DeviceGroup?  @relation("GroupTree", fields: [parentId], references: [id], onDelete: SetNull)
   children    DeviceGroup[] @relation("GroupTree")
   devices     Device[]
+  drivers     Driver[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -157,8 +214,10 @@ model Device {
   id           String        @id @default(uuid()) @db.Uuid
   companyId    String        @db.Uuid
   company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  groupId      String?       @db.Uuid
+  groupId      String?       @db.Uuid          // алба нэгж / department
   group        DeviceGroup?  @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  garageId     String?       @db.Uuid          // гранж / physical depot
+  garage       Garage?       @relation(fields: [garageId], references: [id], onDelete: SetNull)
   imei         String        @unique
   name         String
   model        String?
@@ -166,7 +225,38 @@ model Device {
   plateNumber  String?
   vin          String?
   status       DeviceStatus  @default(ACTIVE)
-  // Reported telemetry / latest snapshot. Real source of truth for fast UI.
+
+  // ── Vehicle identity ──────────────────────────────────────
+  vehicleType    VehicleType? // самосвал / экскаватор / ...
+  vehicleSubtype String?      // free text, e.g. "БелАЗ 75131"
+  color          String?      // hex code, e.g. "#f59e0b"
+  iconKey        String?      // optional override (e.g. "haul-truck-yellow")
+
+  // ── Physical specs ────────────────────────────────────────
+  chassisLengthMm Int?
+  chassisWidthMm  Int?
+  chassisHeightMm Int?
+  payloadKg       Int?   // даац
+  grossWeightKg   Int?
+  seatCount       Int?   // зорчигчийн тоо
+  axleCount       Int?
+  wheelSize       String?
+  wheelCount      Int?
+  trailerPlate    String?
+
+  // ── Fuel ──────────────────────────────────────────────────
+  fuelType            FuelType?
+  fuelGrade           String?  // АИ-80 / 92 / 95 / DT-Л / DT-З / ...
+  tankCapacityL       Float?
+  fuelConsumptionL100Km Float? // нормт зарцуулалт, литр / 100км
+
+  // ── Insurance ─────────────────────────────────────────────
+  insuranceContract1 String?
+  insuranceUntil1    DateTime?
+  insuranceContract2 String?
+  insuranceUntil2    DateTime?
+
+  // ── Telemetry snapshot (kept hot for UI; ingestor updates) ─
   lastSeenAt   DateTime?
   lastLat      Float?
   lastLng      Float?
@@ -190,7 +280,9 @@ model Device {
 
   @@index([companyId])
   @@index([groupId])
+  @@index([garageId])
   @@index([status])
+  @@index([vehicleType])
   @@index([lastSeenAt])
   @@map("devices")
 }
@@ -199,11 +291,27 @@ model Driver {
   id          String   @id @default(uuid()) @db.Uuid
   companyId   String   @db.Uuid
   company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  fullName    String
+  groupId     String?  @db.Uuid                 // хэлтэс / department
+  group       DeviceGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
+  fullName    String                              // Backwards-compatible display
+  firstName   String?                             // Нэр
+  lastName    String?                             // Овог
+  shortName   String?                             // Товч нэр
+  employeeId  String?                             // Ажилтны ID / personnel number
   rfidCard    String?  @unique
-  licenseNo   String?
   phone       String?
   email       String?
+  address     String?
+  ssn         String?                             // Social security number
+  avatarKey   String?                             // preset avatar id
+
+  // Driver's licence
+  licenseNo        String?
+  licenseCategory  String?                        // A, B, C, D, CE, ...
+  licenseIssuedAt  DateTime?
+  licenseUntil     DateTime?
+
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -211,6 +319,8 @@ model Driver {
   devices     Device[]
 
   @@index([companyId])
+  @@index([groupId])
+  @@index([employeeId])
   @@map("drivers")
 }
 
