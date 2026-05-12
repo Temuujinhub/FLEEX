@@ -12,11 +12,12 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       PGDATA: /var/lib/postgresql/data/pgdata
-      # TimescaleDB auto-tuner. Defaults are conservative so a 2 GB droplet
-      # boots — bump these on bigger hosts (4GB recommended for production).
-      TS_TUNE_MEMORY: ${TS_TUNE_MEMORY:-512MB}
-      TS_TUNE_NUM_CPUS: ${TS_TUNE_NUM_CPUS:-1}
-      TS_TUNE_MAX_CONNS: ${TS_TUNE_MAX_CONNS:-50}
+      # TimescaleDB auto-tuner. Defaults assume a 4 GB / 2 vCPU droplet
+      # (DO s-2vcpu-4gb), which is the production minimum. Override in .env
+      # for larger hosts (8 GB+).
+      TS_TUNE_MEMORY: ${TS_TUNE_MEMORY:-1GB}
+      TS_TUNE_NUM_CPUS: ${TS_TUNE_NUM_CPUS:-2}
+      TS_TUNE_MAX_CONNS: ${TS_TUNE_MAX_CONNS:-100}
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
@@ -27,8 +28,8 @@ services:
       retries: 30
       start_period: 60s
     networks: [fleex]
-    # PostgreSQL tuning. Defaults below assume a 2 GB droplet so a fresh
-    # deploy works out of the box. For production, override in .env:
+    # PostgreSQL tuning. Defaults below assume a 4 GB / 2 vCPU droplet
+    # (production minimum). For larger hosts override in .env, e.g. 8 GB:
     #   PG_SHARED_BUFFERS=2GB
     #   PG_EFFECTIVE_CACHE_SIZE=6GB
     #   PG_WORK_MEM=32MB
@@ -38,20 +39,19 @@ services:
     # work_mem, max_connections to postgresql.conf BEFORE postgres starts,
     # using TS_TUNE_MEMORY above. The -c overrides below take effect at
     # process start, but DURING `initdb`'s post-init phase the tuned config
-    # is what gets used. Keep TS_TUNE_MEMORY tight to avoid OOM at first
-    # boot, then optionally bump these for steady-state ceilings.
+    # is what gets used.
     command:
       - "postgres"
       - "-c"
-      - "shared_buffers=${PG_SHARED_BUFFERS:-128MB}"
+      - "shared_buffers=${PG_SHARED_BUFFERS:-512MB}"
       - "-c"
-      - "effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-512MB}"
+      - "effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-2GB}"
       - "-c"
-      - "work_mem=${PG_WORK_MEM:-4MB}"
+      - "work_mem=${PG_WORK_MEM:-16MB}"
       - "-c"
-      - "maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-64MB}"
+      - "maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-256MB}"
       - "-c"
-      - "max_connections=${PG_MAX_CONNECTIONS:-50}"
+      - "max_connections=${PG_MAX_CONNECTIONS:-100}"
       - "-c"
       - "max_worker_processes=${PG_MAX_WORKERS:-4}"
       - "-c"
@@ -69,13 +69,13 @@ services:
     image: redis:7.4-alpine
     container_name: fleex-redis
     restart: unless-stopped
-    # maxmemory defaults to 256MB for small hosts; override REDIS_MAXMEMORY in
-    # .env (e.g. `REDIS_MAXMEMORY=2gb`) on production-sized droplets.
+    # maxmemory defaults to 512MB for a 4 GB droplet; override REDIS_MAXMEMORY
+    # in .env (e.g. `REDIS_MAXMEMORY=2gb`) on larger production hosts.
     command: >
       redis-server
       --requirepass ${REDIS_PASSWORD}
       --appendonly yes
-      --maxmemory ${REDIS_MAXMEMORY:-128mb}
+      --maxmemory ${REDIS_MAXMEMORY:-512mb}
       --maxmemory-policy allkeys-lru
       --tcp-keepalive 60
     volumes:
