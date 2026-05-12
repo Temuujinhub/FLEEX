@@ -107,8 +107,13 @@ services:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
       interval: 15s
       timeout: 5s
-      retries: 5
-      start_period: 60s
+      retries: 10
+      # First-boot needs to: run `prisma db push`, init the Nest container,
+      # then synchronously run TimescaleInitService (hypertable, compression
+      # policy, retention policy, continuous aggregate) — all of which gate
+      # `app.listen()`. On a fresh DB this can take 90–120s before /health
+      # accepts connections, so give it real headroom.
+      start_period: 180s
     networks: [fleex]
 
   ingestor:
