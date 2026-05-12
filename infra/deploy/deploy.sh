@@ -68,8 +68,11 @@ wait_healthy() {
     sleep 2
     tries=$((tries - 1))
   done
-  warn "$svc never became healthy"
-  docker logs --tail 80 "fleex-$svc" 2>&1 | sed 's/^/  [' "$svc" '] /' || true
+  warn "$svc never became healthy. Dumping container state and last 200 log lines:"
+  docker inspect --format='  status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}} err={{.State.Error}}' "fleex-$svc" 2>&1 || true
+  echo "---- docker logs fleex-$svc (tail 200) ----"
+  docker logs --tail 200 "fleex-$svc" 2>&1 || true
+  echo "---- end logs ----"
   return 1
 }
 
