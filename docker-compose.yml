@@ -12,9 +12,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       PGDATA: /var/lib/postgresql/data/pgdata
-      # TimescaleDB auto-tuner. Adjust via .env on bigger hosts.
-      TS_TUNE_MEMORY: ${TS_TUNE_MEMORY:-1GB}
-      TS_TUNE_NUM_CPUS: ${TS_TUNE_NUM_CPUS:-2}
+      # TimescaleDB auto-tuner. Defaults are conservative so a 2 GB droplet
+      # boots — bump these on bigger hosts (4GB recommended for production).
+      TS_TUNE_MEMORY: ${TS_TUNE_MEMORY:-512MB}
+      TS_TUNE_NUM_CPUS: ${TS_TUNE_NUM_CPUS:-1}
+      TS_TUNE_MAX_CONNS: ${TS_TUNE_MAX_CONNS:-50}
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
@@ -32,18 +34,28 @@ services:
     #   PG_WORK_MEM=32MB
     #   PG_MAINTENANCE_WORK_MEM=512MB
     #   PG_MAX_CONNECTIONS=200
+    # NB: timescaledb-tune in the entrypoint writes shared_buffers,
+    # work_mem, max_connections to postgresql.conf BEFORE postgres starts,
+    # using TS_TUNE_MEMORY above. The -c overrides below take effect at
+    # process start, but DURING `initdb`'s post-init phase the tuned config
+    # is what gets used. Keep TS_TUNE_MEMORY tight to avoid OOM at first
+    # boot, then optionally bump these for steady-state ceilings.
     command:
       - "postgres"
       - "-c"
-      - "shared_buffers=${PG_SHARED_BUFFERS:-256MB}"
+      - "shared_buffers=${PG_SHARED_BUFFERS:-128MB}"
       - "-c"
-      - "effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-768MB}"
+      - "effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-512MB}"
       - "-c"
-      - "work_mem=${PG_WORK_MEM:-8MB}"
+      - "work_mem=${PG_WORK_MEM:-4MB}"
       - "-c"
-      - "maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-128MB}"
+      - "maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-64MB}"
       - "-c"
-      - "max_connections=${PG_MAX_CONNECTIONS:-100}"
+      - "max_connections=${PG_MAX_CONNECTIONS:-50}"
+      - "-c"
+      - "max_worker_processes=${PG_MAX_WORKERS:-4}"
+      - "-c"
+      - "max_parallel_workers=${PG_MAX_PARALLEL_WORKERS:-2}"
       - "-c"
       - "wal_compression=on"
       - "-c"
@@ -63,7 +75,7 @@ services:
       redis-server
       --requirepass ${REDIS_PASSWORD}
       --appendonly yes
-      --maxmemory ${REDIS_MAXMEMORY:-256mb}
+      --maxmemory ${REDIS_MAXMEMORY:-128mb}
       --maxmemory-policy allkeys-lru
       --tcp-keepalive 60
     volumes:
