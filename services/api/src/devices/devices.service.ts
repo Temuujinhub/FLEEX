@@ -1,5 +1,7 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { DeviceStatus, Role, VehicleType } from '@prisma/client';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { DeviceStatus, FuelType, Role, VehicleType } from '@prisma/client';
+import * as ExcelJS from 'exceljs';
+import { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../common/redis.service';
 
@@ -100,6 +102,156 @@ export class DevicesService {
     return { ok: true };
   }
 
+  // ── Bulk Excel import ────────────────────────────────────────
+  async importExcel(actor: { role: Role; companyId: string | null }, buffer: Buffer) {
+    if (!actor.companyId && actor.role !== 'SUPER_ADMIN') throw new ForbiddenException();
+    const companyId = actor.companyId!;
+    const [groups, garages] = await Promise.all([
+      this.prisma.deviceGroup.findMany({ where: { companyId } }),
+      this.prisma.garage.findMany({ where: { companyId } }),
+    ]);
+    const groupByName  = new Map(groups.map((g) => [g.name.toLowerCase(), g.id]));
+    const garageByName = new Map(garages.map((g) => [g.name.toLowerCase(), g.id]));
+
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer as any);
+    const ws = wb.worksheets[0];
+    if (!ws) throw new BadRequestException('Excel файл хоосон байна');
+
+    const headers: Record<number, string> = {};
+    ws.getRow(1).eachCell((cell, col) => {
+      headers[col] = String(cell.value ?? '').trim().toLowerCase();
+    });
+
+    const created: any[] = [];
+    const errors: { row: number; message: string }[] = [];
+
+    for (let r = 2; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r);
+      if (row.cellCount === 0 || !row.hasValues) continue;
+      const rec: Record<string, any> = {};
+      row.eachCell((cell, col) => {
+        const key = MAP_DEVICE[headers[col]];
+        if (!key) return;
+        let v: any = cell.value;
+        if (v && typeof v === 'object' && 'text' in (v as any)) v = (v as any).text;
+        if (v == null || v === '') return;
+        rec[key] = v;
+      });
+
+      const imei = String(rec.imei ?? '').trim();
+      const name = String(rec.name ?? '').trim();
+      if (!/^\d{14,16}$/.test(imei)) { errors.push({ row: r, message: 'IMEI 14-16 оронтой тоо байх ёстой' }); continue; }
+      if (name.length < 2) { errors.push({ row: r, message: 'Машины нэр шаардлагатай' }); continue; }
+
+      // Enum normalisation (uppercase, validate against enum)
+      if (rec.vehicleType) {
+        const t = String(rec.vehicleType).toUpperCase().replace(/[^A-Z_]/g, '_');
+        rec.vehicleType = (VehicleType as any)[t] ? (t as VehicleType) : undefined;
+      }
+      if (rec.fuelType) {
+        const t = String(rec.fuelType).toUpperCase().replace(/[^A-Z_]/g, '_');
+        rec.fuelType = (FuelType as any)[t] ? (t as FuelType) : undefined;
+      }
+
+      // Map group / garage names → IDs
+      if (rec._groupName) {
+        const gid = groupByName.get(String(rec._groupName).toLowerCase());
+        if (gid) rec.groupId = gid;
+        delete rec._groupName;
+      }
+      if (rec._garageName) {
+        const gid = garageByName.get(String(rec._garageName).toLowerCase());
+        if (gid) rec.garageId = gid;
+        delete rec._garageName;
+      }
+
+      // Date coercion
+      for (const dk of ['insuranceUntil1', 'insuranceUntil2']) {
+        if (rec[dk] && !(rec[dk] instanceof Date)) {
+          const d = new Date(rec[dk]);
+          if (!Number.isNaN(d.getTime())) rec[dk] = d;
+          else delete rec[dk];
+        }
+      }
+      // Numeric coercion (Excel can give cells as strings)
+      for (const k of [
+        'chassisLengthMm', 'chassisWidthMm', 'chassisHeightMm',
+        'payloadKg', 'grossWeightKg', 'seatCount',
+        'axleCount', 'wheelCount',
+      ]) {
+        if (rec[k] != null) {
+          const n = parseInt(String(rec[k]), 10);
+          if (!Number.isNaN(n)) rec[k] = n; else delete rec[k];
+        }
+      }
+      for (const k of ['tankCapacityL', 'fuelConsumptionL100Km', 'speedLimit']) {
+        if (rec[k] != null) {
+          const n = parseFloat(String(rec[k]));
+          if (!Number.isNaN(n)) rec[k] = n; else delete rec[k];
+        }
+      }
+
+      try {
+        const d = await this.prisma.device.create({
+          data: { ...rec, imei, name, companyId } as any,
+        });
+        created.push({ id: d.id, name: d.name, imei: d.imei });
+      } catch (e: any) {
+        errors.push({ row: r, message: e?.message ?? 'Хадгалах үед алдаа' });
+      }
+    }
+    return { createdCount: created.length, errorCount: errors.length, created, errors };
+  }
+
+  async writeTemplate(res: Response) {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Vehicles');
+    ws.columns = [
+      { header: 'IMEI *',              key: 'imei',            width: 18 },
+      { header: 'Машины нэр *',        key: 'name',            width: 22 },
+      { header: 'Улсын дугаар',        key: 'plateNumber',     width: 14 },
+      { header: 'VIN',                 key: 'vin',             width: 22 },
+      { header: 'Модель',              key: 'model',           width: 16 },
+      { header: 'SIM-ийн дугаар',      key: 'simNumber',       width: 14 },
+      { header: 'Машины төрөл',        key: 'vehicleType',     width: 16 },
+      { header: 'Дэд төрөл',           key: 'vehicleSubtype',  width: 18 },
+      { header: 'Өнгө (HEX)',          key: 'color',           width: 10 },
+      { header: 'Гранж',               key: 'garage',          width: 16 },
+      { header: 'Алба нэгж',           key: 'group',           width: 18 },
+      { header: 'Урт (мм)',            key: 'chassisLengthMm', width: 10 },
+      { header: 'Өргөн (мм)',          key: 'chassisWidthMm',  width: 10 },
+      { header: 'Өндөр (мм)',          key: 'chassisHeightMm', width: 10 },
+      { header: 'Даац (кг)',           key: 'payloadKg',       width: 10 },
+      { header: 'Нийт жин (кг)',       key: 'grossWeightKg',   width: 12 },
+      { header: 'Зорчигч',             key: 'seatCount',       width: 8 },
+      { header: 'Тэнхлэг',             key: 'axleCount',       width: 8 },
+      { header: 'Дугуй',               key: 'wheelCount',      width: 8 },
+      { header: 'Түлшний төрөл',       key: 'fuelType',        width: 14 },
+      { header: 'Түлшний зэрэг',       key: 'fuelGrade',       width: 12 },
+      { header: 'Бакны хэмжээ (Л)',    key: 'tankCapacityL',   width: 12 },
+      { header: 'Нормт зарцуулалт (Л/100км)', key: 'fuelConsumptionL100Km', width: 14 },
+      { header: 'Хурдны хязгаар (км/ц)',     key: 'speedLimit',            width: 12 },
+      { header: 'Даатгал №1',                key: 'insuranceContract1',    width: 18 },
+      { header: 'Даатгал №1 хүчинтэй',       key: 'insuranceUntil1',       width: 14 },
+    ];
+    ws.addRow({
+      imei: '352093081234567', name: 'Самосвал №14', plateNumber: '1234УБА', vin: 'XLR000000000XX001',
+      model: 'FMC650', simNumber: '+97699112233',
+      vehicleType: 'HAUL_TRUCK', vehicleSubtype: 'БелАЗ 75131', color: '#f59e0b',
+      garage: 'Гол гранж', group: 'Тээвэр-А',
+      chassisLengthMm: 14000, chassisWidthMm: 6000, chassisHeightMm: 7200,
+      payloadKg: 130000, grossWeightKg: 240000, seatCount: 2, axleCount: 2, wheelCount: 6,
+      fuelType: 'DIESEL', fuelGrade: 'DT-Л', tankCapacityL: 1800, fuelConsumptionL100Km: 250, speedLimit: 60,
+      insuranceContract1: 'INS-2025-0001', insuranceUntil1: new Date('2026-12-31'),
+    });
+    ws.getRow(1).font = { bold: true };
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="fleex-vehicles-template.xlsx"');
+    const buf = await wb.xlsx.writeBuffer();
+    res.send(Buffer.from(buf));
+  }
+
   // ── helpers ─────────────────────────────────────────────────
 
   // Date strings coming from JSON need to become Dates for Prisma; empty
@@ -147,3 +299,44 @@ export class DevicesService {
     if (actor.companyId !== companyId) throw new ForbiddenException('Cross-tenant access denied');
   }
 }
+
+// Excel header (lower-cased) → Device field. _groupName / _garageName are
+// resolved to ids in importExcel(). Anything unlisted is ignored on import.
+const MAP_DEVICE: Record<string, string> = {
+  'imei':                          'imei',
+  'imei *':                        'imei',
+  'машины нэр':                    'name',
+  'машины нэр *':                  'name',
+  'нэр':                           'name',
+  'улсын дугаар':                  'plateNumber',
+  'vin':                           'vin',
+  'модель':                        'model',
+  'sim-ийн дугаар':                'simNumber',
+  'sim':                           'simNumber',
+  'машины төрөл':                  'vehicleType',
+  'төрөл':                         'vehicleType',
+  'дэд төрөл':                     'vehicleSubtype',
+  'өнгө':                          'color',
+  'өнгө (hex)':                    'color',
+  'гранж':                         '_garageName',
+  'алба нэгж':                     '_groupName',
+  'алба':                          '_groupName',
+  'хэлтэс':                        '_groupName',
+  'урт (мм)':                      'chassisLengthMm',
+  'өргөн (мм)':                    'chassisWidthMm',
+  'өндөр (мм)':                    'chassisHeightMm',
+  'даац (кг)':                     'payloadKg',
+  'нийт жин (кг)':                 'grossWeightKg',
+  'зорчигч':                       'seatCount',
+  'тэнхлэг':                       'axleCount',
+  'дугуй':                         'wheelCount',
+  'түлшний төрөл':                 'fuelType',
+  'түлшний зэрэг':                 'fuelGrade',
+  'бакны хэмжээ (л)':              'tankCapacityL',
+  'нормт зарцуулалт (л/100км)':    'fuelConsumptionL100Km',
+  'хурдны хязгаар (км/ц)':         'speedLimit',
+  'даатгал №1':                    'insuranceContract1',
+  'даатгал №1 хүчинтэй':           'insuranceUntil1',
+  'даатгал №2':                    'insuranceContract2',
+  'даатгал №2 хүчинтэй':           'insuranceUntil2',
+};

@@ -2,6 +2,7 @@ import { ReactNode, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { api } from '../lib/api';
+import { ExcelImport } from '../components/ExcelImport';
 
 // "Машин · Төхөөрөмж" хуудас. Top filter bar (Гранж / Алба нэгж / төрөл /
 // статус / search) + жагсаалт + "+ Шинэ машин" товчоор Gaikham шиг 4
@@ -60,6 +61,7 @@ export function Devices() {
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [showGarage, setShowGarage] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   const params = new URLSearchParams();
   if (groupId) params.set('groupId', groupId);
@@ -102,6 +104,12 @@ export function Devices() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowImport(true)}
+              className="rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-sm font-medium px-3 py-2"
+            >
+              📂 Excel-ээс импортлох
+            </button>
             <button
               onClick={() => setShowGarage(true)}
               className="rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-sm font-medium px-3 py-2"
@@ -255,6 +263,14 @@ export function Devices() {
         />
       )}
       {showGarage && <AddGarageModal onClose={() => setShowGarage(false)} />}
+      {showImport && (
+        <ExcelImport
+          resource="devices"
+          title="Машинуудыг Excel-ээс импортлох"
+          invalidateKeys={['devices']}
+          onClose={() => setShowImport(false)}
+        />
+      )}
     </div>
   );
 }

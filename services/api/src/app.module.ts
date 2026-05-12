@@ -11,6 +11,7 @@ import { CompaniesModule } from './companies/companies.module';
 import { DevicesModule } from './devices/devices.module';
 import { GroupsModule } from './groups/groups.module';
 import { GaragesModule } from './garages/garages.module';
+import { DriversModule } from './drivers/drivers.module';
 import { PositionsModule } from './positions/positions.module';
 import { EventsModule } from './events/events.module';
 import { GeofencesModule } from './geofences/geofences.module';
@@ -43,6 +44,7 @@ import { TimescaleInitService } from './common/timescale-init.service';
     DevicesModule,
     GroupsModule,
     GaragesModule,
+    DriversModule,
     PositionsModule,
     EventsModule,
     GeofencesModule,

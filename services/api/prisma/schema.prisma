@@ -201,6 +201,7 @@ model DeviceGroup {
   parent      DeviceGroup?  @relation("GroupTree", fields: [parentId], references: [id], onDelete: SetNull)
   children    DeviceGroup[] @relation("GroupTree")
   devices     Device[]
+  drivers     Driver[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -290,11 +291,27 @@ model Driver {
   id          String   @id @default(uuid()) @db.Uuid
   companyId   String   @db.Uuid
   company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  fullName    String
+  groupId     String?  @db.Uuid                 // хэлтэс / department
+  group       DeviceGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
+  fullName    String                              // Backwards-compatible display
+  firstName   String?                             // Нэр
+  lastName    String?                             // Овог
+  shortName   String?                             // Товч нэр
+  employeeId  String?                             // Ажилтны ID / personnel number
   rfidCard    String?  @unique
-  licenseNo   String?
   phone       String?
   email       String?
+  address     String?
+  ssn         String?                             // Social security number
+  avatarKey   String?                             // preset avatar id
+
+  // Driver's licence
+  licenseNo        String?
+  licenseCategory  String?                        // A, B, C, D, CE, ...
+  licenseIssuedAt  DateTime?
+  licenseUntil     DateTime?
+
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -302,6 +319,8 @@ model Driver {
   devices     Device[]
 
   @@index([companyId])
+  @@index([groupId])
+  @@index([employeeId])
   @@map("drivers")
 }
 

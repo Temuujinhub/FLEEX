@@ -1,4 +1,20 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  Res,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { Response } from 'express';
 import {
   IsDateString,
   IsEnum,
@@ -144,5 +160,20 @@ export class DevicesController {
   @Audit('device.delete', { resourceType: 'device', resourceIdParam: 'id' })
   remove(@Param('id') id: string, @Req() req: any) {
     return this.svc.remove(id, req.user);
+  }
+
+  // ── Excel import / template ────────────────────────────────
+  @Get('import-template')
+  template(@Res() res: Response) {
+    return this.svc.writeTemplate(res);
+  }
+
+  @Post('import')
+  @Roles(Role.FLEET_MANAGER)
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
+  @Audit('device.import')
+  async import(@UploadedFile() file: any, @Req() req: any) {
+    if (!file?.buffer) throw new BadRequestException('Файл байхгүй байна');
+    return this.svc.importExcel(req.user, file.buffer);
   }
 }

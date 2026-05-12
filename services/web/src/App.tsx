@@ -3,6 +3,7 @@ import { Landing } from './pages/Landing';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { Devices } from './pages/Devices';
+import { Drivers } from './pages/Drivers';
 import { LiveMap } from './pages/LiveMap';
 import { History } from './pages/History';
 import { Events } from './pages/Events';
@@ -28,6 +29,7 @@ export function App() {
         <Route path="/app" element={<Dashboard />} />
         <Route path="/app/map" element={<LiveMap />} />
         <Route path="/app/devices" element={<Devices />} />
+        <Route path="/app/drivers" element={<Drivers />} />
         <Route path="/app/history/:deviceId?" element={<History />} />
         <Route path="/app/events" element={<Events />} />
         <Route path="/app/geofences" element={<Geofences />} />
