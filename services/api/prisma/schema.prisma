@@ -48,6 +48,7 @@ model Company {
   garages     Garage[]
   geofences   Geofence[]
   drivers     Driver[]
+  places      Place[]
 
   @@map("companies")
 }
@@ -166,6 +167,45 @@ enum FuelType {
   ELECTRIC
   HYBRID
   OTHER
+}
+
+// Named point of interest the operator can drop on the map: depots,
+// loading bays, refuelling stations, weighbridges, town offices, etc.
+// Free-form `type` + `color` so the company picks their own vocabulary;
+// `radiusM` is optional and only set when the place is treated like a
+// soft geofence (the hard geofences live on the `Geofence` model).
+enum PlaceType {
+  DEPOT
+  LOADING
+  UNLOADING
+  REFUEL
+  WEIGHBRIDGE
+  WORKSHOP
+  OFFICE
+  CHECKPOINT
+  OTHER
+}
+
+model Place {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @db.Uuid
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name        String
+  type        PlaceType @default(OTHER)
+  latitude    Float
+  longitude   Float
+  radiusM     Int?      // optional buffer; UI draws a circle when set
+  address     String?
+  description String?
+  color       String?   // hex, drives marker / circle colour
+  icon        String?   // optional icon key from the UI palette
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([companyId])
+  @@index([type])
+  @@map("places")
 }
 
 // Physical parking depot / yard. A vehicle lives in one garage; a company

@@ -83,6 +83,67 @@ export class ReportsService {
     });
   }
 
+  // ── Eco-driving scoreboard ────────────────────────────────
+  // Aggregates harsh-driving events per device (and per driver if assigned)
+  // inside the date range, applies the caller-supplied weights to compute
+  // a 0–100 behaviour score (100 = perfect, every event subtracts its
+  // weight). Returns one row per device with full breakdown so the UI can
+  // render a leaderboard and per-driver drill-down.
+  async driverScores(
+    actor: { role: 'SUPER_ADMIN' | 'COMPANY_ADMIN' | 'FLEET_MANAGER' | 'DISPATCHER' | 'DRIVER' | 'VIEWER'; companyId: string | null },
+    from: Date,
+    to: Date,
+    weights: Record<string, number>,
+  ) {
+    const where: any = { occurredAt: { gte: from, lte: to } };
+    if (actor.role !== 'SUPER_ADMIN') where.companyId = actor.companyId ?? undefined;
+
+    const events = await this.prisma.event.findMany({
+      where,
+      select: { deviceId: true, type: true },
+    });
+    const counts = new Map<string, Record<string, number>>();
+    for (const e of events) {
+      const m = counts.get(e.deviceId) ?? {};
+      m[e.type] = (m[e.type] ?? 0) + 1;
+      counts.set(e.deviceId, m);
+    }
+
+    const devices = await this.prisma.device.findMany({
+      where: actor.role === 'SUPER_ADMIN' ? {} : { companyId: actor.companyId ?? undefined },
+      select: {
+        id: true, name: true, plateNumber: true, vehicleType: true,
+        driver: { select: { id: true, fullName: true, employeeId: true } },
+      },
+    });
+
+    const rows = devices.map((d) => {
+      const c = counts.get(d.id) ?? {};
+      const breakdown: { type: string; count: number; weight: number; cost: number }[] = [];
+      let cost = 0;
+      let totalEvents = 0;
+      for (const [type, count] of Object.entries(c)) {
+        const w = weights[type] ?? 0;
+        const stake = count * w;
+        cost += stake;
+        totalEvents += count;
+        breakdown.push({ type, count, weight: w, cost: stake });
+      }
+      breakdown.sort((a, b) => b.cost - a.cost);
+      const score = Math.max(0, Math.min(100, Math.round(100 - cost)));
+      return {
+        device: { id: d.id, name: d.name, plateNumber: d.plateNumber, vehicleType: d.vehicleType },
+        driver: d.driver,
+        totalEvents,
+        cost,
+        score,
+        breakdown,
+      };
+    });
+    rows.sort((a, b) => b.score - a.score);
+    return { from, to, rows };
+  }
+
   async exportExcel(deviceId: string, from: Date, to: Date, actor: any): Promise<Buffer> {
     const data = await this.tripReport(deviceId, from, to, actor);
     const wb = new ExcelJS.Workbook();
