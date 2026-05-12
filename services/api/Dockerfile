@@ -35,4 +35,8 @@ COPY package.json ./
 USER fleex
 EXPOSE 3000
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main.js"]
+# `prisma db push` syncs schema.prisma to the database (creates/updates
+# every relational table). It's idempotent and safe to re-run. The
+# TimescaleDB-specific DDL (hypertable, retention) runs inside the app on
+# startup via TimescaleInitService.
+CMD ["sh", "-c", "npx prisma db push --skip-generate --accept-data-loss && node dist/main.js"]

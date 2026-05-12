@@ -22,6 +22,7 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
 import { AuditInterceptor } from './audit/audit.interceptor';
 import { BootstrapService } from './common/bootstrap.service';
+import { TimescaleInitService } from './common/timescale-init.service';
 
 @Module({
   imports: [
@@ -49,6 +50,9 @@ import { BootstrapService } from './common/bootstrap.service';
     HealthModule,
   ],
   providers: [
+    // Order matters: TimescaleInitService runs hypertable DDL during
+    // onApplicationBootstrap before BootstrapService seeds the admin.
+    TimescaleInitService,
     BootstrapService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
