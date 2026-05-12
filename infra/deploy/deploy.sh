@@ -54,7 +54,10 @@ build_and_up() {
 
 wait_healthy() {
   local svc="$1"
-  local tries=60
+  # 180 × 2s = 360s. API cold-start (prisma db push + TimescaleDB hypertable
+  # / continuous aggregate setup, all of which gate Nest's app.listen) can
+  # exceed 2 minutes on a fresh database; budget accordingly.
+  local tries=180
   while ((tries > 0)); do
     local state
     state="$(docker inspect --format='{{.State.Health.Status}}' "fleex-$svc" 2>/dev/null || echo "unknown")"
@@ -66,6 +69,7 @@ wait_healthy() {
     tries=$((tries - 1))
   done
   warn "$svc never became healthy"
+  docker logs --tail 80 "fleex-$svc" 2>&1 | sed 's/^/  [' "$svc" '] /' || true
   return 1
 }
 
