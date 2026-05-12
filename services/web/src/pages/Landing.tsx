@@ -14,9 +14,9 @@ const NAV = [
 const USE_CASES = [
   {
     title: 'Уул уурхай · Хүнд тоног төхөөрөмж',
-    img: 'https://images.unsplash.com/photo-1581094288338-2314dddb7ece?w=1200&q=80&auto=format&fit=crop',
+    img: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=1200&q=80&auto=format&fit=crop',
     body:
-      'Самосвал, экскаватор, бульдозер, өргөгч кран болон бусад уурхайн машин механизмын онлайн хяналт. Хатуу нөхцөлд (хий ширтсэн, тоосжилттой, -40°C) тогтвортой ажиллах Teltonika FMC650/FMM650 төхөөрөмжүүдийг дэмжинэ.',
+      'Нүүрс, зэс, төмрийн хүдэр тээвэрлэгч самосвал (БелАЗ, CAT 793), экскаватор, бульдозер, өргөгч кран зэрэг уурхайн машин механизмын онлайн хяналт. Хатуу нөхцөлд (тоосжилттой, -40°C) тогтвортой ажиллах Teltonika FMC650/FMM650 төхөөрөмжүүдийг дэмжинэ.',
     bullets: ['Хязгаар бүс (geofence) зөрчлийг шууд илрүүлэх', 'Хурдны хязгаар, panic button', 'Хөдөлгүүрийн цаг, түлшний зарцуулалт'],
   },
   {
@@ -197,8 +197,8 @@ export function Landing() {
           </div>
           <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur shadow-2xl">
             <img
-              src="https://images.unsplash.com/photo-1581094288338-2314dddb7ece?w=1200&q=80&auto=format&fit=crop"
-              alt="Fleet management"
+              src="https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=1200&q=80&auto=format&fit=crop"
+              alt="Нүүрс тээвэрлэгч самосвал"
               className="rounded-xl object-cover w-full h-72"
             />
             <div className="mt-4 grid grid-cols-2 gap-3">
