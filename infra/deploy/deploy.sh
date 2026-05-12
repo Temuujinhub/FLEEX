@@ -58,6 +58,7 @@ wait_healthy() {
   # / continuous aggregate setup, all of which gate Nest's app.listen) can
   # exceed 2 minutes on a fresh database; budget accordingly.
   local tries=180
+  local i=0
   while ((tries > 0)); do
     local state
     state="$(docker inspect --format='{{.State.Health.Status}}' "fleex-$svc" 2>/dev/null || echo "unknown")"
@@ -65,8 +66,15 @@ wait_healthy() {
       log "$svc is healthy"
       return 0
     fi
+    # Heartbeat every ~30s so the SSH session sees output and the GitHub
+    # Actions log shows that we're still waiting (rather than appearing
+    # hung). Also surfaces lingering "starting" or "unhealthy" status.
+    if (( i % 15 == 0 )); then
+      log "waiting for $svc (state=$state, $((tries * 2))s remaining)"
+    fi
     sleep 2
     tries=$((tries - 1))
+    i=$((i + 1))
   done
   warn "$svc never became healthy. Dumping container state and last 200 log lines:"
   docker inspect --format='  status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}} err={{.State.Error}}' "fleex-$svc" 2>&1 || true

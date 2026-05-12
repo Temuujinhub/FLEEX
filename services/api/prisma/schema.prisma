@@ -352,8 +352,49 @@ model AuditLog {
   @@map("audit_logs")
 }
 
-// ---- Positions (hypertable; managed via raw SQL migration) -----------------
-// The `positions` table is created via raw SQL and turned into a TimescaleDB
-// hypertable with monthly chunks, compression after 7 days, and retention at
-// 13 months. Prisma sees it via $queryRaw only; we intentionally do not model
-// it here to avoid Prisma trying to manage the hypertable DDL.
+// ---- Positions (hypertable; declared so prisma db push doesn't drop it) ----
+//
+// The `positions` table is created by `prisma/timescale-init.sql` (which
+// TimescaleInitService runs at boot) and turned into a TimescaleDB
+// hypertable with monthly chunks, compression after 7 days, retention at
+// 13 months, and a `positions_daily` continuous aggregate built on top.
+//
+// Previously this model was deliberately omitted from schema.prisma so
+// Prisma "wouldn't touch" the hypertable — but `prisma db push` then saw
+// the table in the DB without a matching model and tried to DROP it on
+// every boot. Postgres refused because the continuous aggregate's
+// dependent views (`_timescaledb_internal._partial_view_3` / `_direct_view_3`)
+// were holding it. The container crashed in a restart loop.
+//
+// We declare the table here purely so prisma's diff is empty and it
+// stops trying to drop the table. `@@ignore` keeps the model out of the
+// generated Prisma Client — the ingestor and reports code paths use raw
+// SQL (`$executeRaw` / `$queryRaw`) for performance anyway.
+model Position {
+  time         DateTime @db.Timestamptz(6)
+  deviceId     String   @map("device_id") @db.Uuid
+  companyId    String   @map("company_id") @db.Uuid
+  latitude     Float    @db.DoublePrecision
+  longitude    Float    @db.DoublePrecision
+  speed        Float?   @db.Real
+  course       Float?   @db.Real
+  altitude     Float?   @db.Real
+  satellites   Int?     @db.SmallInt
+  hdop         Float?   @db.Real
+  ignition     Boolean?
+  odometerKm   Float?   @map("odometer_km")  @db.DoublePrecision
+  engineHours  Float?   @map("engine_hours") @db.DoublePrecision
+  batteryVolt  Float?   @map("battery_volt") @db.Real
+  fuelPct      Float?   @map("fuel_pct")     @db.Real
+  rfid         String?
+  valid        Boolean  @default(true)
+  attributes   Json?
+  receivedAt   DateTime @default(now()) @map("received_at") @db.Timestamptz(6)
+
+  @@id([deviceId, time])
+  @@index([deviceId, time(sort: Desc)], map: "positions_device_time_desc")
+  @@index([companyId, time(sort: Desc)], map: "positions_company_time_desc")
+  @@index([attributes(ops: JsonbPathOps)], type: Gin, map: "positions_attributes_gin")
+  @@map("positions")
+  @@ignore
+}
