@@ -8,7 +8,31 @@ import { api, API_BASE } from '../lib/api';
 const DEFAULT_HERO_TAGLINE = 'Fleet Flexible — Танай флотын уян хатан удирдлага';
 const DEFAULT_HERO_SUBTEXT =
   'Уул уурхай, хүргэлт, нийтийн тээвэр, түрээсийн үйлчилгээ — Fleex нь Teltonika Pro GPS болон AI аналитик дээр суурилсан, Монголын нөхцөлд бүрэн нийцсэн ухаалаг fleet management платформ.';
-const DEFAULT_HERO_IMG = 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=1200&q=80&auto=format&fit=crop';
+
+// Fallback Unsplash photos for every image slot. The CMS overrides these
+// when the super admin uploads a replacement.
+const DEFAULT_IMAGES: Record<string, string> = {
+  hero:               'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=1200&q=80&auto=format&fit=crop',
+  about:              'https://images.unsplash.com/photo-1486325212027-8081e485255e?w=1200&q=80&auto=format&fit=crop',
+  'use-case-mining':  'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=1200&q=80&auto=format&fit=crop',
+  'use-case-delivery':'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=1200&q=80&auto=format&fit=crop',
+  'use-case-intercity':'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=1200&q=80&auto=format&fit=crop',
+  'use-case-bus':     'https://images.unsplash.com/photo-1570125909232-eb263c188f7e?w=1200&q=80&auto=format&fit=crop',
+  'use-case-rental':  'https://images.unsplash.com/photo-1502877338535-766e1452684a?w=1200&q=80&auto=format&fit=crop',
+  'why-us':           'https://images.unsplash.com/photo-1551434678-e076c223a692?w=1200&q=80&auto=format&fit=crop',
+};
+
+function resolveImage(
+  settings: { images?: Record<string, { hasImage: boolean; updatedAt?: string }> } | undefined,
+  key: keyof typeof DEFAULT_IMAGES,
+): string {
+  const meta = settings?.images?.[key];
+  if (meta?.hasImage) {
+    const v = meta.updatedAt ? encodeURIComponent(meta.updatedAt) : '';
+    return `${API_BASE}/landing/images/${key}?v=${v}`;
+  }
+  return DEFAULT_IMAGES[key];
+}
 
 // Sales-focused landing page for fleex.mn — MediaPRO ХХК-ийн product.
 // Sections (top → bottom): nav, hero, key-numbers strip, "why fleex"
@@ -72,35 +96,35 @@ const WHY_FLEEX = [
 const USE_CASES = [
   {
     title: 'Уул уурхай · Хүнд тоног төхөөрөмж',
-    img: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=1200&q=80&auto=format&fit=crop',
+    imgKey: 'use-case-mining' as const,
     body:
       'Нүүрс, зэс, төмрийн хүдэр тээвэрлэгч самосвал (БелАЗ, CAT 793), экскаватор, бульдозер, грейдер. Тоосжилт, -40°C нөхцөлд тогтвортой ажиллах төхөөрөмжүүд.',
     bullets: ['Хязгаар бүс (geofence) зөрчлийг шууд илрүүлэх', 'Хурдны хязгаар, panic button', 'Хөдөлгүүрийн цаг, түлшний зарцуулалт'],
   },
   {
     title: 'Хотын хүргэлт',
-    img: 'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=1200&q=80&auto=format&fit=crop',
+    imgKey: 'use-case-delivery' as const,
     body:
       'Дэлгүүрийн хүргэлт, фургон, жижиг машин. Жолоочийн чиглэлийн нягтлал, хүлээн авагч хүн бүрийн хүргэлтийн түүх, KPI тайлан Excel/PDF-ээр гарна.',
     bullets: ['Хүргэлтийн цаг хугацааны баталгаажуулалт', 'Тойм маршрут, idle time тайлан', 'Хэрэглэгчдэд тааруулсан SLA dashboard'],
   },
   {
     title: 'Хот хоорондын тээвэр',
-    img: 'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=1200&q=80&auto=format&fit=crop',
+    imgKey: 'use-case-intercity' as const,
     body:
       'Контейнер, цистерн тээвэрлэгч. Зам тутамд GPS+GSM хослолоор битгий гээгдэх, түр устсан хэсэгт offline cache, сэргэхдээ автоматаар sync хийнэ.',
     bullets: ['Маршрут оновчлол, fuel theft эсэргүүцэл', 'Жолоочийн ажилласан цаг, унтлагын анхааруулга', 'Шилжилт болон ачааны баримт'],
   },
   {
     title: 'Нийтийн тээвэр · Автобус',
-    img: 'https://images.unsplash.com/photo-1570125909232-eb263c188f7e?w=1200&q=80&auto=format&fit=crop',
+    imgKey: 'use-case-bus' as const,
     body:
       'Хот доторх автобус, маршрутын такси, корпорат шатлын машин. Зорчигчдод ETA, маршрутын зөрчил, давтамжийн тайлан.',
     bullets: ['Маршрутын дагуу үлдсэн зайн ETA', 'Зогсоол алгассан тохиолдол бүртгэх', 'Шатлал жолоочийн RFID identification'],
   },
   {
     title: 'Машин түрээс · Каршэринг',
-    img: 'https://images.unsplash.com/photo-1502877338535-766e1452684a?w=1200&q=80&auto=format&fit=crop',
+    imgKey: 'use-case-rental' as const,
     body:
       'Түрээсийн машин, share-car флотын алсын хяналт. Алсаас түлхүүргүй асаах/унтраах, geofence үндэслэсэн billing, machine-loss эрсдэл буурна.',
     bullets: ['Engine block / unblock алсаас', 'Geofence үндэслэсэн billing', 'Хэрэглэгч / жолоочийн RFID түүх'],
@@ -201,9 +225,7 @@ export function Landing() {
   });
   const heroTagline = (settings.data?.heroTagline?.trim()) || DEFAULT_HERO_TAGLINE;
   const heroSubText = (settings.data?.heroSubText?.trim()) || DEFAULT_HERO_SUBTEXT;
-  const heroImg = settings.data?.hasImage
-    ? `${API_BASE}/landing/image?v=${encodeURIComponent(settings.data.updatedAt ?? '')}`
-    : DEFAULT_HERO_IMG;
+  const heroImg = resolveImage(settings.data, 'hero');
 
   return (
     <div className="bg-white text-slate-900">
@@ -335,7 +357,7 @@ export function Landing() {
         </div>
         <div className="relative">
           <img
-            src="https://images.unsplash.com/photo-1486325212027-8081e485255e?w=1200&q=80&auto=format&fit=crop"
+            src={resolveImage(settings.data, 'about')}
             alt="Fleet operations"
             className="rounded-2xl shadow-xl"
           />
@@ -361,7 +383,7 @@ export function Landing() {
             {USE_CASES.map((u) => (
               <article key={u.title} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition group">
                 <div className="h-44 w-full overflow-hidden">
-                  <img src={u.img} alt={u.title} className="h-full w-full object-cover group-hover:scale-105 transition" />
+                  <img src={resolveImage(settings.data, u.imgKey)} alt={u.title} className="h-full w-full object-cover group-hover:scale-105 transition" />
                 </div>
                 <div className="p-5">
                   <h3 className="font-bold text-lg">{u.title}</h3>
@@ -420,7 +442,7 @@ export function Landing() {
             </ul>
           </div>
           <div className="space-y-4">
-            <img src="https://images.unsplash.com/photo-1551434678-e076c223a692?w=1200&q=80&auto=format&fit=crop" alt="Operations" className="rounded-2xl shadow-2xl" />
+            <img src={resolveImage(settings.data, 'why-us')} alt="Operations" className="rounded-2xl shadow-2xl" />
             <div className="grid grid-cols-2 gap-4">
               <Metric label="P95 latency" value="<200ms" />
               <Metric label="Дата алдалт" value="0%" />
