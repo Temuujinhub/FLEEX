@@ -9,7 +9,12 @@
 
 set -euo pipefail
 DOMAIN="${1:-fleex.mn}"
-EMAIL="${2:?email required (used by Let's Encrypt for renewal warnings)}"
+EMAIL="${2:-}"
+if [[ -z "$EMAIL" ]]; then
+  echo "Email required (used by certbot for renewal warnings)." >&2
+  echo "Usage: $0 <domain> <email>" >&2
+  exit 1
+fi
 
 cd "$(dirname "$0")/../.."
 
@@ -33,7 +38,7 @@ if [[ -f infra/nginx/conf.d/fleex-tls.conf.disabled ]]; then
 fi
 
 # Drop the plain-HTTP catch-all that served the SPA on 80 (the new TLS file
-# already serves /api & /ws and redirects the rest of port 80 → 443).
+# already serves /api & /ws and redirects the rest of port 80 -> 443).
 if [[ -f infra/nginx/conf.d/fleex.conf ]]; then
   mv infra/nginx/conf.d/fleex.conf infra/nginx/conf.d/fleex-http.conf.disabled
 fi
@@ -42,5 +47,4 @@ docker compose exec nginx nginx -t
 docker compose restart nginx
 
 echo "TLS enabled for https://$DOMAIN"
-echo "Renewals: add a daily cron job that runs this script's renew variant, e.g.:"
-echo "  0 3 * * * cd /opt/fleex && docker run --rm -v \$PWD/infra/nginx/certs:/etc/letsencrypt -v /var/www/certbot:/var/www/certbot certbot/certbot renew --quiet && docker compose exec nginx nginx -s reload"
+echo "Add a daily cron job to renew the certificate. See docs/DEPLOYMENT.md."
