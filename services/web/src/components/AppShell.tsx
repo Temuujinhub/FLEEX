@@ -35,6 +35,7 @@ const SECTIONS: {
     title: 'Удирдлага',
     items: [
       { to: '/app/users',     label: 'Хэрэглэгчид', min: 'COMPANY_ADMIN',     icon: <IconUsers /> },
+      { to: '/app/landing-settings', label: 'Сайтын тохиргоо', min: 'SUPER_ADMIN', icon: <IconCog /> },
       { to: '/app/audit',     label: 'Аудит лог', min: 'COMPANY_ADMIN',       icon: <IconAudit /> },
     ],
   },
@@ -287,6 +288,14 @@ function IconUsers() {
       <path d="M2.5 20a6.5 6.5 0 0113 0" />
       <circle cx="17" cy="9" r="2.8" />
       <path d="M15 20a5 5 0 016.5-4.7" />
+    </IconBase>
+  );
+}
+function IconCog() {
+  return (
+    <IconBase>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19 12a7 7 0 00-.2-1.6l2-1.5-2-3.4-2.3.9a7 7 0 00-2.8-1.6L13 2h-2l-.7 2.8a7 7 0 00-2.8 1.6L5.2 5.5l-2 3.4 2 1.5a7 7 0 000 3.2l-2 1.5 2 3.4 2.3-.9a7 7 0 002.8 1.6L11 22h2l.7-2.8a7 7 0 002.8-1.6l2.3.9 2-3.4-2-1.5c.13-.52.2-1.06.2-1.6z" />
     </IconBase>
   );
 }

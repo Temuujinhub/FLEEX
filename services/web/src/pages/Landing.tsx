@@ -1,4 +1,14 @@
 import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { api, API_BASE } from '../lib/api';
+
+// Default copy when the operator has not customised the landing page
+// through the super-admin settings page. The CMS-backed values
+// override these when present.
+const DEFAULT_HERO_TAGLINE = 'Fleet Flexible — Танай флотын уян хатан удирдлага';
+const DEFAULT_HERO_SUBTEXT =
+  'Уул уурхай, хүргэлт, нийтийн тээвэр, түрээсийн үйлчилгээ — Fleex нь Teltonika Pro GPS болон AI аналитик дээр суурилсан, Монголын нөхцөлд бүрэн нийцсэн ухаалаг fleet management платформ.';
+const DEFAULT_HERO_IMG = 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=1200&q=80&auto=format&fit=crop';
 
 // Sales-focused landing page for fleex.mn — MediaPRO ХХК-ийн product.
 // Sections (top → bottom): nav, hero, key-numbers strip, "why fleex"
@@ -181,6 +191,20 @@ const PRICING = [
 ];
 
 export function Landing() {
+  // CMS data — super_admin can override hero copy / image via the
+  // Landing settings page. Cache for 5 minutes so the marketing site is
+  // fast even when the admin updates content.
+  const settings = useQuery({
+    queryKey: ['landing-settings'],
+    queryFn: () => api.get('/landing').then((r) => r.data),
+    staleTime: 5 * 60_000,
+  });
+  const heroTagline = (settings.data?.heroTagline?.trim()) || DEFAULT_HERO_TAGLINE;
+  const heroSubText = (settings.data?.heroSubText?.trim()) || DEFAULT_HERO_SUBTEXT;
+  const heroImg = settings.data?.hasImage
+    ? `${API_BASE}/landing/image?v=${encodeURIComponent(settings.data.updatedAt ?? '')}`
+    : DEFAULT_HERO_IMG;
+
   return (
     <div className="bg-white text-slate-900">
       {/* ───────── Top nav ───────── */}
@@ -209,20 +233,16 @@ export function Landing() {
       {/* ───────── Hero ───────── */}
       <section className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-brand-900 to-brand-700 text-white">
         <div className="absolute inset-0 opacity-20"
-             style={{ backgroundImage: "url('https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=2000&q=80&auto=format&fit=crop')",
+             style={{ backgroundImage: `url('${heroImg}')`,
                       backgroundSize: 'cover', backgroundPosition: 'center' }} />
         <div className="relative max-w-7xl mx-auto px-6 py-20 md:py-28 grid md:grid-cols-2 gap-12 items-center">
           <div>
             <p className="uppercase tracking-widest text-brand-200 text-sm">Enterprise Fleet Management</p>
             <h1 className="mt-3 text-4xl md:text-5xl lg:text-6xl font-extrabold leading-tight">
-              Fleex — <span className="text-brand-200">Монголын ухаалаг</span>
-              <br />
-              Fleet Management
+              {heroTagline}
             </h1>
-            <p className="mt-5 text-lg text-brand-100/90 max-w-xl leading-relaxed">
-              GPS дээр суурилсан, шатахуун хэмнэлт, жолоочийн аюулгүй байдал, AI аналитик
-              бүхий нэгдсэн платформ. Уул уурхай, хүргэлт, тээвэр, нийтийн үйлчилгээний
-              флотод зориулсан.
+            <p className="mt-5 text-lg text-brand-100/90 max-w-xl leading-relaxed whitespace-pre-line">
+              {heroSubText}
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <a href="#contact" className="rounded-md bg-white text-brand-900 px-5 py-3 font-semibold hover:bg-brand-50 transition shadow-lg">
@@ -241,8 +261,8 @@ export function Landing() {
           </div>
           <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur shadow-2xl">
             <img
-              src="https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=1200&q=80&auto=format&fit=crop"
-              alt="Нүүрс тээвэрлэгч самосвал"
+              src={heroImg}
+              alt="Fleet hero"
               className="rounded-xl object-cover w-full h-72"
             />
             <div className="mt-4 grid grid-cols-2 gap-3">

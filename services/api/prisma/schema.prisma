@@ -131,6 +131,22 @@ model ApiKey {
 
 // ---- Fleet -----------------------------------------------------------------
 
+// Single-row marketing-content store for the landing page. Super admin
+// edits the hero copy and uploads a hero image; the public landing page
+// reads this through an unauthenticated GET. Falls back to hard-coded
+// defaults when the row is empty.
+model LandingSetting {
+  id            Int      @id @default(1)
+  heroTagline   String?
+  heroSubText   String?
+  imageMime     String?
+  imageData     Bytes?
+  updatedAt     DateTime @updatedAt
+  updatedById   String?  @db.Uuid
+
+  @@map("landing_settings")
+}
+
 enum DeviceStatus {
   ACTIVE
   INACTIVE
