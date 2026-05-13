@@ -18,18 +18,33 @@ fi
 
 cd "$(dirname "$0")/../.."
 
-mkdir -p /var/www/certbot
 mkdir -p infra/nginx/certs
 
-# Use certbot in standalone-via-webroot mode — it places the challenge under
-# /var/www/certbot which our nginx config already serves.
+# Build the -d arg list. We always include the apex; www is added only if
+# its DNS A record actually resolves to this host. This avoids the
+# Let's Encrypt NXDOMAIN failure we used to hit when www was never set up.
+DOMAINS=( -d "$DOMAIN" )
+if getent hosts "www.$DOMAIN" >/dev/null 2>&1; then
+  DOMAINS+=( -d "www.$DOMAIN" )
+  echo "[enable-tls] www.$DOMAIN resolves; including in the certificate"
+else
+  echo "[enable-tls] www.$DOMAIN does not resolve; requesting cert for $DOMAIN only"
+fi
+
+# Standalone mode beats webroot here: it does not need /var/www/certbot
+# mounted into the nginx container, and it survives the brief window
+# where nginx is stopped to free port 80.
+echo "[enable-tls] Stopping nginx to free port 80 for certbot"
+docker compose stop nginx
+
+echo "[enable-tls] Requesting certificate from Let's Encrypt"
 docker run --rm \
+  -p 80:80 \
   -v "$PWD/infra/nginx/certs:/etc/letsencrypt" \
-  -v "/var/www/certbot:/var/www/certbot" \
   certbot/certbot certonly \
-    --webroot --webroot-path=/var/www/certbot \
+    --standalone \
     --email "$EMAIL" --agree-tos --no-eff-email \
-    -d "$DOMAIN" -d "www.$DOMAIN" \
+    "${DOMAINS[@]}" \
     --non-interactive
 
 # Activate the TLS server block.
@@ -38,13 +53,17 @@ if [[ -f infra/nginx/conf.d/fleex-tls.conf.disabled ]]; then
 fi
 
 # Drop the plain-HTTP catch-all that served the SPA on 80 (the new TLS file
-# already serves /api & /ws and redirects the rest of port 80 -> 443).
+# already serves /api and /ws and redirects the rest of port 80 to 443).
+# upstreams.conf stays — both fleex.conf and fleex-tls.conf reference its
+# upstream blocks.
 if [[ -f infra/nginx/conf.d/fleex.conf ]]; then
   mv infra/nginx/conf.d/fleex.conf infra/nginx/conf.d/fleex-http.conf.disabled
 fi
 
+echo "[enable-tls] Starting nginx with the new TLS config"
+docker compose start nginx
+sleep 2
 docker compose exec nginx nginx -t
-docker compose restart nginx
 
 echo "TLS enabled for https://$DOMAIN"
-echo "Add a daily cron job to renew the certificate. See docs/DEPLOYMENT.md."
+echo "Set up auto-renewal in /etc/cron.d/. See docs/DEPLOYMENT.md."
