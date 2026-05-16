@@ -178,9 +178,20 @@ export function Drivers() {
                   <td className="px-4 py-3 text-slate-600">{d.group?.name ?? '—'}</td>
                   <td className="px-4 py-3 text-slate-600">{d.phone ?? '—'}</td>
                   <td className="px-4 py-3 text-right">
-                    {(d.devices ?? []).length > 0 ? (
-                      <span className="text-sm font-semibold">{d.devices.length}</span>
-                    ) : <span className="text-slate-400">—</span>}
+                    {(d.devices ?? []).length === 0 ? (
+                      <span className="text-slate-400">—</span>
+                    ) : (
+                      <div className="flex flex-wrap justify-end gap-1 max-w-[220px] ml-auto">
+                        {(d.devices as any[]).slice(0, 2).map((dev) => (
+                          <span key={dev.id} className="inline-flex items-center gap-1 text-[11px] bg-brand-50 border border-brand-200 text-brand-800 rounded-md px-1.5 py-0.5">
+                            {dev.name}{dev.plateNumber ? ` · ${dev.plateNumber}` : ''}
+                          </span>
+                        ))}
+                        {d.devices.length > 2 && (
+                          <span className="text-[11px] text-slate-500">+{d.devices.length - 2}</span>
+                        )}
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-right">
                     {canEdit ? (
@@ -414,6 +425,12 @@ function DriverModal({ mode, driver, groups, onClose }: DriverModalProps) {
                   ))}
                 </div>
               </Field>
+
+              {isEdit && (
+                <div className="md:col-span-2">
+                  <AssignedDevices driver={driver} />
+                </div>
+              )}
             </div>
           )}
 
@@ -568,6 +585,62 @@ function expiryHint(until: string) {
   if (days < 0) return <div className="text-[11px] text-rose-700 mt-1">Хугацаа аль хэдийн дууссан байна</div>;
   if (days <= 30) return <div className="text-[11px] text-amber-700 mt-1">{days} хоногийн дотор дуусна</div>;
   return null;
+}
+
+// Driver → device-үүдийн жагсаалт. Edit modal-д харагдана.
+//
+// Холбоо нь `Device.driverId` талбараар хадгалагдана, тиймээс энд "Салгах"
+// дарахад тухайн device-ийн `driverId`-г null болгож PATCH хийнэ. Шинээр
+// машин хуваарилахдаа Машин · Төхөөрөмж цэснээс машинаа сонгож "Жолооч"
+// талбарт энэ жолоочийг сонгоно — энэ нь нэг талын холбоо (one driver per
+// device) тул бичих гол цэг машин талд байх нь зөв.
+function AssignedDevices({ driver }: { driver: any }) {
+  const qc = useQueryClient();
+  const devices = (driver?.devices ?? []) as { id: string; name: string; plateNumber?: string | null }[];
+  const unassign = useMutation({
+    mutationFn: (deviceId: string) => api.patch(`/devices/${deviceId}`, { driverId: null }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['drivers'] });
+      qc.invalidateQueries({ queryKey: ['devices'] });
+    },
+  });
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[11px] uppercase tracking-widest text-slate-500 font-semibold">
+          Холбоотой машинууд · {devices.length}
+        </div>
+        <a href="/app/devices" className="text-[11px] text-brand-700 hover:underline">
+          + Машин нэмэх →
+        </a>
+      </div>
+      {devices.length === 0 ? (
+        <p className="text-xs text-slate-500">
+          Энэ жолоочид одоогоор машин хуваарилаагүй байна. <b>Машин · Төхөөрөмж</b> цэс →
+          машинаа сонгох → <b>Жолооч</b> талбарт энэ жолоочийг тавь.
+        </p>
+      ) : (
+        <ul className="space-y-1.5">
+          {devices.map((dev) => (
+            <li key={dev.id} className="flex items-center justify-between bg-white border border-slate-200 rounded-md px-3 py-2">
+              <div className="text-sm">
+                <div className="font-medium text-slate-900">{dev.name}</div>
+                {dev.plateNumber && <div className="text-xs text-slate-500">{dev.plateNumber}</div>}
+              </div>
+              <button
+                type="button"
+                onClick={() => unassign.mutate(dev.id)}
+                disabled={unassign.isPending}
+                className="text-xs text-rose-700 hover:underline disabled:opacity-50"
+              >
+                Салгах
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 function PencilIcon() {
