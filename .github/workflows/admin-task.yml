@@ -1,0 +1,91 @@
+# Manually-triggered admin operations on the production host. Pick a
+# command from the dropdown — the workflow SSHes into the deploy host
+# and runs the matching whitelisted action from
+# infra/deploy/admin-task.sh. No arbitrary commands accepted.
+#
+# Add a new operation by:
+#   1) Adding a `case` branch to infra/deploy/admin-task.sh
+#   2) Adding the name to the `command` choice options below
+
+name: admin-task
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: 'Whitelisted operation to run on production'
+        type: choice
+        required: true
+        default: 'status'
+        options:
+          - status
+          - logs-api
+          - logs-ingestor
+          - logs-web
+          - logs-db
+          - restart-api
+          - restart-ingestor
+          - restart-web
+          - restart-all
+          - seed-demo-companies
+          - prune-images
+      tail_lines:
+        description: 'Log tail count (only used for logs-* commands)'
+        required: false
+        default: '200'
+
+concurrency:
+  group: admin-task
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: ${{ inputs.command }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          if [ -n "$DEPLOY_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -H -p "${DEPLOY_SSH_PORT:-22}" "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          fi
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Run admin-task on host
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          CMD: ${{ inputs.command }}
+          TAIL: ${{ inputs.tail_lines }}
+        run: |
+          set -euo pipefail
+          PORT="${DEPLOY_SSH_PORT:-22}"
+          # Belt-and-braces: GitHub UI restricts the dropdown, but we also
+          # re-validate here in case someone hand-crafts a dispatch via
+          # the API with a custom value.
+          case "$CMD" in
+            status|logs-api|logs-ingestor|logs-web|logs-db|restart-api|restart-ingestor|restart-web|restart-all|seed-demo-companies|prune-images) ;;
+            *) echo "Refusing unknown command: $CMD" >&2; exit 1 ;;
+          esac
+          if ! [[ "$TAIL" =~ ^[0-9]+$ ]]; then
+            echo "tail_lines must be numeric, got: $TAIL" >&2
+            exit 1
+          fi
+          ssh -p "$PORT" \
+              -o StrictHostKeyChecking=accept-new \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=40 \
+              "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd /opt/fleex && ./infra/deploy/admin-task.sh '$CMD' '$TAIL'"
