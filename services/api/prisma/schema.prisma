@@ -131,6 +131,38 @@ model ApiKey {
 
 // ---- Fleet -----------------------------------------------------------------
 
+// Single-row marketing-content store for the landing page. Super admin
+// edits the hero copy through Сайтын тохиргоо; the public landing page
+// reads this through an unauthenticated GET. Hero image and the other
+// in-page photos live in `LandingImage` (keyed table) so we can
+// extend the gallery without growing this row.
+model LandingSetting {
+  id            Int      @id @default(1)
+  heroTagline   String?
+  heroSubText   String?
+  // Legacy fields from when the hero image lived here. New uploads go
+  // to LandingImage with key='hero'. Kept around so an old DB does not
+  // need a destructive migration; treat as unused.
+  imageMime     String?
+  imageData     Bytes?
+  updatedAt     DateTime @updatedAt
+  updatedById   String?  @db.Uuid
+
+  @@map("landing_settings")
+}
+
+// One image per slot on the public landing page (hero, about, each use
+// case, etc.). Bytes live in Postgres as bytea — no S3 / volume mount.
+model LandingImage {
+  key         String   @id        // 'hero', 'about', 'use-case-mining', ...
+  mimeType    String
+  data        Bytes
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  @@map("landing_images")
+}
+
 enum DeviceStatus {
   ACTIVE
   INACTIVE

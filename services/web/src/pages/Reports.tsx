@@ -22,6 +22,32 @@ interface Template {
   icon: ReactNode;
 }
 
+// Inline SVG glyphs (declared up here so the TEMPLATES array below can
+// reference them as JSX without hitting a TDZ — see Vite/Rollup TDZ
+// error fix history).
+function svg(children: ReactNode) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-full w-full">
+      {children}
+    </svg>
+  );
+}
+const I = {
+  Route:    () => svg(<><circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M6 8.5v4a3 3 0 003 3h6a3 3 0 013 3" /></>),
+  Pause:    () => svg(<><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></>),
+  Driver:   () => svg(<><circle cx="12" cy="8" r="3.5" /><path d="M5 20a7 7 0 0114 0" /></>),
+  Gauge:    () => svg(<><path d="M4 14a8 8 0 1116 0" /><path d="M12 14l4-3" /><circle cx="12" cy="14" r="1.2" fill="currentColor" /></>),
+  Panic:    () => svg(<><circle cx="12" cy="12" r="8" /><path d="M12 8v4M12 16v.5" /></>),
+  Shield:   () => svg(<><path d="M12 3l8 3v6c0 4.5-3.5 8-8 9-4.5-1-8-4.5-8-9V6z" /><path d="M9 12l2 2 4-4" /></>),
+  AlertList:() => svg(<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M8 9h8M8 13h8M8 17h5" /></>),
+  Engine:   () => svg(<><rect x="5" y="9" width="14" height="8" rx="1" /><path d="M9 9V6h6v3M3 13h2M19 13h2" /></>),
+  Fuel:     () => svg(<><rect x="4" y="4" width="9" height="16" rx="1.5" /><path d="M13 9h3l2 3v6a2 2 0 01-2 2" /><path d="M7 8h3" /></>),
+  Power:    () => svg(<><path d="M12 4v8" /><path d="M8 6a6 6 0 108 0" /></>),
+  Signal:   () => svg(<><path d="M5 12.5a10 10 0 0114 0" /><path d="M8 15.5a6 6 0 018 0" /><circle cx="12" cy="18.5" r="1.5" /></>),
+  Battery:  () => svg(<><rect x="3" y="7" width="16" height="10" rx="1.5" /><rect x="20" y="10" width="2" height="4" rx="0.5" /><path d="M6 12h8" /></>),
+  Lock:     () => svg(<><rect x="5" y="11" width="14" height="9" rx="1.5" /><path d="M8 11V8a4 4 0 018 0v3" /></>),
+};
+
 const TEMPLATES: Template[] = [
   // ── Жолоодлого ───────────────────────────────────────────
   { id: 'trip',     cat: 'Жолоодлогын тайлан', name: 'Зорчилт',
@@ -714,26 +740,4 @@ function eventLabel(t: string) {
   return m[t] ?? t;
 }
 
-// ── Inline icons (no external lib) ────────────────────────────
-const I = {
-  Route:    () => svg(<><circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M6 8.5v4a3 3 0 003 3h6a3 3 0 013 3" /></>),
-  Pause:    () => svg(<><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></>),
-  Driver:   () => svg(<><circle cx="12" cy="8" r="3.5" /><path d="M5 20a7 7 0 0114 0" /></>),
-  Gauge:    () => svg(<><path d="M4 14a8 8 0 1116 0" /><path d="M12 14l4-3" /><circle cx="12" cy="14" r="1.2" fill="currentColor" /></>),
-  Panic:    () => svg(<><circle cx="12" cy="12" r="8" /><path d="M12 8v4M12 16v.5" /></>),
-  Shield:   () => svg(<><path d="M12 3l8 3v6c0 4.5-3.5 8-8 9-4.5-1-8-4.5-8-9V6z" /><path d="M9 12l2 2 4-4" /></>),
-  AlertList:() => svg(<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M8 9h8M8 13h8M8 17h5" /></>),
-  Engine:   () => svg(<><rect x="5" y="9" width="14" height="8" rx="1" /><path d="M9 9V6h6v3M3 13h2M19 13h2" /></>),
-  Fuel:     () => svg(<><rect x="4" y="4" width="9" height="16" rx="1.5" /><path d="M13 9h3l2 3v6a2 2 0 01-2 2" /><path d="M7 8h3" /></>),
-  Power:    () => svg(<><path d="M12 4v8" /><path d="M8 6a6 6 0 108 0" /></>),
-  Signal:   () => svg(<><path d="M5 12.5a10 10 0 0114 0" /><path d="M8 15.5a6 6 0 018 0" /><circle cx="12" cy="18.5" r="1.5" /></>),
-  Battery:  () => svg(<><rect x="3" y="7" width="16" height="10" rx="1.5" /><rect x="20" y="10" width="2" height="4" rx="0.5" /><path d="M6 12h8" /></>),
-  Lock:     () => svg(<><rect x="5" y="11" width="14" height="9" rx="1.5" /><path d="M8 11V8a4 4 0 018 0v3" /></>),
-};
-function svg(children: ReactNode) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-full w-full">
-      {children}
-    </svg>
-  );
-}
+// (icon glyphs declared up top so TEMPLATES can reference them without TDZ)

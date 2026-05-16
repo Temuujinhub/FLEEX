@@ -14,6 +14,7 @@ import { GaragesModule } from './garages/garages.module';
 import { DriversModule } from './drivers/drivers.module';
 import { PlacesModule } from './places/places.module';
 import { ServiceTasksModule } from './service-tasks/service-tasks.module';
+import { LandingModule } from './landing/landing.module';
 import { PositionsModule } from './positions/positions.module';
 import { EventsModule } from './events/events.module';
 import { GeofencesModule } from './geofences/geofences.module';
@@ -50,6 +51,7 @@ import { TimescaleInitService } from './common/timescale-init.service';
     DriversModule,
     PlacesModule,
     ServiceTasksModule,
+    LandingModule,
     PositionsModule,
     EventsModule,
     GeofencesModule,

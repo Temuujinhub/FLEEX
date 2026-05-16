@@ -6,14 +6,13 @@ export default defineConfig({
   server: { host: '0.0.0.0', port: 5173 },
   build: {
     outDir: 'dist',
-    sourcemap: false,
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          react: ['react', 'react-dom', 'react-router-dom'],
-          maps: ['leaflet', 'react-leaflet'],
-        },
-      },
-    },
+    // Rollup's default chunking is preferable here: the previous
+    // `manualChunks: { react, maps }` config introduced a circular
+    // init order with react-leaflet and produced a TDZ error
+    // ("Cannot access 'oe' before initialization") in the minified
+    // bundle. Source maps stay on so future runtime errors point at
+    // real lines.
+    sourcemap: true,
   },
 });
+
