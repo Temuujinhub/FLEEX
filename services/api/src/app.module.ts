@@ -26,6 +26,7 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
 import { AuditInterceptor } from './audit/audit.interceptor';
 import { BootstrapService } from './common/bootstrap.service';
+import { DemoSeedService } from './common/demo-seed.service';
 import { TimescaleInitService } from './common/timescale-init.service';
 
 @Module({
@@ -62,6 +63,7 @@ import { TimescaleInitService } from './common/timescale-init.service';
     // onApplicationBootstrap before BootstrapService seeds the admin.
     TimescaleInitService,
     BootstrapService,
+    DemoSeedService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
