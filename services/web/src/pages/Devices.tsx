@@ -86,6 +86,13 @@ export function Devices() {
     queryKey: ['groups'],
     queryFn: () => api.get('/groups').then((r) => r.data),
   });
+  // Driver list feeds the "Жолооч" picker in the device modal. Each device
+  // can be assigned to at most one driver (Device.driverId); a driver can
+  // own several devices.
+  const drivers = useQuery({
+    queryKey: ['drivers'],
+    queryFn: () => api.get('/drivers').then((r) => r.data),
+  });
 
   const stats = useMemo(() => {
     const list: any[] = devices.data ?? [];
@@ -198,6 +205,7 @@ export function Devices() {
                 <th className="text-left px-4 py-3 font-semibold">Машин</th>
                 <th className="text-left px-4 py-3 font-semibold">IMEI</th>
                 <th className="text-left px-4 py-3 font-semibold">Дугаар</th>
+                <th className="text-left px-4 py-3 font-semibold">Жолооч</th>
                 <th className="text-left px-4 py-3 font-semibold">Гранж</th>
                 <th className="text-left px-4 py-3 font-semibold">Алба</th>
                 <th className="text-left px-4 py-3 font-semibold">Статус</th>
@@ -207,11 +215,11 @@ export function Devices() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {devices.isLoading && (
-                <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-400">Уншиж байна…</td></tr>
+                <tr><td colSpan={9} className="px-4 py-10 text-center text-slate-400">Уншиж байна…</td></tr>
               )}
               {!devices.isLoading && (devices.data ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-16 text-center">
+                  <td colSpan={9} className="px-4 py-16 text-center">
                     <div className="text-slate-400 text-sm">Машин олдсонгүй</div>
                     <button
                       onClick={() => setShowAdd(true)}
@@ -243,6 +251,9 @@ export function Devices() {
                     </td>
                     <td className="px-4 py-3 text-slate-600 tabular-nums">{d.imei}</td>
                     <td className="px-4 py-3 text-slate-600">{d.plateNumber ?? '—'}</td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {d.driver?.fullName ?? <span className="text-slate-400">—</span>}
+                    </td>
                     <td className="px-4 py-3 text-slate-600">{d.garage?.name ?? '—'}</td>
                     <td className="px-4 py-3 text-slate-600">{d.group?.name ?? '—'}</td>
                     <td className="px-4 py-3">
@@ -279,6 +290,7 @@ export function Devices() {
         <AddVehicleModal
           garages={garages.data ?? []}
           groups={groups.data ?? []}
+          drivers={drivers.data ?? []}
           onClose={() => setShowAdd(false)}
         />
       )}
@@ -287,6 +299,7 @@ export function Devices() {
           device={editTarget}
           garages={garages.data ?? []}
           groups={groups.data ?? []}
+          drivers={drivers.data ?? []}
           onClose={() => setEditTarget(null)}
         />
       )}
@@ -366,7 +379,7 @@ function Stat({
 // ── Add Vehicle Modal ─────────────────────────────────────────
 type FormState = {
   imei: string; name: string;
-  groupId: string; garageId: string;
+  groupId: string; garageId: string; driverId: string;
   plateNumber: string; vin: string; color: string;
   vehicleType: VehicleTypeValue | ''; vehicleSubtype: string; model: string;
   simNumber: string;
@@ -380,7 +393,7 @@ type FormState = {
   speedLimit: string;
 };
 const EMPTY_FORM: FormState = {
-  imei: '', name: '', groupId: '', garageId: '',
+  imei: '', name: '', groupId: '', garageId: '', driverId: '',
   plateNumber: '', vin: '', color: '#1670f1',
   vehicleType: 'HAUL_TRUCK', vehicleSubtype: '', model: '',
   simNumber: '',
@@ -397,11 +410,13 @@ const EMPTY_FORM: FormState = {
 function AddVehicleModal({
   garages,
   groups,
+  drivers,
   device,
   onClose,
 }: {
   garages: any[];
   groups: any[];
+  drivers: any[];
   device?: any;
   onClose: () => void;
 }) {
@@ -420,6 +435,8 @@ function AddVehicleModal({
         : api.post('/devices', payload).then((r) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['devices'] });
+      // Driver list embeds the assigned devices, so it needs to refresh too.
+      qc.invalidateQueries({ queryKey: ['drivers'] });
       onClose();
     },
     onError: (e: any) => {
@@ -451,6 +468,9 @@ function AddVehicleModal({
     if (form.fuelType)    payload.fuelType = form.fuelType;
     if (form.groupId)  payload.groupId  = form.groupId;
     if (form.garageId) payload.garageId = form.garageId;
+    // On edit we send `driverId: null` to unassign — on create we just skip.
+    if (form.driverId) payload.driverId = form.driverId;
+    else if (isEdit)   payload.driverId = null;
     const intKeys: (keyof FormState)[] = [
       'chassisLengthMm', 'chassisWidthMm', 'chassisHeightMm',
       'payloadKg', 'grossWeightKg', 'seatCount',
@@ -543,6 +563,22 @@ function AddVehicleModal({
               {groups.length === 0 && (
                 <div className="text-[11px] text-amber-700 mt-1">
                   Алба нэгж бүртгэгдээгүй. <b>"Алба нэгж"</b> цэснээс нэмнэ үү.
+                </div>
+              )}
+            </Field>
+
+            <Field label="Жолооч" hint="Тухайн машиныг хариуцах жолооч." tooltip="Жолоочийг 'Жолооч · Ажилчид' цэснээс үүсгэсэн байх ёстой. Нэг машинд нэг жолооч; нэг жолооч хэдэн ч машинтай байж болно. Хоосон үлдээвэл хариуцагчгүй гэж тооцогдоно — салгахдаа '— Жолооч хуваарилаагүй —' сонго.">
+              <select value={form.driverId} onChange={(e) => set('driverId', e.target.value)} className={input}>
+                <option value="">— Жолооч хуваарилаагүй —</option>
+                {drivers.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.fullName}{d.employeeId ? ` · ${d.employeeId}` : ''}
+                  </option>
+                ))}
+              </select>
+              {drivers.length === 0 && (
+                <div className="text-[11px] text-amber-700 mt-1">
+                  Жолооч бүртгэгдээгүй. <b>"Жолооч · Ажилчид"</b> цэснээс нэмнэ үү.
                 </div>
               )}
             </Field>
@@ -1129,6 +1165,7 @@ function deviceToForm(d: any): FormState {
   return {
     imei: s(d.imei), name: s(d.name),
     groupId: s(d.groupId), garageId: s(d.garageId),
+    driverId: s(d.driverId ?? d.driver?.id),
     plateNumber: s(d.plateNumber), vin: s(d.vin), color: s(d.color) || '#1670f1',
     vehicleType: (d.vehicleType ?? '') as any, vehicleSubtype: s(d.vehicleSubtype), model: s(d.model),
     simNumber: s(d.simNumber),
