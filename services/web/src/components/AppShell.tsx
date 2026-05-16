@@ -35,6 +35,7 @@ const SECTIONS: {
     title: 'Удирдлага',
     items: [
       { to: '/app/users',     label: 'Хэрэглэгчид', min: 'COMPANY_ADMIN',     icon: <IconUsers /> },
+      { to: '/app/companies', label: 'Компаниуд',   min: 'SUPER_ADMIN',       icon: <IconBuilding /> },
       { to: '/app/landing-settings', label: 'Сайтын тохиргоо', min: 'SUPER_ADMIN', icon: <IconCog /> },
       { to: '/app/audit',     label: 'Аудит лог', min: 'COMPANY_ADMIN',       icon: <IconAudit /> },
     ],
@@ -105,19 +106,23 @@ export function AppShell() {
         {/* User card */}
         <div className="border-t border-slate-800/60 p-3">
           <div className="rounded-lg bg-slate-900/80 border border-slate-800/80 px-3 py-2.5">
-            <div className="flex items-center gap-3">
-              <div className="h-9 w-9 rounded-full bg-brand-600/80 flex items-center justify-center text-sm font-bold uppercase shadow">
+            <NavLink
+              to="/app/profile"
+              className="flex items-center gap-3 group"
+              title="Миний бүртгэл"
+            >
+              <div className="h-9 w-9 rounded-full bg-brand-600/80 group-hover:bg-brand-500 flex items-center justify-center text-sm font-bold uppercase shadow transition">
                 {initials(user?.fullName || user?.email || '?')}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium text-white truncate">
+                <div className="text-sm font-medium text-white truncate group-hover:text-brand-200 transition">
                   {user?.fullName || user?.email}
                 </div>
                 <div className="text-[10px] uppercase tracking-widest text-brand-300/80">
                   {roleLabel(user?.role)}
                 </div>
               </div>
-            </div>
+            </NavLink>
             <button
               onClick={logout}
               className="mt-2 w-full rounded-md bg-slate-800 hover:bg-slate-700 text-sm py-1.5 transition flex items-center justify-center gap-2"
@@ -296,6 +301,14 @@ function IconCog() {
     <IconBase>
       <circle cx="12" cy="12" r="3" />
       <path d="M19 12a7 7 0 00-.2-1.6l2-1.5-2-3.4-2.3.9a7 7 0 00-2.8-1.6L13 2h-2l-.7 2.8a7 7 0 00-2.8 1.6L5.2 5.5l-2 3.4 2 1.5a7 7 0 000 3.2l-2 1.5 2 3.4 2.3-.9a7 7 0 002.8 1.6L11 22h2l.7-2.8a7 7 0 002.8-1.6l2.3.9 2-3.4-2-1.5c.13-.52.2-1.06.2-1.6z" />
+    </IconBase>
+  );
+}
+function IconBuilding() {
+  return (
+    <IconBase>
+      <rect x="4" y="3" width="16" height="18" rx="1.5" />
+      <path d="M8 7h2M14 7h2M8 11h2M14 11h2M8 15h2M14 15h2M10 21v-3h4v3" />
     </IconBase>
   );
 }

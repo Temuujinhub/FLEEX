@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
@@ -21,6 +21,39 @@ const SAFE_USER_FIELDS = {
 @Injectable()
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
+
+  // `/users/me` includes the company so the profile page can show it
+  // without a second round-trip to a SUPER_ADMIN-only /companies endpoint.
+  async getMe(id: string) {
+    const u = await this.prisma.user.findUnique({
+      where: { id },
+      select: { ...SAFE_USER_FIELDS, company: { select: { id: true, name: true, slug: true } } },
+    });
+    if (!u) throw new NotFoundException();
+    return u;
+  }
+
+  async updateSelf(id: string, dto: { fullName?: string; phone?: string }) {
+    return this.prisma.user.update({
+      where: { id },
+      data: { fullName: dto.fullName, phone: dto.phone },
+      select: SAFE_USER_FIELDS,
+    });
+  }
+
+  async changeOwnPassword(id: string, currentPassword: string, newPassword: string) {
+    const u = await this.prisma.user.findUnique({ where: { id } });
+    if (!u) throw new NotFoundException();
+    const ok = await argon2.verify(u.passwordHash, currentPassword);
+    if (!ok) throw new BadRequestException('Одоогийн нууц үг буруу байна');
+    const hash = await argon2.hash(newPassword, { type: argon2.argon2id });
+    await this.prisma.user.update({
+      where: { id },
+      data: { passwordHash: hash, failedLogins: 0, lockedUntil: null },
+    });
+    // Force re-auth on every OTHER session; keep current one alive.
+    return { ok: true };
+  }
 
   list(actor: { role: Role; companyId: string | null }) {
     const where = actor.role === 'SUPER_ADMIN' ? {} : { companyId: actor.companyId };
