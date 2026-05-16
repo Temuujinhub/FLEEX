@@ -3,11 +3,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { api } from '../lib/api';
 import { ExcelImport } from '../components/ExcelImport';
+import { useAuth } from '../store/auth';
 
 // Жолооч / ажилчдын бүртгэл. Driver carries identity, contact, license,
-// and an optional department (DeviceGroup). The "Жолооч нэмэх" modal has
-// two tabs (Үндсэн / Үнэмлэх) matching the Gaikham flow, with an avatar
+// and an optional department (DeviceGroup). The "Жолооч нэмэх / засах" modal
+// has two tabs (Үндсэн / Үнэмлэх) matching the Gaikham flow, with an avatar
 // picker rendered as inline SVG portraits — no asset bundling needed.
+//
+// The same `DriverModal` powers both Create and Edit: passing a `driver` prop
+// flips the modal into edit mode (PATCH instead of POST, prefilled fields).
 
 const LICENSE_CATEGORIES = ['A', 'B', 'BE', 'C', 'CE', 'D', 'DE', 'T'];
 
@@ -17,9 +21,11 @@ const AVATARS = [
 ];
 
 export function Drivers() {
+  const canEdit = useAuth((s) => s.hasRole('FLEET_MANAGER'));
   const [groupId, setGroupId] = useState('');
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState<any | null>(null);
   const [showImport, setShowImport] = useState(false);
 
   const params = new URLSearchParams();
@@ -128,15 +134,16 @@ export function Drivers() {
                 <th className="text-left px-4 py-3 font-semibold">Хэлтэс</th>
                 <th className="text-left px-4 py-3 font-semibold">Утас</th>
                 <th className="text-right px-4 py-3 font-semibold">Машин</th>
+                <th className="text-right px-4 py-3 font-semibold w-24">Үйлдэл</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {drivers.isLoading && (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-400">Уншиж байна…</td></tr>
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400">Уншиж байна…</td></tr>
               )}
               {!drivers.isLoading && (drivers.data ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-16 text-center">
+                  <td colSpan={7} className="px-4 py-16 text-center">
                     <div className="text-slate-400 text-sm">Жолооч олдсонгүй</div>
                     <button onClick={() => setShowAdd(true)} className="mt-3 text-brand-700 hover:underline text-sm font-medium">
                       Эхний жолоочоо нэмье →
@@ -175,6 +182,20 @@ export function Drivers() {
                       <span className="text-sm font-semibold">{d.devices.length}</span>
                     ) : <span className="text-slate-400">—</span>}
                   </td>
+                  <td className="px-4 py-3 text-right">
+                    {canEdit ? (
+                      <button
+                        type="button"
+                        onClick={() => setEditing(d)}
+                        title="Жолоочийн мэдээлэл засах"
+                        className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 hover:border-brand-300 text-slate-700 text-xs font-medium px-2.5 py-1.5 transition"
+                      >
+                        <PencilIcon /> Засах
+                      </button>
+                    ) : (
+                      <span className="text-slate-300 text-xs">—</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -183,9 +204,18 @@ export function Drivers() {
       </div>
 
       {showAdd && (
-        <AddDriverModal
+        <DriverModal
+          mode="create"
           groups={groups.data ?? []}
           onClose={() => setShowAdd(false)}
+        />
+      )}
+      {editing && (
+        <DriverModal
+          mode="edit"
+          driver={editing}
+          groups={groups.data ?? []}
+          onClose={() => setEditing(null)}
         />
       )}
       {showImport && (
@@ -200,7 +230,7 @@ export function Drivers() {
   );
 }
 
-// ── Add Driver Modal ──────────────────────────────────────────
+// ── Driver Modal (create + edit) ──────────────────────────────
 type DriverForm = {
   lastName: string; firstName: string; shortName: string; fullName: string;
   employeeId: string; groupId: string;
@@ -218,16 +248,26 @@ const EMPTY_DRIVER: DriverForm = {
   licenseIssuedAt: '', licenseUntil: '',
 };
 
-function AddDriverModal({ groups, onClose }: { groups: any[]; onClose: () => void }) {
+type DriverModalProps =
+  | { mode: 'create'; groups: any[]; onClose: () => void; driver?: undefined }
+  | { mode: 'edit';   groups: any[]; onClose: () => void; driver: any };
+
+function DriverModal({ mode, driver, groups, onClose }: DriverModalProps) {
+  const isEdit = mode === 'edit';
   const [tab, setTab] = useState<'basic' | 'license'>('basic');
-  const [form, setForm] = useState<DriverForm>(EMPTY_DRIVER);
+  const [form, setForm] = useState<DriverForm>(() => driver ? formFromDriver(driver) : EMPTY_DRIVER);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const canDelete = useAuth((s) => s.hasRole('COMPANY_ADMIN'));
   const qc = useQueryClient();
 
   const set = <K extends keyof DriverForm>(k: K, v: DriverForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   const mutation = useMutation({
-    mutationFn: (payload: any) => api.post('/drivers', payload).then((r) => r.data),
+    mutationFn: (payload: any) => {
+      if (isEdit) return api.patch(`/drivers/${driver.id}`, payload).then((r) => r.data);
+      return api.post('/drivers', payload).then((r) => r.data);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['drivers'] });
       onClose();
@@ -235,6 +275,18 @@ function AddDriverModal({ groups, onClose }: { groups: any[]; onClose: () => voi
     onError: (e: any) => {
       const msg = e?.response?.data?.message;
       setError(Array.isArray(msg) ? msg.join(', ') : msg ?? 'Хадгалах үед алдаа гарлаа');
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => api.delete(`/drivers/${driver.id}`).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['drivers'] });
+      onClose();
+    },
+    onError: (e: any) => {
+      const msg = e?.response?.data?.message;
+      setError(Array.isArray(msg) ? msg.join(', ') : msg ?? 'Устгах үед алдаа гарлаа');
     },
   });
 
@@ -252,11 +304,14 @@ function AddDriverModal({ groups, onClose }: { groups: any[]; onClose: () => voi
     ];
     for (const k of strKeys) {
       const v = (form[k] as string).trim();
-      if (v) payload[k] = v;
+      // On edit we keep behaviour symmetric: blank field clears the value.
+      if (v || isEdit) payload[k] = v || null;
     }
-    if (form.groupId) payload.groupId = form.groupId;
-    if (form.licenseIssuedAt) payload.licenseIssuedAt = new Date(form.licenseIssuedAt).toISOString();
-    if (form.licenseUntil)    payload.licenseUntil    = new Date(form.licenseUntil).toISOString();
+    payload.groupId = form.groupId || (isEdit ? null : undefined);
+    payload.licenseIssuedAt = form.licenseIssuedAt ? new Date(form.licenseIssuedAt).toISOString() : (isEdit ? null : undefined);
+    payload.licenseUntil    = form.licenseUntil    ? new Date(form.licenseUntil).toISOString()    : (isEdit ? null : undefined);
+    // Drop "undefined"s so the body is clean on create.
+    for (const k of Object.keys(payload)) if (payload[k] === undefined) delete payload[k];
     mutation.mutate(payload);
   };
 
@@ -264,7 +319,12 @@ function AddDriverModal({ groups, onClose }: { groups: any[]; onClose: () => voi
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
       <div className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
         <header className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-          <h2 className="text-lg font-bold">Шинэ жолооч</h2>
+          <div>
+            <h2 className="text-lg font-bold">{isEdit ? 'Жолоочийн мэдээлэл засах' : 'Шинэ жолооч'}</h2>
+            {isEdit && (
+              <p className="text-xs text-slate-500 mt-0.5">{driver.fullName}{driver.employeeId ? ` · ${driver.employeeId}` : ''}</p>
+            )}
+          </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-2xl leading-none">×</button>
         </header>
 
@@ -395,7 +455,33 @@ function AddDriverModal({ groups, onClose }: { groups: any[]; onClose: () => voi
         {error && (
           <div className="mx-6 mb-3 rounded-md bg-rose-50 border border-rose-200 text-rose-800 text-sm px-3 py-2">{error}</div>
         )}
-        <div className="border-t border-slate-200 px-6 py-3 flex justify-end gap-2 bg-slate-50">
+        <div className="border-t border-slate-200 px-6 py-3 flex items-center gap-2 bg-slate-50">
+          {isEdit && canDelete && (
+            confirmDelete ? (
+              <div className="flex items-center gap-2 text-xs text-rose-700">
+                <span>Устгахдаа итгэлтэй байна уу?</span>
+                <button
+                  onClick={() => deleteMutation.mutate()}
+                  disabled={deleteMutation.isPending}
+                  className="rounded-md bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold px-3 py-1.5 disabled:opacity-60"
+                >
+                  {deleteMutation.isPending ? 'Устгаж байна…' : 'Тийм, устга'}
+                </button>
+                <button onClick={() => setConfirmDelete(false)} className="rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-xs px-3 py-1.5">
+                  Болих
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(true)}
+                className="rounded-md border border-rose-200 bg-white hover:bg-rose-50 text-rose-700 text-sm font-medium px-3 py-2"
+              >
+                Устгах
+              </button>
+            )
+          )}
+          <div className="flex-1" />
           <button onClick={onClose} className="rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-sm font-medium px-4 py-2">
             Цуцлах
           </button>
@@ -404,12 +490,36 @@ function AddDriverModal({ groups, onClose }: { groups: any[]; onClose: () => voi
             disabled={mutation.isPending}
             className="rounded-md bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold px-5 py-2 disabled:opacity-60"
           >
-            {mutation.isPending ? 'Хадгалж байна…' : 'Хадгалах'}
+            {mutation.isPending ? 'Хадгалж байна…' : isEdit ? 'Хадгалах өөрчлөлт' : 'Хадгалах'}
           </button>
         </div>
       </div>
     </div>
   );
+}
+
+// Prefill helper. The API returns dates as ISO strings — convert them back
+// to the `YYYY-MM-DD` format the <input type="date"> expects.
+function formFromDriver(d: any): DriverForm {
+  const ymd = (iso?: string | null) => (iso ? new Date(iso).toISOString().slice(0, 10) : '');
+  return {
+    lastName:        d.lastName        ?? '',
+    firstName:       d.firstName       ?? '',
+    shortName:       d.shortName       ?? '',
+    fullName:        d.fullName        ?? '',
+    employeeId:      d.employeeId      ?? '',
+    groupId:         d.groupId         ?? d.group?.id ?? '',
+    phone:           d.phone           ?? '',
+    email:           d.email           ?? '',
+    address:         d.address         ?? '',
+    rfidCard:        d.rfidCard        ?? '',
+    ssn:             d.ssn             ?? '',
+    avatarKey:       d.avatarKey       ?? 'A1',
+    licenseNo:       d.licenseNo       ?? '',
+    licenseCategory: d.licenseCategory ?? '',
+    licenseIssuedAt: ymd(d.licenseIssuedAt),
+    licenseUntil:    ymd(d.licenseUntil),
+  };
 }
 
 // ── Bits ──────────────────────────────────────────────────────
@@ -458,6 +568,15 @@ function expiryHint(until: string) {
   if (days < 0) return <div className="text-[11px] text-rose-700 mt-1">Хугацаа аль хэдийн дууссан байна</div>;
   if (days <= 30) return <div className="text-[11px] text-amber-700 mt-1">{days} хоногийн дотор дуусна</div>;
   return null;
+}
+
+function PencilIcon() {
+  return (
+    <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M11.5 2.5l2 2-8 8H3.5v-2z" />
+      <path d="M9.5 4.5l2 2" />
+    </svg>
+  );
 }
 
 // ── Avatar (inline SVG portraits — 16 deterministic variants) ─

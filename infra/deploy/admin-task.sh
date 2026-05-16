@@ -41,6 +41,10 @@ case "$CMD" in
     $COMPOSE logs --tail="$TAIL" --no-color gps-ingestor
     ;;
 
+  logs-engine)
+    $COMPOSE logs --tail="$TAIL" --no-color events-engine
+    ;;
+
   logs-web)
     $COMPOSE logs --tail="$TAIL" --no-color web
     ;;
@@ -61,6 +65,13 @@ case "$CMD" in
     $COMPOSE restart gps-ingestor
     sleep 3
     $COMPOSE ps gps-ingestor
+    ;;
+
+  restart-engine)
+    log "Restarting events-engine"
+    $COMPOSE restart events-engine
+    sleep 3
+    $COMPOSE ps events-engine
     ;;
 
   restart-web)
@@ -109,7 +120,7 @@ case "$CMD" in
 
   *)
     echo "Unknown command: $CMD" >&2
-    echo "Allowed: status, logs-api, logs-ingestor, logs-web, logs-db, restart-api, restart-ingestor, restart-web, restart-all, seed-demo-companies, prune-images" >&2
+    echo "Allowed: status, logs-api, logs-ingestor, logs-engine, logs-web, logs-db, restart-api, restart-ingestor, restart-engine, restart-web, restart-all, seed-demo-companies, prune-images" >&2
     exit 2
     ;;
 esac

@@ -143,6 +143,40 @@ services:
       start_period: 30s
     networks: [fleex]
 
+  # Events engine. Subscribes to `fleex.positions` on Redis, evaluates each
+  # sample against the active geofences + device speed limits, and writes
+  # Event rows (GEOFENCE_ENTER / GEOFENCE_EXIT / OVERSPEED) to Postgres while
+  # republishing them on `fleex.events` for the API's WebSocket gateway.
+  # Stateless beyond Redis-backed device transition state, so it scales
+  # horizontally and tolerates restarts.
+  events-engine:
+    build:
+      context: ./services/events-engine
+      dockerfile: Dockerfile
+    image: fleex/events-engine:latest
+    container_name: fleex-events-engine
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        # Wait until prisma db push has materialised the schema; otherwise the
+        # engine's INSERT against the events table fails on first boot.
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9091/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [fleex]
+
   web:
     build:
       context: ./services/web
