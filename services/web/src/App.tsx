@@ -15,6 +15,8 @@ import { Geofences } from './pages/Geofences';
 import { Reports } from './pages/Reports';
 import { Audit } from './pages/Audit';
 import { Users } from './pages/Users';
+import { Companies } from './pages/Companies';
+import { Profile } from './pages/Profile';
 import { AppShell } from './components/AppShell';
 import { Protected } from './components/Protected';
 
@@ -43,6 +45,8 @@ export function App() {
         <Route path="/app/geofences" element={<Geofences />} />
         <Route path="/app/reports" element={<Reports />} />
         <Route path="/app/users" element={<Users />} />
+        <Route path="/app/companies" element={<Companies />} />
+        <Route path="/app/profile" element={<Profile />} />
         <Route path="/app/audit" element={<Audit />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

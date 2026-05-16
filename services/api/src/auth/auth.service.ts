@@ -26,7 +26,10 @@ export class AuthService {
   ) {}
 
   async login(email: string, password: string, ip?: string, userAgent?: string) {
-    const user = await this.prisma.user.findUnique({ where: { email } });
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      include: { company: { select: { id: true, name: true, slug: true } } },
+    });
 
     const auditFail = async (reason: string) => {
       await this.audit.record({
@@ -94,8 +97,10 @@ export class AuthService {
         id: user.id,
         email: user.email,
         fullName: user.fullName,
+        phone: user.phone,
         role: user.role,
         companyId: user.companyId,
+        company: user.company,
       },
     };
   }

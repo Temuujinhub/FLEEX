@@ -25,6 +25,16 @@ class ResetPasswordDto {
   @IsString() @MinLength(8) newPassword!: string;
 }
 
+class ChangeOwnPasswordDto {
+  @IsString() currentPassword!: string;
+  @IsString() @MinLength(8) newPassword!: string;
+}
+
+class UpdateOwnProfileDto {
+  @IsOptional() @IsString() fullName?: string;
+  @IsOptional() @IsString() phone?: string;
+}
+
 @Controller('users')
 @Roles(Role.COMPANY_ADMIN)
 export class UsersController {
@@ -33,7 +43,21 @@ export class UsersController {
   @Get('me')
   @Roles(Role.VIEWER)
   me(@Req() req: any) {
-    return req.user;
+    return this.svc.getMe(req.user.id);
+  }
+
+  @Patch('me')
+  @Roles(Role.VIEWER)
+  @Audit('user.update_self', { resourceType: 'user', captureResult: true })
+  updateMe(@Body() dto: UpdateOwnProfileDto, @Req() req: any) {
+    return this.svc.updateSelf(req.user.id, dto);
+  }
+
+  @Post('me/change-password')
+  @Roles(Role.VIEWER)
+  @Audit('user.change_password_self', { resourceType: 'user' })
+  changeOwnPassword(@Body() dto: ChangeOwnPasswordDto, @Req() req: any) {
+    return this.svc.changeOwnPassword(req.user.id, dto.currentPassword, dto.newPassword);
   }
 
   @Get()

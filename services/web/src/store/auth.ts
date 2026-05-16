@@ -5,8 +5,10 @@ export interface AuthUser {
   id: string;
   email: string;
   fullName?: string | null;
+  phone?: string | null;
   role: 'SUPER_ADMIN' | 'COMPANY_ADMIN' | 'FLEET_MANAGER' | 'DISPATCHER' | 'DRIVER' | 'VIEWER';
   companyId: string | null;
+  company?: { id: string; name: string; slug: string } | null;
 }
 
 interface AuthState {
