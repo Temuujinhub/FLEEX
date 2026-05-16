@@ -25,7 +25,11 @@ class GroupsService {
 
   list(actor: { role: Role; companyId: string | null }) {
     const where = actor.role === 'SUPER_ADMIN' ? {} : { companyId: actor.companyId };
-    return this.prisma.deviceGroup.findMany({ where, orderBy: { name: 'asc' } });
+    return this.prisma.deviceGroup.findMany({
+      where,
+      orderBy: { name: 'asc' },
+      include: { _count: { select: { devices: true, drivers: true } } },
+    });
   }
 
   async create(actor: { role: Role; companyId: string | null }, dto: any) {
