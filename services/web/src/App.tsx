@@ -16,6 +16,7 @@ import { Reports } from './pages/Reports';
 import { Audit } from './pages/Audit';
 import { Users } from './pages/Users';
 import { Companies } from './pages/Companies';
+import { Groups } from './pages/Groups';
 import { Profile } from './pages/Profile';
 import { AppShell } from './components/AppShell';
 import { Protected } from './components/Protected';
@@ -36,6 +37,7 @@ export function App() {
         <Route path="/app/map" element={<LiveMap />} />
         <Route path="/app/devices" element={<Devices />} />
         <Route path="/app/drivers" element={<Drivers />} />
+        <Route path="/app/groups" element={<Groups />} />
         <Route path="/app/eco-driving" element={<EcoDriving />} />
         <Route path="/app/places" element={<Places />} />
         <Route path="/app/service-tasks" element={<ServiceTasks />} />
