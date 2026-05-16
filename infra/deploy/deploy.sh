@@ -97,7 +97,7 @@ trap 'rollback' ERR
 build_and_up
 
 OK=true
-for svc in postgres redis api ingestor; do
+for svc in postgres redis api ingestor events-engine; do
   wait_healthy "$svc" || OK=false
 done
 

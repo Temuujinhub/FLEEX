@@ -36,11 +36,40 @@ Non-goals (for now):
 - Single batcher goroutine drains the channel into `pgx CopyFrom` in chunks
   of 500 rows or 1s, whichever comes first. Throughput target: 50k+ rows/s.
 - Live envelopes are published to Redis Pub/Sub on `fleex.positions`. The
-  API gateway subscribes and forwards to WebSocket clients.
+  API gateway and the events engine both subscribe — the gateway forwards
+  to WebSocket clients, the engine evaluates geofence and speed rules.
 - Health on `:9090/healthz` + Prometheus-shape metrics on `/metrics`.
 
 Why Go: lowest memory per concurrent TCP connection, simplest deployment,
 and `pgx` is the fastest PostgreSQL driver in any ecosystem.
+
+### 2.1a Events engine (Go)
+
+A second small Go service, modelled on the ingestor:
+
+- Subscribes to Redis Pub/Sub `fleex.positions` (the channel the ingestor
+  publishes to). Reads the active geofence + device cache from Postgres on a
+  30-second timer so admin changes propagate without a restart.
+- For every position envelope:
+  - Computes the set of geofences the device is inside *now* using
+    `haversine` for circles and ray-casting point-in-polygon for shapes.
+  - Diffs against the device's previous "inside" set (stored in Redis) to
+    emit `GEOFENCE_ENTER` / `GEOFENCE_EXIT` rows.
+  - Emits `OVERSPEED` rows when the position exceeds either the geofence's
+    speed limit (while inside) or the device's own `speedLimit` override.
+  - All OVERSPEED emissions are rate-limited via `SETNX` keys with a 60s
+    cooldown per (device, scope) so a truck stuck at 80 km/h does not
+    flood the events table.
+- Each new row is inserted into the `events` table and republished on
+  `fleex.events`. The API's WebSocket gateway subscribes to that channel
+  and pushes alerts to the operator dashboards live.
+- Stateless beyond the Redis-backed transition state, so it can be killed
+  and restarted with no loss beyond a single GPS sample of accuracy.
+
+Why a separate service: the ingestor's hot path is COPY-FROM throughput;
+mixing event evaluation there would couple two very different SLAs. Keeping
+it separate lets either service be scaled, restarted, or rewritten in
+isolation.
 
 ### 2.2 API (NestJS)
 

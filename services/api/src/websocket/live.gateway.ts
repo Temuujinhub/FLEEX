@@ -28,6 +28,20 @@ interface LivePayload {
   eventIo?: number;
 }
 
+interface EventPayload {
+  id: string;
+  companyId: string;
+  deviceId: string;
+  geofenceId?: string | null;
+  type: string;
+  severity: string;
+  lat?: number;
+  lng?: number;
+  speed?: number;
+  message?: string;
+  occurredAt: string;
+}
+
 interface ClientCtx {
   userId: string;
   role: string;
@@ -36,9 +50,16 @@ interface ClientCtx {
   deviceFilter: Set<string>;
 }
 
-// Live position gateway. Authenticates on the upgrade (?token=jwt), then
-// subscribes to Redis Pub/Sub on `fleex.positions` and forwards filtered
-// envelopes to each connected client.
+// Live gateway. Authenticates on the upgrade (?token=jwt), then subscribes to
+// two Redis Pub/Sub channels and forwards filtered envelopes to clients:
+//
+//   • `fleex.positions` — emitted by the gps-ingestor on every parsed AVL
+//     record. Forwarded as { type: 'position', data: ... }.
+//   • `fleex.events`    — emitted by the events-engine on geofence
+//     transitions and overspeed. Forwarded as { type: 'event', data: ... }.
+//
+// Tenant isolation is applied at fanout time using the `companyId` on each
+// envelope: a client never sees traffic from another company.
 //
 // Path is /ws so nginx can proxy the upgrade.
 @WebSocketGateway({ path: '/ws' })
@@ -58,15 +79,22 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
   async onModuleInit() {
     this.sub = this.redis.duplicate();
-    await this.sub.subscribe('fleex.positions');
-    this.sub.on('message', (_channel, raw) => {
-      let msg: LivePayload;
+    await this.sub.subscribe('fleex.positions', 'fleex.events');
+    this.sub.on('message', (channel, raw) => {
+      let parsed: any;
       try {
-        msg = JSON.parse(raw);
+        parsed = JSON.parse(raw);
       } catch {
         return;
       }
-      this.fanout(msg);
+      if (channel === 'fleex.positions') {
+        this.fanout('position', parsed as LivePayload, parsed.companyId, parsed.deviceId);
+      } else if (channel === 'fleex.events') {
+        const ev = parsed as EventPayload;
+        // Events without a deviceId still scope to companyId; pass the device
+        // id when present so per-device subscriptions get their alerts too.
+        this.fanout('event', ev, ev.companyId, ev.deviceId);
+      }
     });
 
     const pingMs = Number(this.config.get('WS_PING_INTERVAL_MS') ?? 25_000);
@@ -115,16 +143,18 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     client.send(JSON.stringify({ type: 'subscribed', count: ctx.deviceFilter.size }));
   }
 
-  private fanout(msg: LivePayload) {
-    const data = JSON.stringify({ type: 'position', data: msg });
+  private fanout(type: 'position' | 'event', payload: any, companyId: string, deviceId?: string | null) {
+    const data = JSON.stringify({ type, data: payload });
     this.server.clients.forEach((c) => {
       if (c.readyState !== WebSocket.OPEN) return;
       const ctx = this.clients.get(c);
       if (!ctx) return;
       // Tenant isolation: clients can only see their own company's traffic,
       // except SUPER_ADMIN which sees everything.
-      if (ctx.role !== 'SUPER_ADMIN' && ctx.companyId !== msg.companyId) return;
-      if (ctx.deviceFilter.size > 0 && !ctx.deviceFilter.has(msg.deviceId)) return;
+      if (ctx.role !== 'SUPER_ADMIN' && ctx.companyId !== companyId) return;
+      // Device filter only applies when the envelope has a device — alerts
+      // without a device (rare, e.g. company-wide notices) skip the filter.
+      if (deviceId && ctx.deviceFilter.size > 0 && !ctx.deviceFilter.has(deviceId)) return;
       try {
         c.send(data);
       } catch (e) {
