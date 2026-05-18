@@ -518,7 +518,7 @@ function AddVehicleModal({
   };
 
   return (
-    <ModalShell title={isEdit ? `Машин засах · ${device.name}` : 'Шинэ машин'} onClose={onClose}>
+    <ModalShell title={isEdit ? `Машин засах · ${device.name}` : 'Шинэ машин'} onClose={onClose} fixedHeight>
       <div className="flex flex-wrap border-b border-slate-200 bg-slate-50">
         {([
           { id: 'basic',     label: 'Үндсэн',     always: true },
@@ -937,15 +937,23 @@ function ModalShell({
   onClose,
   children,
   maxWidth = 'max-w-3xl',
+  fixedHeight = false,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   maxWidth?: string;
+  // When `true`, the modal locks to ~85vh so its overall size doesn't jump
+  // as the user switches between tabs of different intrinsic heights.
+  fixedHeight?: boolean;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-      <div className={clsx('w-full bg-white rounded-2xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden', maxWidth)}>
+      <div className={clsx(
+        'w-full bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden',
+        fixedHeight ? 'h-[85vh]' : 'max-h-[92vh]',
+        maxWidth,
+      )}>
         <header className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
           <h2 className="text-lg font-bold">{title}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-2xl leading-none">×</button>
