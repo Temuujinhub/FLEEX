@@ -50,6 +50,12 @@ export function CommandsTab({ deviceId, deviceOnline }: { deviceId: string; devi
     },
   });
 
+  const cancel = useMutation({
+    mutationFn: (commandId: string) =>
+      api.delete(`/devices/${deviceId}/commands/${commandId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['commands', deviceId] }),
+  });
+
   return (
     <div className="space-y-4">
       <div>
@@ -110,6 +116,7 @@ export function CommandsTab({ deviceId, deviceOnline }: { deviceId: string; devi
                   <th className="text-left px-3 py-2 font-semibold">Статус</th>
                   <th className="text-left px-3 py-2 font-semibold">Илгээсэн</th>
                   <th className="text-left px-3 py-2 font-semibold">Үр дүн</th>
+                  <th className="w-12"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -123,6 +130,22 @@ export function CommandsTab({ deviceId, deviceOnline }: { deviceId: string; devi
                     </td>
                     <td className="px-3 py-2 text-xs text-slate-600">{formatRelative(c.sentAt ?? c.createdAt)}</td>
                     <td className="px-3 py-2 text-xs text-slate-500">{c.result ?? '—'}</td>
+                    <td className="px-3 py-2 text-right">
+                      {c.status === 'PENDING' && (
+                        <button
+                          type="button"
+                          title="Цуцлах"
+                          onClick={() => cancel.mutate(c.id)}
+                          disabled={cancel.isPending}
+                          className="text-rose-700 hover:text-rose-900 hover:bg-rose-50 rounded p-1 disabled:opacity-40"
+                          aria-label="Цуцлах"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" />
+                          </svg>
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -1,4 +1,4 @@
-import { Module, Controller, Get, Post, Body, Param, Query, Req, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Module, Controller, Delete, Get, Post, Body, Param, Query, Req, Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { IsObject, IsOptional, IsString } from 'class-validator';
 import { Role } from '@prisma/client';
 import { Roles } from '../auth/roles.decorator';
@@ -53,6 +53,41 @@ class CommandsService {
     });
     return items.map((c) => ({ ...c, id: c.id.toString() }));
   }
+
+  // Cancel a queued command. We only allow it while the command is still
+  // PENDING — once it has been sent the device has already received it and
+  // there's nothing meaningful to cancel from the server side. The Redis
+  // queue entry is best-effort: we LREM by exact payload match; if the
+  // ingestor has already popped it, the Postgres delete still proceeds
+  // (the command will sit in the device's local buffer at most).
+  async cancel(
+    deviceId: string,
+    commandId: bigint,
+    actor: { role: Role; companyId: string | null },
+  ) {
+    const dev = await this.prisma.device.findUnique({ where: { id: deviceId } });
+    if (!dev) throw new NotFoundException('Device not found');
+    if (actor.role !== 'SUPER_ADMIN' && dev.companyId !== actor.companyId) throw new ForbiddenException();
+    const cmd = await this.prisma.command.findUnique({ where: { id: commandId } });
+    if (!cmd || cmd.deviceId !== deviceId) throw new NotFoundException('Command not found');
+    if (cmd.status !== 'PENDING') {
+      throw new BadRequestException('Зөвхөн хүлээгдэж буй (PENDING) команд цуцлах боломжтой');
+    }
+    // Best-effort Redis cleanup. The ingestor's queue payload is the same
+    // JSON envelope we wrote on POST, so we re-build it and LREM by value.
+    try {
+      const envelope = JSON.stringify({
+        id: cmd.id.toString(),
+        type: cmd.type,
+        payload: cmd.payload ?? null,
+      });
+      await this.redis.client.lrem(`fleex.commands:${dev.imei}`, 0, envelope);
+    } catch {
+      // Redis unreachable or already popped — non-fatal.
+    }
+    await this.prisma.command.delete({ where: { id: commandId } });
+    return { ok: true };
+  }
 }
 
 @Controller('devices/:deviceId/commands')
@@ -76,6 +111,16 @@ class CommandsController {
   @Audit('device.command', { resourceType: 'device', resourceIdParam: 'deviceId', captureResult: true })
   issue(@Param('deviceId') deviceId: string, @Body() dto: IssueCommandDto, @Req() req: any) {
     return this.svc.issue(deviceId, req.user, dto);
+  }
+
+  @Delete(':commandId')
+  @Audit('device.command.cancel', { resourceType: 'device', resourceIdParam: 'deviceId' })
+  cancel(
+    @Param('deviceId') deviceId: string,
+    @Param('commandId') commandId: string,
+    @Req() req: any,
+  ) {
+    return this.svc.cancel(deviceId, BigInt(commandId), req.user);
   }
 }
 
