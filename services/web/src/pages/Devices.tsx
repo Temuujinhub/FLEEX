@@ -5,8 +5,8 @@ import { api } from '../lib/api';
 import { ExcelImport } from '../components/ExcelImport';
 
 // "Машин · Төхөөрөмж" хуудас. Top filter bar (Гранж / Алба нэгж / төрөл /
-// статус / search) + жагсаалт + "+ Шинэ машин" товчоор Gaikham шиг 4
-// tab-тай (Үндсэн / Үзүүлэлт / Түлш / Даатгал) modal нээгдэнэ.
+// статус / search) + жагсаалт + "+ Шинэ машин" товчоор Gaikham шиг 5
+// tab-тай (Үндсэн / GPS / Үзүүлэлт / Түлш / Даатгал) modal нээгдэнэ.
 
 const VEHICLE_TYPES = [
   { value: 'HAUL_TRUCK',   label: 'Хэт том самосвал (БелАЗ)', icon: 'HaulTruck' },
@@ -421,7 +421,7 @@ function AddVehicleModal({
   onClose: () => void;
 }) {
   const isEdit = !!device;
-  const [tab, setTab] = useState<'basic' | 'specs' | 'fuel' | 'insurance'>('basic');
+  const [tab, setTab] = useState<'basic' | 'gps' | 'specs' | 'fuel' | 'insurance'>('basic');
   const [form, setForm] = useState<FormState>(() => device ? deviceToForm(device) : EMPTY_FORM);
   const [error, setError] = useState<string | null>(null);
   const qc = useQueryClient();
@@ -448,7 +448,7 @@ function AddVehicleModal({
   const submit = () => {
     setError(null);
     if (!isEdit && !/^\d{14,16}$/.test(form.imei)) {
-      setError('IMEI 14–16 оронтой тоо байх ёстой'); setTab('basic'); return;
+      setError('IMEI 14–16 оронтой тоо байх ёстой'); setTab('gps'); return;
     }
     if (form.name.trim().length < 2) {
       setError('Машины нэрийг 2-оос дээш тэмдэгтээр оруулна уу'); setTab('basic'); return;
@@ -502,6 +502,7 @@ function AddVehicleModal({
       <div className="flex border-b border-slate-200 bg-slate-50">
         {[
           { id: 'basic',     label: 'Үндсэн' },
+          { id: 'gps',       label: 'GPS' },
           { id: 'specs',     label: 'Үзүүлэлт' },
           { id: 'fuel',      label: 'Түлш' },
           { id: 'insurance', label: 'Даатгал' },
@@ -525,15 +526,6 @@ function AddVehicleModal({
       <div className="flex-1 overflow-y-auto p-6">
         {tab === 'basic' && (
           <div className="grid md:grid-cols-2 gap-x-5 gap-y-4">
-            <Field label="IMEI *" hint="14-16 оронтой тоо. GPS төхөөрөмжийн дотоод ID. Үүсгэсний дараа өөрчилж болохгүй." tooltip="IMEI нь GPS-н зөөврийн дугаар. Teltonika FMC650-н хувьд төхөөрөмжийн ард наалт дээр бичсэн байдаг (15 оронтой). Хэрэв олдохгүй бол төхөөрөмжид холбогдох тусгай команд (IMEI?) илгээж унших боломжтой.">
-              <input
-                value={form.imei}
-                onChange={(e) => set('imei', e.target.value.replace(/\D/g, ''))}
-                placeholder="352093081234567"
-                disabled={isEdit}
-                className={clsx(input, isEdit && 'bg-slate-100 text-slate-500')}
-              />
-            </Field>
             <Field label="Машины нэр *" hint="Дотооддоо ялгах нэр. Жишээ: 'Самосвал №14' эсвэл 'БелАЗ-12'." tooltip="Энэ нэр газрын зураг, тайлан, дохиолол бүгдэд харагдана. Хэрэглэгчид ойлгомжтой богино нэр сонгоорой.">
               <input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Жишээ: Самосвал №14" className={input} />
             </Field>
@@ -567,7 +559,7 @@ function AddVehicleModal({
               )}
             </Field>
 
-            <Field label="Жолооч" hint="Тухайн машиныг хариуцах жолооч." tooltip="Жолоочийг 'Жолооч · Ажилчид' цэснээс үүсгэсэн байх ёстой. Нэг машинд нэг жолооч; нэг жолооч хэдэн ч машинтай байж болно. Хоосон үлдээвэл хариуцагчгүй гэж тооцогдоно — салгахдаа '— Жолооч хуваарилаагүй —' сонго.">
+            <Field label="Жолооч" className="md:col-span-2" hint="Тухайн машиныг хариуцах жолооч." tooltip="Жолоочийг 'Жолооч · Ажилчид' цэснээс үүсгэсэн байх ёстой. Нэг машинд нэг жолооч; нэг жолооч хэдэн ч машинтай байж болно. Хоосон үлдээвэл хариуцагчгүй гэж тооцогдоно — салгахдаа '— Жолооч хуваарилаагүй —' сонго.">
               <select value={form.driverId} onChange={(e) => set('driverId', e.target.value)} className={input}>
                 <option value="">— Жолооч хуваарилаагүй —</option>
                 {drivers.map((d) => (
@@ -581,13 +573,6 @@ function AddVehicleModal({
                   Жолооч бүртгэгдээгүй. <b>"Жолооч · Ажилчид"</b> цэснээс нэмнэ үү.
                 </div>
               )}
-            </Field>
-
-            <Field label="Модель" hint="GPS төхөөрөмжийн загвар. Жнь: FMC650, FMB920, GH5200." tooltip="Энэ нь GPS box-ын брэнд+загвар. Машины брэнд биш. Дэмжигдсэн загварууд: Teltonika (FMx цуврал), Queclink, Concox, Ruptela.">
-              <input value={form.model} onChange={(e) => set('model', e.target.value)} placeholder="FMC650 / Teltonika..." className={input} />
-            </Field>
-            <Field label="SIM-ийн дугаар" hint="GPS төхөөрөмжид суусан SIM-ийн утасны дугаар." tooltip="SMS-р тохиргоо илгээх (жнь: APN, серверийн хаяг) болон асуудал гарвал утсаар хянахад ашиглагдана.">
-              <input value={form.simNumber} onChange={(e) => set('simNumber', e.target.value)} placeholder="+97699112233" className={input} />
             </Field>
 
             <Field label="Машины төрөл" className="md:col-span-2">
@@ -637,6 +622,30 @@ function AddVehicleModal({
                 ))}
               </div>
             </Field>
+          </div>
+        )}
+
+        {tab === 'gps' && (
+          <div className="grid md:grid-cols-2 gap-x-5 gap-y-4">
+            <Field label="IMEI *" hint="14-16 оронтой тоо. GPS төхөөрөмжийн дотоод ID. Үүсгэсний дараа өөрчилж болохгүй." tooltip="IMEI нь GPS-н зөөврийн дугаар. Teltonika FMC650-н хувьд төхөөрөмжийн ард наалт дээр бичсэн байдаг (15 оронтой). Хэрэв олдохгүй бол төхөөрөмжид холбогдох тусгай команд (IMEI?) илгээж унших боломжтой.">
+              <input
+                value={form.imei}
+                onChange={(e) => set('imei', e.target.value.replace(/\D/g, ''))}
+                placeholder="352093081234567"
+                disabled={isEdit}
+                className={clsx(input, isEdit && 'bg-slate-100 text-slate-500')}
+              />
+            </Field>
+            <Field label="Модель" hint="GPS төхөөрөмжийн загвар. Жнь: FMC650, FMB920, GH5200." tooltip="Энэ нь GPS box-ын брэнд+загвар. Машины брэнд биш. Дэмжигдсэн загварууд: Teltonika (FMx цуврал), Queclink, Concox, Ruptela.">
+              <input value={form.model} onChange={(e) => set('model', e.target.value)} placeholder="FMC650 / Teltonika..." className={input} />
+            </Field>
+            <Field label="SIM-ийн дугаар" hint="GPS төхөөрөмжид суусан SIM-ийн утасны дугаар." tooltip="SMS-р тохиргоо илгээх (жнь: APN, серверийн хаяг) болон асуудал гарвал утсаар хянахад ашиглагдана." className="md:col-span-2">
+              <input value={form.simNumber} onChange={(e) => set('simNumber', e.target.value)} placeholder="+97699112233" className={input} />
+            </Field>
+            <div className="md:col-span-2 rounded-lg bg-sky-50 border border-sky-200 text-xs text-sky-900 px-3 py-2">
+              ℹ GPS төхөөрөмжийн сервер/порт/APN тохиргооны дэлгэрэнгүйг хуудасны дээд талын
+              <b> "📡 GPS холболтын заавар" </b> товчоор үзнэ үү.
+            </div>
           </div>
         )}
 
