@@ -507,7 +507,7 @@ function AddVehicleModal({
 
   return (
     <ModalShell title={isEdit ? `Машин засах · ${device.name}` : 'Шинэ машин'} onClose={onClose}>
-      <div className="flex border-b border-slate-200 bg-slate-50">
+      <div className="flex flex-wrap border-b border-slate-200 bg-slate-50">
         {([
           { id: 'basic',     label: 'Үндсэн',     always: true },
           { id: 'gps',       label: 'GPS',        always: true },
@@ -531,7 +531,7 @@ function AddVehicleModal({
             type="button"
             onClick={() => setTab(t.id as any)}
             className={clsx(
-              'px-5 py-3 text-sm font-semibold border-b-2 transition',
+              'px-4 py-3 text-sm font-semibold border-b-2 transition whitespace-nowrap',
               tab === t.id
                 ? 'border-brand-600 text-brand-700 bg-white'
                 : 'border-transparent text-slate-500 hover:text-slate-800',

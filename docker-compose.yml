@@ -207,6 +207,16 @@ services:
       - ./infra/nginx/conf.d:/etc/nginx/conf.d:ro
       - ./infra/nginx/certs:/etc/nginx/certs:ro
       - nginx-cache:/var/cache/nginx
+    # Hit the static /healthz route nginx serves itself (no upstream). If
+    # nginx is up but config is broken, this will fail and the deploy
+    # script's healthcheck loop will catch it instead of silently leaving
+    # the site as 502.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks: [fleex]
 
 volumes:

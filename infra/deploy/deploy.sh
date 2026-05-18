@@ -50,6 +50,14 @@ build_and_up() {
 
   log "docker compose up -d (with deps & healthchecks)"
   docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
+
+  # nginx caches upstream container IPs via the docker DNS resolver — when
+  # `api` / `web` get rebuilt (new container ID, new IP), nginx keeps the
+  # stale entry and serves 502 until something nudges it. Force-recreate
+  # nginx so it re-resolves both upstreams. Cheap (image isn't rebuilt)
+  # and keeps the deploy self-healing.
+  log "Re-creating nginx so it picks up fresh upstream IPs"
+  docker compose -f "$COMPOSE_FILE" up -d --force-recreate --no-deps nginx
 }
 
 wait_healthy() {
@@ -97,7 +105,7 @@ trap 'rollback' ERR
 build_and_up
 
 OK=true
-for svc in postgres redis api ingestor events-engine; do
+for svc in postgres redis api ingestor events-engine web nginx; do
   wait_healthy "$svc" || OK=false
 done
 
