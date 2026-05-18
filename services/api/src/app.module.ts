@@ -23,6 +23,14 @@ import { AuditModule } from './audit/audit.module';
 import { WebsocketModule } from './websocket/websocket.module';
 import { HealthModule } from './health/health.module';
 import { CommandsModule } from './commands/commands.module';
+import { SensorsModule } from './sensors/sensors.module';
+import { MessagesModule } from './messages/messages.module';
+import { TripsModule } from './trips/trips.module';
+import { DeviceHealthModule } from './device-health/device-health.module';
+import { NotificationRulesModule } from './notification-rules/notification-rules.module';
+import { CustomFieldsModule } from './custom-fields/custom-fields.module';
+import { EcoModule } from './eco/eco.module';
+import { GprsModule } from './gprs/gprs.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
 import { AuditInterceptor } from './audit/audit.interceptor';
@@ -57,6 +65,14 @@ import { TimescaleInitService } from './common/timescale-init.service';
     GeofencesModule,
     ReportsModule,
     CommandsModule,
+    SensorsModule,
+    MessagesModule,
+    TripsModule,
+    DeviceHealthModule,
+    NotificationRulesModule,
+    CustomFieldsModule,
+    EcoModule,
+    GprsModule,
     WebsocketModule,
     HealthModule,
   ],

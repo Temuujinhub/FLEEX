@@ -36,18 +36,23 @@ import (
 
 // LivePayload mirrors the JSON shape the gps-ingestor publishes on
 // `fleex.positions`. We deliberately copy the struct rather than importing
-// it from the ingestor so the two services can evolve independently.
+// it from the ingestor so the two services can evolve independently. The
+// `EventIO` + `IO` map carry the raw protocol-level signals so the
+// engine can detect harsh driving, sensor states etc. without another DB
+// hop.
 type LivePayload struct {
-	DeviceID  string  `json:"deviceId"`
-	CompanyID string  `json:"companyId"`
-	Imei      string  `json:"imei"`
-	Lat       float64 `json:"lat"`
-	Lng       float64 `json:"lng"`
-	Speed     float64 `json:"speed"`
-	Course    float64 `json:"course"`
-	Altitude  float64 `json:"altitude"`
-	Time      int64   `json:"time"` // unix millis
-	Ignition  *bool   `json:"ignition,omitempty"`
+	DeviceID  string           `json:"deviceId"`
+	CompanyID string           `json:"companyId"`
+	Imei      string           `json:"imei"`
+	Lat       float64          `json:"lat"`
+	Lng       float64          `json:"lng"`
+	Speed     float64          `json:"speed"`
+	Course    float64          `json:"course"`
+	Altitude  float64          `json:"altitude"`
+	Time      int64            `json:"time"` // unix millis
+	Ignition  *bool            `json:"ignition,omitempty"`
+	EventIO   uint16           `json:"eventIo,omitempty"`
+	IO        map[string]int64 `json:"io,omitempty"`
 }
 
 type Engine struct {
@@ -236,5 +241,131 @@ func (e *Engine) process(ctx context.Context, p *LivePayload) error {
 		}
 	}
 
+	// ── Harsh driving / power / tamper events from EventIO + IO map ──
+	e.emitIoEvents(ctx, p, occurred)
+
+	// ── Ignition transition → trip start / end ───────────────
+	e.handleIgnition(ctx, p, occurred)
+
 	return nil
+}
+
+// Teltonika AVL IDs that flag specific events. We translate them to our
+// own EventType enum and emit one row per occurrence. The cooldown key
+// per (device, ioId) ensures that a stuck-true flag doesn't produce
+// one event per packet.
+const (
+	ioGreenDriving = "253"
+	ioOverspeeding = "255"
+	ioCrashDetect  = "257"
+	ioTowing       = "246"
+	ioJamming      = "247"
+	ioPowerCut     = "252"
+	ioIgnition     = "239"
+	ioExternalVolt = "66"
+)
+
+func (e *Engine) emitIoEvents(ctx context.Context, p *LivePayload, occurred time.Time) {
+	if len(p.IO) == 0 && p.EventIO == 0 {
+		return
+	}
+	// Green driving: 1=harsh accel, 2=harsh brake, 3=harsh corner. We
+	// reuse the cooldown machinery to dampen sticky values.
+	if v, ok := p.IO[ioGreenDriving]; ok && v > 0 {
+		var typ, msg, sev string
+		switch v {
+		case 1:
+			typ, sev, msg = "HARSH_ACCEL", "WARNING", "Гэнэт хурдалсан"
+		case 2:
+			typ, sev, msg = "HARSH_BRAKE", "WARNING", "Гэнэт тоормосолсон"
+		case 3:
+			typ, sev, msg = "HARSH_CORNER", "WARNING", "Гэнэт эргэсэн"
+		}
+		if typ != "" {
+			e.emitOnce(ctx, p, occurred, typ, sev, msg, "harsh"+typ)
+		}
+	}
+	if v, ok := p.IO[ioCrashDetect]; ok && v != 0 {
+		e.emitOnce(ctx, p, occurred, "CUSTOM", "CRITICAL", "Хүчтэй цохилт илрэв", "crash")
+	}
+	if v, ok := p.IO[ioJamming]; ok && v != 0 {
+		e.emitOnce(ctx, p, occurred, "TAMPER", "CRITICAL", "GSM jamming илрэв", "jamming")
+	}
+	if v, ok := p.IO[ioTowing]; ok && v != 0 {
+		e.emitOnce(ctx, p, occurred, "TAMPER", "WARNING", "Чирүүлэлт илрэв", "towing")
+	}
+	if v, ok := p.IO[ioPowerCut]; ok && v != 0 {
+		e.emitOnce(ctx, p, occurred, "POWER_CUT", "CRITICAL", "Гадаад тэжээл салсан", "powercut")
+	}
+	// Low battery: external voltage < 11.5V (in millivolts in the AVL field).
+	if v, ok := p.IO[ioExternalVolt]; ok && v > 0 && v < 11500 {
+		e.emitOnce(ctx, p, occurred, "LOW_BATTERY", "WARNING",
+			fmt.Sprintf("Хүчдэл бага: %.1fV", float64(v)/1000.0), "lowbat")
+	}
+}
+
+// emitOnce wraps PersistAndPublish with a per-device, per-scope cooldown so
+// the same condition doesn't flood the events table.
+func (e *Engine) emitOnce(ctx context.Context, p *LivePayload, occurred time.Time, typ, sev, msg, scope string) {
+	allow, err := e.store.AllowEvent(ctx, p.DeviceID, scope)
+	if err != nil || !allow {
+		return
+	}
+	if err := e.store.PersistAndPublish(ctx, store.EventInsert{
+		CompanyID: p.CompanyID,
+		DeviceID:  p.DeviceID,
+		Type:      typ,
+		Severity:  sev,
+		Lat:       p.Lat, Lng: p.Lng, Speed: p.Speed,
+		Message:    msg,
+		OccurredAt: occurred,
+	}); err != nil {
+		log.Warn().Err(err).Str("type", typ).Msg("persist io event")
+	}
+}
+
+// handleIgnition watches ignition transitions to drive trip-start /
+// trip-end. State is persisted to Redis so a restart doesn't replay the
+// transitions.
+func (e *Engine) handleIgnition(ctx context.Context, p *LivePayload, occurred time.Time) {
+	if p.Ignition == nil {
+		return
+	}
+	prev, known, err := e.store.LoadIgnition(ctx, p.DeviceID)
+	if err != nil {
+		log.Debug().Err(err).Msg("load ignition")
+		return
+	}
+	if err := e.store.SaveIgnition(ctx, p.DeviceID, *p.Ignition); err != nil {
+		log.Debug().Err(err).Msg("save ignition")
+	}
+	if !known {
+		return
+	}
+	if prev == *p.Ignition {
+		return
+	}
+	if *p.Ignition {
+		// Off → On: trip start.
+		if err := e.store.StartTrip(ctx, p.CompanyID, p.DeviceID, occurred, p.Lat, p.Lng); err != nil {
+			log.Warn().Err(err).Msg("start trip")
+		}
+		_ = e.store.PersistAndPublish(ctx, store.EventInsert{
+			CompanyID: p.CompanyID, DeviceID: p.DeviceID,
+			Type: "IGNITION_ON", Severity: "INFO",
+			Lat: p.Lat, Lng: p.Lng, Speed: p.Speed,
+			Message: "Хөдөлгүүр асав", OccurredAt: occurred,
+		})
+	} else {
+		// On → Off: trip end.
+		if err := e.store.EndTrip(ctx, p.DeviceID, occurred, p.Lat, p.Lng); err != nil {
+			log.Warn().Err(err).Msg("end trip")
+		}
+		_ = e.store.PersistAndPublish(ctx, store.EventInsert{
+			CompanyID: p.CompanyID, DeviceID: p.DeviceID,
+			Type: "IGNITION_OFF", Severity: "INFO",
+			Lat: p.Lat, Lng: p.Lng, Speed: p.Speed,
+			Message: "Хөдөлгүүр унтрав", OccurredAt: occurred,
+		})
+	}
 }

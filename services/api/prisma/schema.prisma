@@ -51,6 +51,11 @@ model Company {
   places      Place[]
   serviceTasks ServiceTask[]
 
+  sensors           Sensor[]
+  healthRules       DeviceHealthRule[]
+  notificationRules NotificationRule[]
+  customFields      CustomField[]
+
   @@map("companies")
 }
 
@@ -352,6 +357,12 @@ model Device {
   commands     Command[]
   serviceTasks ServiceTask[]
 
+  sensors      Sensor[]
+  rawMessages  RawMessage[]
+  trips        Trip[]
+  health       DeviceHealthStatus?
+  gprsCounters GprsCounter[]
+
   @@index([companyId])
   @@index([groupId])
   @@index([garageId])
@@ -468,6 +479,8 @@ model Driver {
   updatedAt   DateTime @updatedAt
 
   devices     Device[]
+  scores      DriverScore[]
+  trips       Trip[]
 
   @@index([companyId])
   @@index([groupId])
@@ -658,4 +671,305 @@ model Position {
   @@index([attributes(ops: JsonbPathOps)], type: Gin, map: "positions_attributes_gin")
   @@map("positions")
   @@ignore
+}
+
+// ---- Sensors (logical mapping of raw IO parameters) ------------------------
+//
+// GPS hardware sends a fixed catalogue of raw IO IDs (Teltonika AVL IDs,
+// Queclink parameter codes, etc.). A `Sensor` is the company-side
+// definition that turns one of those raw fields into a named, calibrated
+// value the rest of the system can reason about (fuel level, voltage,
+// door open, RFID tag, ...). `sourceParam` is the protocol-level key
+// (e.g. "io.239" for Teltonika ignition, "io.66" for external voltage).
+// `multiplier` / `offset` are the default linear calibration; richer
+// piecewise calibration goes in `calibration` (JSON: [{raw, real}, ...]).
+
+enum SensorType {
+  IGNITION
+  FUEL_LEVEL
+  VOLTAGE
+  TEMPERATURE
+  DOOR
+  ENGINE_RPM
+  ODOMETER
+  ENGINE_HOURS
+  WEIGHT
+  PRESSURE
+  DRIVER_RFID
+  CUSTOM_DIGITAL
+  CUSTOM_ANALOG
+}
+
+enum SensorValueKind {
+  BOOL
+  NUMBER
+  TEXT
+}
+
+model Sensor {
+  id            String          @id @default(uuid()) @db.Uuid
+  companyId     String          @db.Uuid
+  company       Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  deviceId      String          @db.Uuid
+  device        Device          @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  name          String
+  type          SensorType
+  valueKind     SensorValueKind @default(NUMBER)
+  sourceParam   String          // protocol IO key, e.g. "io.239", "io.66"
+  unit          String?         // V, %, L, °C
+  multiplier    Float           @default(1.0)
+  offset        Float           @default(0.0)
+  calibration   Json?           // optional piecewise lookup
+  invert        Boolean         @default(false)
+  active        Boolean         @default(true)
+  // Cached last value snapshot — updated by the ingestor / events engine.
+  lastValue     Float?
+  lastBool      Boolean?
+  lastText      String?
+  lastAt        DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([companyId])
+  @@index([deviceId])
+  @@map("sensors")
+}
+
+// ---- Raw messages (debug viewer) -------------------------------------------
+//
+// Last ~500 raw packets per device, written by the ingestor. Used by the
+// "Мессеж" page to debug "why is this device not reporting" or "is the
+// fuel sensor wiring right?" without leaving the operator UI. A periodic
+// cleanup job trims older rows to keep the table bounded.
+
+model RawMessage {
+  id           BigInt    @id @default(autoincrement())
+  deviceId     String    @db.Uuid
+  device       Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  receivedAt   DateTime  @default(now())
+  protocol     String
+  lat          Float?
+  lng          Float?
+  speed        Float?
+  ignition     Boolean?
+  payload      Json
+  byteSize     Int       @default(0)
+
+  @@index([deviceId, receivedAt(sort: Desc)])
+  @@map("raw_messages")
+}
+
+// ---- Trips -----------------------------------------------------------------
+//
+// A trip = engine-on → engine-off (or movement → idle, configurable).
+// Aggregated by a background worker so reports (mileage, fuel, driver
+// behaviour) can be computed by trip rather than across raw positions.
+
+enum TripStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+model Trip {
+  id              String     @id @default(uuid()) @db.Uuid
+  companyId       String     @db.Uuid
+  deviceId        String     @db.Uuid
+  device          Device     @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  driverId        String?    @db.Uuid
+  driver          Driver?    @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  startedAt       DateTime
+  endedAt         DateTime?
+  startLat        Float
+  startLng        Float
+  startAddress    String?
+  endLat          Float?
+  endLng          Float?
+  endAddress      String?
+  distanceKm      Float      @default(0)
+  durationS       Int        @default(0)
+  maxSpeed        Float?
+  avgSpeed        Float?
+  fuelUsedL       Float?
+  status          TripStatus @default(IN_PROGRESS)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@index([companyId, startedAt(sort: Desc)])
+  @@index([deviceId, startedAt(sort: Desc)])
+  @@map("trips")
+}
+
+// ---- Device health ---------------------------------------------------------
+//
+// Rule-based health checks evaluated by the events engine on a schedule.
+// Each device gets a single `DeviceHealthStatus` row that holds the latest
+// summary; the UI groups devices by `state` for the dashboard donut.
+
+enum DeviceHealthState {
+  HEALTHY
+  WARNING
+  UNHEALTHY
+  UNKNOWN
+}
+
+model DeviceHealthRule {
+  id            String   @id @default(uuid()) @db.Uuid
+  companyId     String   @db.Uuid
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name          String
+  // Supported `check` values:
+  //   OFFLINE_GT     — minutes since lastSeen exceeds threshold
+  //   VOLTAGE_LT     — batteryVolt < threshold
+  //   GPS_FIX_LT     — satellites < threshold
+  //   IGNITION_STALE — hours since ignitionOn flipped > threshold
+  check         String
+  threshold     Float
+  severity      String   @default("WARNING")
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([companyId])
+  @@map("device_health_rules")
+}
+
+model DeviceHealthStatus {
+  deviceId     String            @id @db.Uuid
+  device       Device            @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  state        DeviceHealthState @default(UNKNOWN)
+  diagnoses    Json?             // [{rule, message, since}, ...]
+  evaluatedAt  DateTime          @default(now())
+
+  @@map("device_health_status")
+}
+
+// ---- Driver scoring --------------------------------------------------------
+//
+// One aggregate row per driver per day. The events engine increments
+// counters as harsh / speeding events are produced, then a nightly job
+// computes the 0-100 score (100 - penalty per event-type * count).
+
+model DriverScore {
+  id              String   @id @default(uuid()) @db.Uuid
+  companyId       String   @db.Uuid
+  driverId        String   @db.Uuid
+  driver          Driver   @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  date            DateTime @db.Date
+  distanceKm      Float    @default(0)
+  durationS       Int      @default(0)
+  harshAccel      Int      @default(0)
+  harshBrake      Int      @default(0)
+  harshCorner     Int      @default(0)
+  speedingEvents  Int      @default(0)
+  idleS           Int      @default(0)
+  score           Float    @default(100)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([driverId, date])
+  @@index([companyId, date])
+  @@map("driver_scores")
+}
+
+// ---- Notification rules ---------------------------------------------------
+//
+// User-defined rules that map matching events → delivery channels. The
+// events engine evaluates rules whenever it inserts an `Event` and queues
+// deliveries (email / sms / webhook) via the worker.
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  SMS
+  WEBHOOK
+}
+
+model NotificationRule {
+  id              String                @id @default(uuid()) @db.Uuid
+  companyId       String                @db.Uuid
+  company         Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name            String
+  triggerType     EventType
+  deviceIds       String[]              @db.Uuid
+  groupIds        String[]              @db.Uuid
+  geofenceIds     String[]              @db.Uuid
+  minSeverity     String                @default("INFO")
+  channels        NotificationChannel[]
+  recipientEmails String[]
+  recipientPhones String[]
+  webhookUrl      String?
+  template        String                @default("{DEVICE}: {TYPE} at {LOCATION} ({TIME})")
+  active          Boolean               @default(true)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  @@index([companyId])
+  @@index([triggerType])
+  @@map("notification_rules")
+}
+
+// ---- Custom fields --------------------------------------------------------
+//
+// Per-tenant extension of the Device entity (later other entities). The
+// Devices modal renders a "Custom" tab that lists each definition and the
+// matching value stored in CustomFieldValue.
+
+enum CustomFieldType {
+  TEXT
+  NUMBER
+  DATE
+  BOOLEAN
+  SELECT
+}
+
+model CustomField {
+  id           String          @id @default(uuid()) @db.Uuid
+  companyId    String          @db.Uuid
+  company      Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  entity       String          @default("device")
+  name         String
+  label        String
+  type         CustomFieldType @default(TEXT)
+  options      String[]
+  required     Boolean         @default(false)
+  ordering     Int             @default(0)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  values       CustomFieldValue[]
+
+  @@unique([companyId, entity, name])
+  @@map("custom_fields")
+}
+
+model CustomFieldValue {
+  id           String       @id @default(uuid()) @db.Uuid
+  fieldId      String       @db.Uuid
+  field        CustomField  @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  entityId     String       @db.Uuid
+  valueText    String?
+
+  @@unique([fieldId, entityId])
+  @@index([entityId])
+  @@map("custom_field_values")
+}
+
+// ---- GPRS data usage ------------------------------------------------------
+//
+// Per-device monthly counter of bytes sent / received over GPRS and the
+// number of packets. Helps operators predict SIM-plan overages.
+
+model GprsCounter {
+  id           String    @id @default(uuid()) @db.Uuid
+  deviceId     String    @db.Uuid
+  device       Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  yearMonth    String    @db.VarChar(7)  // "2026-05"
+  bytesRx      BigInt    @default(0)
+  bytesTx      BigInt    @default(0)
+  packetCount  Int       @default(0)
+  resetAt      DateTime?
+
+  @@unique([deviceId, yearMonth])
+  @@index([yearMonth])
+  @@map("gprs_counters")
 }

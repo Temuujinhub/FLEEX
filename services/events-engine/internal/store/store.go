@@ -142,6 +142,11 @@ func (s *Store) Healthy() bool { return s.healthy.Load() }
 // the positions channel and publish to the events channel.
 func (s *Store) Redis() *redis.Client { return s.rdb }
 
+// PG exposes the connection pool to engine-internal goroutines (health
+// evaluator, trip-finaliser) that need raw SQL. The Store wraps the
+// common operations; everything else goes through here.
+func (s *Store) PG() *pgxpool.Pool { return s.pg }
+
 // Stats counters for /metrics.
 func (s *Store) Stats() (eventsEmitted, cacheRefreshes uint64) {
 	return s.eventsEmitted.Load(), s.cacheRefreshes.Load()
@@ -371,6 +376,86 @@ func (s *Store) AllowOverspeed(ctx context.Context, deviceID, scope string) (boo
 		return false, err
 	}
 	return ok, nil
+}
+
+// AllowEvent is the generic NX-cooldown for non-geofence event types
+// (harsh driving, power cut, tamper). One key per device+scope; default
+// TTL is 30 s which is short enough to keep distinct incidents but long
+// enough to dampen sticky flags.
+func (s *Store) AllowEvent(ctx context.Context, deviceID, scope string) (bool, error) {
+	key := fmt.Sprintf("fleex.event.last:%s:%s", deviceID, scope)
+	ok, err := s.rdb.SetNX(ctx, key, "1", 30*time.Second).Result()
+	if err != nil {
+		return false, err
+	}
+	return ok, nil
+}
+
+// LoadIgnition returns the last seen ignition state for a device, plus
+// `known=true` when we have a previous value. First-sighting devices
+// return false/false so the caller can skip emitting bogus transitions.
+func (s *Store) LoadIgnition(ctx context.Context, deviceID string) (bool, bool, error) {
+	key := "fleex.ign:" + deviceID
+	v, err := s.rdb.Get(ctx, key).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return false, false, nil
+		}
+		return false, false, err
+	}
+	return v == "1", true, nil
+}
+
+func (s *Store) SaveIgnition(ctx context.Context, deviceID string, on bool) error {
+	key := "fleex.ign:" + deviceID
+	v := "0"
+	if on {
+		v = "1"
+	}
+	return s.rdb.Set(ctx, key, v, 24*time.Hour).Err()
+}
+
+// StartTrip writes a new in-progress Trip row. The trip-detector calls
+// this when ignition flips off → on. `companyId` and the start location
+// come from the position that triggered the transition. We do not
+// pre-emptively fill the driver — the assignment is looked up by the
+// nightly aggregator from the device's `driverId` at that moment.
+func (s *Store) StartTrip(ctx context.Context, companyID, deviceID string, t time.Time, lat, lng float64) error {
+	// If there's already an in-progress trip for this device, leave it alone.
+	var existing string
+	err := s.pg.QueryRow(ctx, `
+		SELECT id::text FROM trips
+		WHERE "deviceId" = $1::uuid AND status = 'IN_PROGRESS'
+		ORDER BY "startedAt" DESC LIMIT 1
+	`, deviceID).Scan(&existing)
+	if err == nil && existing != "" {
+		return nil
+	}
+	_, err = s.pg.Exec(ctx, `
+		INSERT INTO trips
+		  (id, "companyId", "deviceId", "driverId", "startedAt", "startLat", "startLng", status, "createdAt", "updatedAt")
+		SELECT gen_random_uuid(), $1::uuid, $2::uuid, d."driverId", $3, $4, $5, 'IN_PROGRESS', NOW(), NOW()
+		FROM devices d WHERE d.id = $2::uuid
+	`, companyID, deviceID, t, lat, lng)
+	return err
+}
+
+// EndTrip closes the most recent in-progress trip for the device. We
+// compute distance / duration from the positions stored during the trip
+// in a separate pass; here we only stamp the end-of-trip fields.
+func (s *Store) EndTrip(ctx context.Context, deviceID string, t time.Time, lat, lng float64) error {
+	_, err := s.pg.Exec(ctx, `
+		UPDATE trips
+		SET "endedAt" = $2, "endLat" = $3, "endLng" = $4, status = 'COMPLETED',
+		    "durationS" = GREATEST(0, EXTRACT(EPOCH FROM ($2 - "startedAt"))::int),
+		    "updatedAt" = NOW()
+		WHERE id = (
+			SELECT id FROM trips
+			WHERE "deviceId" = $1::uuid AND status = 'IN_PROGRESS'
+			ORDER BY "startedAt" DESC LIMIT 1
+		)
+	`, deviceID, t, lat, lng)
+	return err
 }
 
 // ── helpers ─────────────────────────────────────────────────

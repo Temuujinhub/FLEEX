@@ -25,6 +25,11 @@ export function Dashboard() {
     queryFn: () => api.get('/service-tasks?upcoming=true').then((r) => r.data),
     refetchInterval: 60_000,
   });
+  const healthStatus = useQuery({
+    queryKey: ['health-status'],
+    queryFn: () => api.get('/device-health/status').then((r) => r.data),
+    refetchInterval: 60_000,
+  });
 
   const list: any[] = devices.data ?? [];
   const evts: any[] = events.data ?? [];
@@ -137,6 +142,11 @@ export function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Health summary (donut + per-state count) — reads from
+          /device-health/status, populated by the events-engine on a 60 s
+          tick. */}
+      <HealthSummaryPanel statuses={healthStatus.data ?? []} />
 
       {/* Service tasks summary */}
       <ServiceTasksPanel tasks={upcomingTasks.data ?? []} />
@@ -494,3 +504,98 @@ function AlertGlyph() {
     </svg>
   );
 }
+
+// ── Health summary (Wialon-style device health donut) ──────────
+function HealthSummaryPanel({ statuses }: { statuses: any[] }) {
+  const counts = useMemo(() => {
+    const m: Record<string, number> = { HEALTHY: 0, WARNING: 0, UNHEALTHY: 0, UNKNOWN: 0 };
+    for (const s of statuses) m[s.state] = (m[s.state] ?? 0) + 1;
+    return m;
+  }, [statuses]);
+  const total = statuses.length;
+  // Quick list of any non-healthy devices for visibility.
+  const issues = statuses
+    .filter((s) => s.state === "WARNING" || s.state === "UNHEALTHY")
+    .slice(0, 5);
+
+  if (total === 0) return null;
+
+  return (
+    <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+      <header className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <div className="text-sm font-semibold">Эрүүл мэндийн шалгалт</div>
+          <div className="text-xs text-slate-500">Сүүлд: {statuses[0]?.evaluatedAt ? new Date(statuses[0].evaluatedAt).toLocaleTimeString("mn-MN") : "—"}</div>
+        </div>
+        <a href="/app/health-rules" className="text-xs text-brand-700 hover:underline">Дүрэм тохируулах →</a>
+      </header>
+      <div className="mt-4 grid md:grid-cols-2 gap-5 items-center">
+        <div className="flex items-center justify-center">
+          <HealthDonut counts={counts} total={total} />
+        </div>
+        <div>
+          <div className="grid grid-cols-2 gap-2">
+            <Legend color="emerald" label="Эрүүл"        value={counts.HEALTHY} />
+            <Legend color="amber"   label="Анхааруулга"  value={counts.WARNING} />
+            <Legend color="rose"    label="Асуудалтай"   value={counts.UNHEALTHY} />
+            <Legend color="slate"   label="Тодорхойгүй"  value={counts.UNKNOWN} />
+          </div>
+          {issues.length > 0 && (
+            <div className="mt-4">
+              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold mb-1">Анхаарал шаардсан машинууд</div>
+              <ul className="text-xs space-y-1">
+                {issues.map((s) => (
+                  <li key={s.deviceId} className="flex items-center gap-2">
+                    <span className={s.state === "UNHEALTHY" ? "h-2 w-2 rounded-full bg-rose-500" : "h-2 w-2 rounded-full bg-amber-500"} />
+                    <span className="truncate">{s.device?.name ?? s.deviceId}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function HealthDonut({ counts, total }: { counts: Record<string, number>; total: number }) {
+  const r = 56;
+  const c = 2 * Math.PI * r;
+  let offset = 0;
+  const segs = [
+    { key: "HEALTHY",   color: "#10b981" },
+    { key: "WARNING",   color: "#f59e0b" },
+    { key: "UNHEALTHY", color: "#ef4444" },
+    { key: "UNKNOWN",   color: "#94a3b8" },
+  ];
+  return (
+    <svg viewBox="0 0 140 140" className="w-44 h-44">
+      <circle cx="70" cy="70" r={r} fill="none" stroke="#f1f5f9" strokeWidth="14" />
+      {segs.map((s) => {
+        const v = counts[s.key] ?? 0;
+        if (v === 0) return null;
+        const frac = v / total;
+        const dash = frac * c;
+        const el = (
+          <circle
+            key={s.key}
+            cx="70" cy="70" r={r}
+            fill="none"
+            stroke={s.color}
+            strokeWidth="14"
+            strokeDasharray={`${dash} ${c - dash}`}
+            strokeDashoffset={-offset}
+            transform="rotate(-90 70 70)"
+            strokeLinecap="butt"
+          />
+        );
+        offset += dash;
+        return el;
+      })}
+      <text x="70" y="68" textAnchor="middle" className="font-bold" style={{ fontSize: "20px" }} fill="#0f172a">{total}</text>
+      <text x="70" y="86" textAnchor="middle" style={{ fontSize: "10px", letterSpacing: "0.1em" }} fill="#64748b">МАШИН</text>
+    </svg>
+  );
+}
+

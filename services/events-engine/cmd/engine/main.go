@@ -55,6 +55,7 @@ func main() {
 	go runHealth(ctx, cfg, st)
 
 	eng := engine.New(cfg, st)
+	go eng.RunHealthLoop(ctx)
 	if err := eng.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		log.Error().Err(err).Msg("engine exited")
 	}

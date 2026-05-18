@@ -54,6 +54,7 @@ type Session struct {
 	readTimeout  time.Duration
 	writeTimeout time.Duration
 	imei         string
+	lastFrameLen int // total bytes of the most recent AVL frame (header + payload + crc)
 }
 
 func NewSession(conn net.Conn, rTO, wTO time.Duration) *Session {
@@ -64,6 +65,10 @@ func NewSession(conn net.Conn, rTO, wTO time.Duration) *Session {
 		writeTimeout: wTO,
 	}
 }
+
+// LastFrameLen returns the byte size of the most recently read AVL frame so
+// the store can credit it against the device's monthly GPRS counter.
+func (s *Session) LastFrameLen() int { return s.lastFrameLen }
 
 // Handshake performs the Teltonika IMEI handshake and returns the IMEI.
 func (s *Session) Handshake() (string, error) {
@@ -128,6 +133,10 @@ func (s *Session) ReadAVL() ([]Record, error) {
 	// We accept the CRC the device sent; verifying CRC-16/IBM here is cheap
 	// but optional. Add when load-testing on real hardware.
 	_ = trailer
+
+	// Header(8) + payload(dataLen) + trailer(4) — total bytes-on-wire for this
+	// AVL packet. Recorded so the store can charge the GPRS counter.
+	s.lastFrameLen = 8 + int(dataLen) + 4
 
 	codec := payload[0]
 	num := payload[1]

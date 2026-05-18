@@ -18,6 +18,8 @@ import { Users } from './pages/Users';
 import { Companies } from './pages/Companies';
 import { Groups } from './pages/Groups';
 import { Profile } from './pages/Profile';
+import { NotificationRules } from './pages/NotificationRules';
+import { DeviceHealthRules } from './pages/DeviceHealthRules';
 import { AppShell } from './components/AppShell';
 import { Protected } from './components/Protected';
 
@@ -44,6 +46,8 @@ export function App() {
         <Route path="/app/landing-settings" element={<LandingSettings />} />
         <Route path="/app/history/:deviceId?" element={<History />} />
         <Route path="/app/events" element={<Events />} />
+        <Route path="/app/notification-rules" element={<NotificationRules />} />
+        <Route path="/app/health-rules" element={<DeviceHealthRules />} />
         <Route path="/app/geofences" element={<Geofences />} />
         <Route path="/app/reports" element={<Reports />} />
         <Route path="/app/users" element={<Users />} />
