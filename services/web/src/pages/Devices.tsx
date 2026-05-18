@@ -217,7 +217,7 @@ export function Devices() {
                 <th className="text-left px-4 py-3 font-semibold">Алба</th>
                 <th className="text-left px-4 py-3 font-semibold">Статус</th>
                 <th className="text-right px-4 py-3 font-semibold">Сүүлд</th>
-                <th className="w-12"></th>
+                <th className="w-28"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -991,32 +991,49 @@ function VIcon({ name }: { name: string }) {
   );
 }
 
-// ── Device row "..." menu ─────────────────────────────────────────
+// ── Device row actions (inline icon buttons) ─────────────────────
+// Previously a "..." dropdown. The dropdown popped UP on the last row of
+// the table and got clipped under the page bottom, so the user could
+// never reach Edit / GPS-check / Delete on the most recent device.
+// Inline icon buttons are always visible and one click each.
 function DeviceRowActions({
-  device, onEdit, onCheck, onDelete,
+  onEdit, onCheck, onDelete,
 }: { device: any; onEdit: () => void; onCheck: () => void; onDelete: () => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [open]);
   return (
-    <div ref={ref} className="relative flex justify-end">
-      <button onClick={() => setOpen((v) => !v)} className="rounded-md p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100" aria-label="Үйлдэл">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" /></svg>
+    <div className="flex justify-end items-center gap-0.5">
+      <button
+        onClick={onEdit}
+        title="Засах"
+        aria-label="Засах"
+        className="rounded-md p-1.5 text-slate-500 hover:text-brand-700 hover:bg-brand-50 transition"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+        </svg>
       </button>
-      {open && (
-        <div className="absolute right-0 top-8 z-30 w-56 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
-          <button onClick={() => { setOpen(false); onEdit(); }} className="block w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">✎ Засах</button>
-          <button onClick={() => { setOpen(false); onCheck(); }} className="block w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">📡 GPS холболт шалгах</button>
-          <button onClick={() => { setOpen(false); onDelete(); }} className="block w-full text-left px-3 py-2 text-sm text-rose-700 hover:bg-rose-50">🗑 Устгах</button>
-        </div>
-      )}
+      <button
+        onClick={onCheck}
+        title="GPS холболт шалгах"
+        aria-label="GPS холболт шалгах"
+        className="rounded-md p-1.5 text-slate-500 hover:text-sky-700 hover:bg-sky-50 transition"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M5 12a7 7 0 0 1 14 0" />
+          <path d="M8 12a4 4 0 0 1 8 0" />
+          <circle cx="12" cy="12" r="1" />
+        </svg>
+      </button>
+      <button
+        onClick={onDelete}
+        title="Устгах"
+        aria-label="Устгах"
+        className="rounded-md p-1.5 text-slate-500 hover:text-rose-700 hover:bg-rose-50 transition"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" />
+        </svg>
+      </button>
     </div>
   );
 }
