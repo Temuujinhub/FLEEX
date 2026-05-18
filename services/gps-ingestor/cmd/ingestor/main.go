@@ -132,6 +132,11 @@ func (s *server) handle(parent context.Context, conn net.Conn) {
 	// without needing a write to Postgres on every heartbeat.
 	_ = s.store.MarkOnline(ctx, imei)
 
+	// Sibling goroutine that delivers operator-issued commands onto this
+	// session's TCP socket. Lifetime is bounded by `ctx` — when the device
+	// disconnects we cancel and the BLPOP returns.
+	go s.runCommandLoop(ctx, imei, session)
+
 	for {
 		if ctx.Err() != nil {
 			return
@@ -149,7 +154,7 @@ func (s *server) handle(parent context.Context, conn net.Conn) {
 		}
 		s.totalMsgs.Add(uint64(len(records)))
 
-		if err := s.store.Enqueue(ctx, imei, records); err != nil {
+		if err := s.store.Enqueue(ctx, imei, records, session.LastFrameLen()); err != nil {
 			logger.Error().Err(err).Msg("enqueue")
 			return
 		}
@@ -160,6 +165,38 @@ func (s *server) handle(parent context.Context, conn net.Conn) {
 		}
 
 		_ = s.store.MarkOnline(ctx, imei)
+	}
+}
+
+// runCommandLoop drains the device's Redis command queue and writes each
+// command onto the open TCP socket via Codec 12. We block up to 5 s in
+// BLPOP per iteration so a graceful disconnect (ctx cancel) returns
+// promptly. The goroutine is tied to a single session — when the device
+// reconnects, a fresh loop is spawned and the new session picks up any
+// commands that landed in the meantime.
+func (s *server) runCommandLoop(ctx context.Context, imei string, session *teltonika.Session) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		cmd, err := s.store.PopCommand(ctx, imei, 5*time.Second)
+		if err != nil {
+			if !errors.Is(err, context.Canceled) {
+				log.Debug().Err(err).Str("imei", imei).Msg("pop command")
+			}
+			return
+		}
+		if cmd == nil {
+			continue
+		}
+		text := store.CommandToText(cmd)
+		if err := session.SendCommand(text); err != nil {
+			log.Warn().Err(err).Str("imei", imei).Str("cmd", text).Msg("send command")
+			s.store.MarkCommandFailed(ctx, cmd.ID, err.Error())
+			return
+		}
+		s.store.MarkCommandSent(ctx, cmd.ID)
+		log.Info().Str("imei", imei).Str("cmd", text).Msg("command delivered")
 	}
 }
 
