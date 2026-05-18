@@ -29,6 +29,10 @@ interface DeviceRow {
   lastLng: number | null;
   lastSpeed: number | null;
   lastSeenAt: string | null;
+  groupId: string | null;
+  group?: { id: string; name: string } | null;
+  garageId?: string | null;
+  garage?: { id: string; name: string } | null;
 }
 
 interface LivePosition {
@@ -42,6 +46,9 @@ interface LivePosition {
 
 export function LiveMap() {
   const [selected, setSelected] = useState<string | null>(null);
+  const [groupFilter, setGroupFilter] = useState<string>('');
+  const [garageFilter, setGarageFilter] = useState<string>('');
+  const [search, setSearch] = useState('');
   // Real-time positions arriving over WebSocket override REST snapshots.
   const [livePos, setLivePos] = useState<Record<string, LivePosition>>({});
 
@@ -49,6 +56,14 @@ export function LiveMap() {
     queryKey: ['devices'],
     queryFn: () => api.get('/devices').then((r) => r.data),
     refetchInterval: 15_000,
+  });
+  const groups = useQuery<any[]>({
+    queryKey: ['groups'],
+    queryFn: () => api.get('/groups').then((r) => r.data),
+  });
+  const garages = useQuery<any[]>({
+    queryKey: ['garages'],
+    queryFn: () => api.get('/garages').then((r) => r.data),
   });
 
   // WebSocket live updates.
@@ -85,7 +100,23 @@ export function LiveMap() {
     });
   }, [devices.data, livePos]);
 
-  const withCoords = merged.filter((d) => d.lastLat != null && d.lastLng != null);
+  // Sidebar and map both filter by group / garage / free-text search.
+  // Keeping the filter at the merged level means the map markers + the
+  // sidebar list always stay in sync.
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return merged.filter((d) => {
+      if (groupFilter && d.groupId !== groupFilter) return false;
+      if (garageFilter && d.garageId !== garageFilter) return false;
+      if (q) {
+        const hay = `${d.name} ${d.imei} ${d.group?.name ?? ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [merged, groupFilter, garageFilter, search]);
+
+  const withCoords = filtered.filter((d) => d.lastLat != null && d.lastLng != null);
   // Default center: Oyu Tolgoi area in southern Mongolia.
   const center: [number, number] = withCoords.length
     ? [withCoords[0].lastLat!, withCoords[0].lastLng!]
@@ -153,13 +184,45 @@ export function LiveMap() {
         </MapContainer>
       </div>
 
-      <aside className="w-80 bg-white border-l border-slate-200 overflow-y-auto scrollbar-thin">
-        <div className="p-4 border-b border-slate-200 font-semibold flex items-center justify-between">
-          <span>Төхөөрөмжүүд</span>
-          <span className="text-xs text-slate-500">{merged.length}</span>
+      <aside className="w-80 bg-white border-l border-slate-200 overflow-y-auto scrollbar-thin flex flex-col">
+        <div className="p-4 border-b border-slate-200">
+          <div className="flex items-center justify-between mb-3">
+            <span className="font-semibold">Төхөөрөмжүүд</span>
+            <span className="text-xs text-slate-500">
+              {filtered.length}{filtered.length !== merged.length ? ` / ${merged.length}` : ''}
+            </span>
+          </div>
+          <div className="space-y-2">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Хайх (нэр / IMEI)…"
+              className="w-full rounded-md border border-slate-200 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+            <select
+              value={groupFilter}
+              onChange={(e) => setGroupFilter(e.target.value)}
+              className="w-full rounded-md border border-slate-200 px-2.5 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <option value="">Бүх алба нэгж</option>
+              {(groups.data ?? []).map((g) => (
+                <option key={g.id} value={g.id}>{g.name}</option>
+              ))}
+            </select>
+            <select
+              value={garageFilter}
+              onChange={(e) => setGarageFilter(e.target.value)}
+              className="w-full rounded-md border border-slate-200 px-2.5 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <option value="">Бүх гранж</option>
+              {(garages.data ?? []).map((g) => (
+                <option key={g.id} value={g.id}>{g.name}</option>
+              ))}
+            </select>
+          </div>
         </div>
-        <ul>
-          {merged.map((d) => (
+        <ul className="flex-1">
+          {filtered.map((d) => (
             <li
               key={d.id}
               onClick={() => setSelected(d.id)}
@@ -175,6 +238,9 @@ export function LiveMap() {
                 />
                 <span className="font-medium">{d.name}</span>
               </div>
+              {d.group?.name && (
+                <div className="text-[10px] uppercase tracking-widest text-slate-400 mt-0.5">{d.group.name}</div>
+              )}
               <div className="text-xs text-slate-500 mt-0.5">
                 {d.lastLat != null && d.lastLng != null
                   ? `${d.lastLat.toFixed(4)}, ${d.lastLng.toFixed(4)}`
@@ -182,8 +248,10 @@ export function LiveMap() {
               </div>
             </li>
           ))}
-          {merged.length === 0 && (
-            <li className="p-6 text-sm text-slate-400 text-center">Төхөөрөмж бүртгэгдээгүй</li>
+          {filtered.length === 0 && (
+            <li className="p-6 text-sm text-slate-400 text-center">
+              {merged.length === 0 ? 'Төхөөрөмж бүртгэгдээгүй' : 'Шүүлтэнд тохирох машин олдсонгүй'}
+            </li>
           )}
         </ul>
       </aside>

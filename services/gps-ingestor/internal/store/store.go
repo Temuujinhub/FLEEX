@@ -61,6 +61,9 @@ type Row struct {
 	EngineHrs   *float64
 	BatteryVolt *float64
 	RFID        string
+	// VIN is harvested from Codec 8E variable IO 256 (VIN auto-detect
+	// over OBD). Empty for devices without an OBD adapter.
+	VIN         string
 	Valid       bool
 	Attributes  []byte
 }
@@ -277,6 +280,17 @@ func (s *Store) Run(ctx context.Context) {
 					ByteSize:   batch.frameLen / max(len(batch.records), 1),
 				})
 
+				// VIN auto-detect: Teltonika OBD adapter delivers the
+				// VIN as a printable-ASCII variable IO (id 256). We pass
+				// it through the row so flushSnapshots can opportunistically
+				// persist it to devices.vin when the field is null.
+				vin := ""
+				if rec.IOStrings != nil {
+					if v, ok := rec.IOStrings[256]; ok {
+						vin = v
+					}
+				}
+
 				rows = append(rows, Row{
 					Time: rec.Timestamp, DeviceID: dev.ID, CompanyID: dev.CompanyID,
 					Latitude: rec.Lat, Longitude: rec.Lng,
@@ -286,6 +300,7 @@ func (s *Store) Run(ctx context.Context) {
 					Satellites: int16(rec.Satellites),
 					Ignition:   ig, OdometerKm: odo, EngineHrs: hrs, BatteryVolt: bat,
 					RFID:       rfid,
+					VIN:        vin,
 					Valid:      rec.Satellites >= 3,
 					Attributes: attrs,
 				})
@@ -388,6 +403,7 @@ func (s *Store) flushSnapshots(ctx context.Context, rows []Row) {
 		speed, course, alt                float32
 		ig                                *bool
 		odo, hrs, bat                     *float64
+		vin                               string
 	}
 	latest := make(map[string]snap, len(rows))
 	for _, r := range rows {
@@ -397,7 +413,14 @@ func (s *Store) flushSnapshots(ctx context.Context, rows []Row) {
 				t: r.Time, lat: r.Latitude, lng: r.Longitude,
 				speed: r.Speed, course: r.Course, alt: r.Altitude,
 				ig: r.Ignition, odo: r.OdometerKm, hrs: r.EngineHrs, bat: r.BatteryVolt,
+				vin: r.VIN,
 			}
+		} else if s.vin == "" && r.VIN != "" {
+			// VIN may arrive on a non-latest record in the batch — keep it
+			// so we can populate devices.vin even if the latest position
+			// itself didn't include it.
+			s.vin = r.VIN
+			latest[r.DeviceID] = s
 		}
 	}
 	batch := &pgx.Batch{}
@@ -408,6 +431,11 @@ func (s *Store) flushSnapshots(ctx context.Context, rows []Row) {
 			// Unquoted snake_case identifiers fold to all-lowercase and
 			// never resolve — that bug shipped to prod and stopped every
 			// snapshot UPDATE from going through.
+			//
+			// `vin` only gets stamped when it's still null on the device
+			// row, so a manually entered VIN is never overwritten by the
+			// OBD auto-detect. NULLIF($12, '') keeps the UPDATE a no-op
+			// for snapshots that didn't carry a VIN payload.
 			`UPDATE devices SET
 				"lastSeenAt"   = $2,
 				"lastLat"      = $3, "lastLng" = $4,
@@ -416,10 +444,11 @@ func (s *Store) flushSnapshots(ctx context.Context, rows []Row) {
 				"odometerKm"   = COALESCE($9, "odometerKm"),
 				"engineHours"  = COALESCE($10, "engineHours"),
 				"batteryVolt"  = COALESCE($11, "batteryVolt"),
+				vin            = COALESCE(vin, NULLIF($12, '')),
 				"updatedAt"    = NOW()
 			WHERE id = $1::uuid`,
 			id, sn.t, sn.lat, sn.lng, sn.speed, sn.course, sn.alt,
-			sn.ig, sn.odo, sn.hrs, sn.bat,
+			sn.ig, sn.odo, sn.hrs, sn.bat, sn.vin,
 		)
 	}
 	br := s.pg.SendBatch(ctx, batch)
@@ -543,12 +572,21 @@ func isPlausible(r teltonika.Record) bool {
 }
 
 func buildAttributes(r teltonika.Record) []byte {
-	if len(r.IO) == 0 {
+	if len(r.IO) == 0 && len(r.IOStrings) == 0 {
 		return nil
 	}
-	m := make(map[string]int64, len(r.IO)+1)
+	// JSON-encode with a mixed map (numbers + strings). Using `any`
+	// is the simplest way to keep both kinds of values in one object
+	// without needing a tagged-union type.
+	m := make(map[string]any, len(r.IO)+len(r.IOStrings)+2)
 	for k, v := range r.IO {
 		m[fmt.Sprintf("io_%d", k)] = v
+	}
+	for k, v := range r.IOStrings {
+		// Variable IOs that are printable ASCII (VIN, firmware, ...)
+		// are stored with a `_str` suffix so the UI can distinguish them
+		// from the truncated int64 version under the same id.
+		m[fmt.Sprintf("io_%d_str", k)] = v
 	}
 	m["priority"] = int64(r.Priority)
 	m["eventIo"] = int64(r.EventIO)

@@ -44,7 +44,13 @@ type Record struct {
 	Satellites uint8
 	Speed      uint16
 	EventIO    uint16
-	IO         map[uint16]int64 // ioId -> value (sign-extended where applicable)
+	IO         map[uint16]int64  // ioId -> value (sign-extended where applicable)
+	// IOStrings keeps the ASCII payload of Codec 8E variable-length IOs
+	// when the bytes look like printable text (VIN, firmware string,
+	// driver-card UID, ...). Numeric io map still gets a truncated
+	// int64 in `IO` for backwards compatibility; consumers that want
+	// the textual form should prefer `IOStrings`.
+	IOStrings  map[uint16]string
 }
 
 // Session manages one device connection.
@@ -344,10 +350,15 @@ func (p *parser) readRecord(codec uint8) (Record, error) {
 				rec.IO[id] = val
 			}
 		}
-		// Variable-length section (codec 8E only).
+		// Variable-length section (codec 8E only). Holds VIN, firmware
+		// version, RFID UIDs and similar strings — anything that doesn't
+		// fit into the fixed 1/2/4/8-byte buckets.
 		nvar, err := p.readUint16()
 		if err != nil {
 			return rec, err
+		}
+		if nvar > 0 && rec.IOStrings == nil {
+			rec.IOStrings = make(map[uint16]string, nvar)
 		}
 		for i := 0; i < int(nvar); i++ {
 			id, err := p.readUint16()
@@ -362,8 +373,10 @@ func (p *parser) readRecord(codec uint8) (Record, error) {
 			if err != nil {
 				return rec, err
 			}
-			// Keep first 8 bytes only — variable IOs are seldom needed for
-			// the dashboard and we don't want to bloat the JSON column.
+			// Keep first 8 bytes as int64 for callers that already index
+			// by `rec.IO[id]`. The full payload also lands in IOStrings
+			// when it's printable ASCII, so the API can use the textual
+			// form for VIN auto-population and similar.
 			n := len(payload)
 			if n > 8 {
 				n = 8
@@ -373,9 +386,28 @@ func (p *parser) readRecord(codec uint8) (Record, error) {
 				v = (v << 8) | int64(b)
 			}
 			rec.IO[id] = v
+
+			if isPrintableASCII(payload) && len(payload) > 0 {
+				rec.IOStrings[id] = string(payload)
+			}
 		}
 	}
 	return rec, nil
+}
+
+// isPrintableASCII returns true when every byte is printable 7-bit ASCII
+// (including space). Used to pick out VIN-like fields in the variable
+// IO section without misinterpreting binary RFID UIDs as text.
+func isPrintableASCII(b []byte) bool {
+	if len(b) == 0 {
+		return false
+	}
+	for _, c := range b {
+		if c < 0x20 || c > 0x7E {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *parser) readSignedN(size int) (int64, error) {
