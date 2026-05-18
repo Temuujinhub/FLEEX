@@ -428,8 +428,20 @@ function AddVehicleModal({
   onClose: () => void;
 }) {
   const isEdit = !!device;
-  type Tab = 'basic' | 'gps' | 'specs' | 'fuel' | 'insurance' | 'sensors' | 'commands' | 'messages' | 'trips' | 'health' | 'counters' | 'custom';
+  // Top-level tabs. The runtime / GPS-device-related views (sensors, commands,
+  // messages, counters, health) live as sub-tabs under "gps" so the modal
+  // header stays compact even for a saved device.
+  type Tab = 'basic' | 'gps' | 'specs' | 'fuel' | 'trips' | 'insurance' | 'custom';
+  type GpsSub = 'config' | 'sensors' | 'commands' | 'messages' | 'counters' | 'health';
   const [tab, setTab] = useState<Tab>('basic');
+  const [gpsSub, setGpsSub] = useState<GpsSub>('config');
+  // The runtime / view-only tabs persist their own state — they don't
+  // round-trip through this modal's Save button. We hide the Save CTA
+  // (and rename Cancel → Close) whenever one of them is active.
+  const isRuntime =
+    tab === 'trips' ||
+    tab === 'custom' ||
+    (tab === 'gps' && gpsSub !== 'config');
   const [form, setForm] = useState<FormState>(() => device ? deviceToForm(device) : EMPTY_FORM);
   const [error, setError] = useState<string | null>(null);
   const qc = useQueryClient();
@@ -513,15 +525,8 @@ function AddVehicleModal({
           { id: 'gps',       label: 'GPS',        always: true },
           { id: 'specs',     label: 'Үзүүлэлт',   always: true },
           { id: 'fuel',      label: 'Түлш',       always: true },
-          { id: 'insurance', label: 'Даатгал',    always: true },
-          // The runtime / config tabs only make sense for an existing
-          // device — they all key off a saved Device id.
-          { id: 'sensors',   label: 'Мэдрэгч',    always: false },
-          { id: 'commands',  label: 'Команд',     always: false },
-          { id: 'messages',  label: 'Мессеж',     always: false },
           { id: 'trips',     label: 'Замууд',     always: false },
-          { id: 'health',    label: 'Эрүүл',      always: false },
-          { id: 'counters',  label: 'Тоолуур',    always: false },
+          { id: 'insurance', label: 'Даатгал',    always: true },
           { id: 'custom',    label: 'Нэмэлт',     always: false },
         ] as { id: Tab; label: string; always: boolean }[])
           .filter((t) => t.always || isEdit)
@@ -645,26 +650,66 @@ function AddVehicleModal({
         )}
 
         {tab === 'gps' && (
-          <div className="grid md:grid-cols-2 gap-x-5 gap-y-4">
-            <Field label="IMEI *" hint="14-16 оронтой тоо. GPS төхөөрөмжийн дотоод ID. Үүсгэсний дараа өөрчилж болохгүй." tooltip="IMEI нь GPS-н зөөврийн дугаар. Teltonika FMC650-н хувьд төхөөрөмжийн ард наалт дээр бичсэн байдаг (15 оронтой). Хэрэв олдохгүй бол төхөөрөмжид холбогдох тусгай команд (IMEI?) илгээж унших боломжтой.">
-              <input
-                value={form.imei}
-                onChange={(e) => set('imei', e.target.value.replace(/\D/g, ''))}
-                placeholder="352093081234567"
-                disabled={isEdit}
-                className={clsx(input, isEdit && 'bg-slate-100 text-slate-500')}
-              />
-            </Field>
-            <Field label="Модель" hint="GPS төхөөрөмжийн загвар. Жнь: FMC650, FMB920, GH5200." tooltip="Энэ нь GPS box-ын брэнд+загвар. Машины брэнд биш. Дэмжигдсэн загварууд: Teltonika (FMx цуврал), Queclink, Concox, Ruptela.">
-              <input value={form.model} onChange={(e) => set('model', e.target.value)} placeholder="FMC650 / Teltonika..." className={input} />
-            </Field>
-            <Field label="SIM-ийн дугаар" hint="GPS төхөөрөмжид суусан SIM-ийн утасны дугаар." tooltip="SMS-р тохиргоо илгээх (жнь: APN, серверийн хаяг) болон асуудал гарвал утсаар хянахад ашиглагдана." className="md:col-span-2">
-              <input value={form.simNumber} onChange={(e) => set('simNumber', e.target.value)} placeholder="+97699112233" className={input} />
-            </Field>
-            <div className="md:col-span-2 rounded-lg bg-sky-50 border border-sky-200 text-xs text-sky-900 px-3 py-2">
-              ℹ GPS төхөөрөмжийн сервер/порт/APN тохиргооны дэлгэрэнгүйг хуудасны дээд талын
-              <b> "📡 GPS холболтын заавар" </b> товчоор үзнэ үү.
+          <div className="space-y-4">
+            {/* Sub-tab nav. The runtime views (sensors / commands / messages /
+                counters / health) only render once the device has been
+                saved — they all depend on a real Device id. */}
+            <div className="flex flex-wrap gap-1 bg-slate-100 rounded-lg p-1">
+              {([
+                { id: 'config',   label: 'Тохиргоо', always: true },
+                { id: 'sensors',  label: 'Мэдрэгч',  always: false },
+                { id: 'commands', label: 'Команд',   always: false },
+                { id: 'messages', label: 'Мессеж',   always: false },
+                { id: 'counters', label: 'Тоолуур',  always: false },
+                { id: 'health',   label: 'Эрүүл',    always: false },
+              ] as { id: GpsSub; label: string; always: boolean }[])
+                .filter((s) => s.always || isEdit)
+                .map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setGpsSub(s.id)}
+                    className={clsx(
+                      'px-3 py-1.5 text-xs font-semibold rounded-md transition whitespace-nowrap',
+                      gpsSub === s.id
+                        ? 'bg-white text-brand-700 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900',
+                    )}
+                  >
+                    {s.label}
+                  </button>
+                ))}
             </div>
+
+            {gpsSub === 'config' && (
+              <div className="grid md:grid-cols-2 gap-x-5 gap-y-4">
+                <Field label="IMEI *" hint="14-16 оронтой тоо. GPS төхөөрөмжийн дотоод ID. Үүсгэсний дараа өөрчилж болохгүй." tooltip="IMEI нь GPS-н зөөврийн дугаар. Teltonika FMC650-н хувьд төхөөрөмжийн ард наалт дээр бичсэн байдаг (15 оронтой). Хэрэв олдохгүй бол төхөөрөмжид холбогдох тусгай команд (IMEI?) илгээж унших боломжтой.">
+                  <input
+                    value={form.imei}
+                    onChange={(e) => set('imei', e.target.value.replace(/\D/g, ''))}
+                    placeholder="352093081234567"
+                    disabled={isEdit}
+                    className={clsx(input, isEdit && 'bg-slate-100 text-slate-500')}
+                  />
+                </Field>
+                <Field label="Модель" hint="GPS төхөөрөмжийн загвар. Жнь: FMC650, FMB920, GH5200." tooltip="Энэ нь GPS box-ын брэнд+загвар. Машины брэнд биш. Дэмжигдсэн загварууд: Teltonika (FMx цуврал), Queclink, Concox, Ruptela.">
+                  <input value={form.model} onChange={(e) => set('model', e.target.value)} placeholder="FMC650 / Teltonika..." className={input} />
+                </Field>
+                <Field label="SIM-ийн дугаар" hint="GPS төхөөрөмжид суусан SIM-ийн утасны дугаар." tooltip="SMS-р тохиргоо илгээх (жнь: APN, серверийн хаяг) болон асуудал гарвал утсаар хянахад ашиглагдана." className="md:col-span-2">
+                  <input value={form.simNumber} onChange={(e) => set('simNumber', e.target.value)} placeholder="+97699112233" className={input} />
+                </Field>
+                <div className="md:col-span-2 rounded-lg bg-sky-50 border border-sky-200 text-xs text-sky-900 px-3 py-2">
+                  ℹ GPS төхөөрөмжийн сервер/порт/APN тохиргооны дэлгэрэнгүйг хуудасны дээд талын
+                  <b> "📡 GPS холболтын заавар" </b> товчоор үзнэ үү.
+                </div>
+              </div>
+            )}
+
+            {isEdit && gpsSub === 'sensors'  && <SensorsTab deviceId={device.id} />}
+            {isEdit && gpsSub === 'commands' && <CommandsTab deviceId={device.id} deviceOnline={device.online} />}
+            {isEdit && gpsSub === 'messages' && <MessagesTab deviceId={device.id} />}
+            {isEdit && gpsSub === 'counters' && <CountersTab deviceId={device.id} />}
+            {isEdit && gpsSub === 'health'   && <HealthTab deviceId={device.id} />}
           </div>
         )}
 
@@ -732,14 +777,9 @@ function AddVehicleModal({
           </div>
         )}
 
-        {/* Runtime / config tabs — only mounted for an existing device. */}
-        {isEdit && tab === 'sensors'  && <SensorsTab deviceId={device.id} />}
-        {isEdit && tab === 'commands' && <CommandsTab deviceId={device.id} deviceOnline={device.online} />}
-        {isEdit && tab === 'messages' && <MessagesTab deviceId={device.id} />}
-        {isEdit && tab === 'trips'    && <TripsTab deviceId={device.id} />}
-        {isEdit && tab === 'health'   && <HealthTab deviceId={device.id} />}
-        {isEdit && tab === 'counters' && <CountersTab deviceId={device.id} />}
-        {isEdit && tab === 'custom'   && <CustomFieldsTab deviceId={device.id} />}
+        {/* Standalone runtime tabs — only mounted for an existing device. */}
+        {isEdit && tab === 'trips'  && <TripsTab deviceId={device.id} />}
+        {isEdit && tab === 'custom' && <CustomFieldsTab deviceId={device.id} />}
       </div>
 
       {error && (
@@ -749,9 +789,9 @@ function AddVehicleModal({
       )}
       <div className="border-t border-slate-200 px-6 py-3 flex justify-end gap-2 bg-slate-50">
         <button onClick={onClose} className="rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-sm font-medium px-4 py-2">
-          {isRuntimeTab(tab) ? 'Хаах' : 'Цуцлах'}
+          {isRuntime ? 'Хаах' : 'Цуцлах'}
         </button>
-        {!isRuntimeTab(tab) && (
+        {!isRuntime && (
           <button
             onClick={submit}
             disabled={mutation.isPending}
@@ -763,13 +803,6 @@ function AddVehicleModal({
       </div>
     </ModalShell>
   );
-}
-
-// Runtime / config tabs persist their own changes inline — the modal's
-// Save button does not apply to them, so we hide it when one of these is
-// active.
-function isRuntimeTab(t: string): boolean {
-  return ['sensors', 'commands', 'messages', 'trips', 'health', 'counters', 'custom'].includes(t);
 }
 
 // ── Add Garage Modal ──────────────────────────────────────────
