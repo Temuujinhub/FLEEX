@@ -3,6 +3,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { api } from '../lib/api';
 import { ExcelImport } from '../components/ExcelImport';
+import { SensorsTab } from './devices/SensorsTab';
+import { CommandsTab } from './devices/CommandsTab';
+import { MessagesTab } from './devices/MessagesTab';
+import { HealthTab } from './devices/HealthTab';
+import { CountersTab } from './devices/CountersTab';
+import { CustomFieldsTab } from './devices/CustomFieldsTab';
+import { TripsTab } from './devices/TripsTab';
 
 // "Машин · Төхөөрөмж" хуудас. Top filter bar (Гранж / Алба нэгж / төрөл /
 // статус / search) + жагсаалт + "+ Шинэ машин" товчоор Gaikham шиг 5
@@ -421,7 +428,8 @@ function AddVehicleModal({
   onClose: () => void;
 }) {
   const isEdit = !!device;
-  const [tab, setTab] = useState<'basic' | 'gps' | 'specs' | 'fuel' | 'insurance'>('basic');
+  type Tab = 'basic' | 'gps' | 'specs' | 'fuel' | 'insurance' | 'sensors' | 'commands' | 'messages' | 'trips' | 'health' | 'counters' | 'custom';
+  const [tab, setTab] = useState<Tab>('basic');
   const [form, setForm] = useState<FormState>(() => device ? deviceToForm(device) : EMPTY_FORM);
   const [error, setError] = useState<string | null>(null);
   const qc = useQueryClient();
@@ -500,13 +508,24 @@ function AddVehicleModal({
   return (
     <ModalShell title={isEdit ? `Машин засах · ${device.name}` : 'Шинэ машин'} onClose={onClose}>
       <div className="flex border-b border-slate-200 bg-slate-50">
-        {[
-          { id: 'basic',     label: 'Үндсэн' },
-          { id: 'gps',       label: 'GPS' },
-          { id: 'specs',     label: 'Үзүүлэлт' },
-          { id: 'fuel',      label: 'Түлш' },
-          { id: 'insurance', label: 'Даатгал' },
-        ].map((t) => (
+        {([
+          { id: 'basic',     label: 'Үндсэн',     always: true },
+          { id: 'gps',       label: 'GPS',        always: true },
+          { id: 'specs',     label: 'Үзүүлэлт',   always: true },
+          { id: 'fuel',      label: 'Түлш',       always: true },
+          { id: 'insurance', label: 'Даатгал',    always: true },
+          // The runtime / config tabs only make sense for an existing
+          // device — they all key off a saved Device id.
+          { id: 'sensors',   label: 'Мэдрэгч',    always: false },
+          { id: 'commands',  label: 'Команд',     always: false },
+          { id: 'messages',  label: 'Мессеж',     always: false },
+          { id: 'trips',     label: 'Замууд',     always: false },
+          { id: 'health',    label: 'Эрүүл',      always: false },
+          { id: 'counters',  label: 'Тоолуур',    always: false },
+          { id: 'custom',    label: 'Нэмэлт',     always: false },
+        ] as { id: Tab; label: string; always: boolean }[])
+          .filter((t) => t.always || isEdit)
+          .map((t) => (
           <button
             key={t.id}
             type="button"
@@ -712,6 +731,15 @@ function AddVehicleModal({
             </Field>
           </div>
         )}
+
+        {/* Runtime / config tabs — only mounted for an existing device. */}
+        {isEdit && tab === 'sensors'  && <SensorsTab deviceId={device.id} />}
+        {isEdit && tab === 'commands' && <CommandsTab deviceId={device.id} deviceOnline={device.online} />}
+        {isEdit && tab === 'messages' && <MessagesTab deviceId={device.id} />}
+        {isEdit && tab === 'trips'    && <TripsTab deviceId={device.id} />}
+        {isEdit && tab === 'health'   && <HealthTab deviceId={device.id} />}
+        {isEdit && tab === 'counters' && <CountersTab deviceId={device.id} />}
+        {isEdit && tab === 'custom'   && <CustomFieldsTab deviceId={device.id} />}
       </div>
 
       {error && (
@@ -721,18 +749,27 @@ function AddVehicleModal({
       )}
       <div className="border-t border-slate-200 px-6 py-3 flex justify-end gap-2 bg-slate-50">
         <button onClick={onClose} className="rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-sm font-medium px-4 py-2">
-          Цуцлах
+          {isRuntimeTab(tab) ? 'Хаах' : 'Цуцлах'}
         </button>
-        <button
-          onClick={submit}
-          disabled={mutation.isPending}
-          className="rounded-md bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold px-5 py-2 disabled:opacity-60"
-        >
-          {mutation.isPending ? 'Хадгалж байна…' : 'Хадгалах'}
-        </button>
+        {!isRuntimeTab(tab) && (
+          <button
+            onClick={submit}
+            disabled={mutation.isPending}
+            className="rounded-md bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold px-5 py-2 disabled:opacity-60"
+          >
+            {mutation.isPending ? 'Хадгалж байна…' : 'Хадгалах'}
+          </button>
+        )}
       </div>
     </ModalShell>
   );
+}
+
+// Runtime / config tabs persist their own changes inline — the modal's
+// Save button does not apply to them, so we hide it when one of these is
+// active.
+function isRuntimeTab(t: string): boolean {
+  return ['sensors', 'commands', 'messages', 'trips', 'health', 'counters', 'custom'].includes(t);
 }
 
 // ── Add Garage Modal ──────────────────────────────────────────
