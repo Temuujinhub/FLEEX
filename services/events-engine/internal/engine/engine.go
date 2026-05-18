@@ -247,6 +247,14 @@ func (e *Engine) process(ctx context.Context, p *LivePayload) error {
 	// ── Ignition transition → trip start / end ───────────────
 	e.handleIgnition(ctx, p, occurred)
 
+	// Fallback trip detection — when the device doesn't report ignition
+	// at all (the operator hasn't enabled io_239 in the Teltonika
+	// permanent IO list, or the hardware doesn't expose it), keep trip
+	// records alive from movement alone.
+	if p.Ignition == nil {
+		e.handleMovementTrip(ctx, p, occurred)
+	}
+
 	return nil
 }
 
@@ -321,6 +329,43 @@ func (e *Engine) emitOnce(ctx context.Context, p *LivePayload, occurred time.Tim
 		OccurredAt: occurred,
 	}); err != nil {
 		log.Warn().Err(err).Str("type", typ).Msg("persist io event")
+	}
+}
+
+// handleMovementTrip is the fallback path when ignition isn't reported.
+// It opens a trip when the vehicle moves above 5 km/h and closes it
+// after ~6 minutes of idleness (speed < 2 km/h). State is in Redis with
+// a self-expiring "moving" key; a position with speed > 5 refreshes the
+// TTL, and the absence of the key after a slow position is the signal
+// to end the trip.
+const movementSpeedKmh = 5.0
+const idleSpeedKmh = 2.0
+const movingKeyTTL = 6 * time.Minute
+
+func (e *Engine) handleMovementTrip(ctx context.Context, p *LivePayload, occurred time.Time) {
+	if p.Speed >= movementSpeedKmh {
+		// Vehicle is moving — refresh the TTL and make sure a trip is open.
+		if err := e.store.MarkMoving(ctx, p.DeviceID, movingKeyTTL); err != nil {
+			log.Debug().Err(err).Msg("mark moving")
+		}
+		if err := e.store.StartTrip(ctx, p.CompanyID, p.DeviceID, occurred, p.Lat, p.Lng); err != nil {
+			log.Debug().Err(err).Msg("movement-based start trip")
+		}
+		return
+	}
+	if p.Speed <= idleSpeedKmh {
+		// Idle. The TTL on the moving key (6 min) lapsing is our signal
+		// that this idleness is long enough to count as trip end.
+		moving, err := e.store.IsMoving(ctx, p.DeviceID)
+		if err != nil {
+			log.Debug().Err(err).Msg("is moving")
+			return
+		}
+		if !moving {
+			if err := e.store.EndTrip(ctx, p.DeviceID, occurred, p.Lat, p.Lng); err != nil {
+				log.Debug().Err(err).Msg("movement-based end trip")
+			}
+		}
 	}
 }
 

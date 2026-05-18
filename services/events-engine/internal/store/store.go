@@ -415,6 +415,22 @@ func (s *Store) SaveIgnition(ctx context.Context, deviceID string, on bool) erro
 	return s.rdb.Set(ctx, key, v, 24*time.Hour).Err()
 }
 
+// MarkMoving refreshes the "device is moving" key in Redis. Used by the
+// movement-based fallback trip detector when ignition isn't available.
+// The key auto-expires after `ttl`; if it lapses, the device is
+// considered idle and any open trip is closed.
+func (s *Store) MarkMoving(ctx context.Context, deviceID string, ttl time.Duration) error {
+	return s.rdb.Set(ctx, "fleex.moving:"+deviceID, "1", ttl).Err()
+}
+
+func (s *Store) IsMoving(ctx context.Context, deviceID string) (bool, error) {
+	n, err := s.rdb.Exists(ctx, "fleex.moving:"+deviceID).Result()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 // StartTrip writes a new in-progress Trip row. The trip-detector calls
 // this when ignition flips off → on. `companyId` and the start location
 // come from the position that triggered the transition. We do not
