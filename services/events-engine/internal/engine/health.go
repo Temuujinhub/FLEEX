@@ -58,7 +58,7 @@ func (e *Engine) evaluateHealth(ctx context.Context) error {
 	pg := e.store.PG()
 	// Pull all active rules grouped by company.
 	rows, err := pg.Query(ctx, `
-		SELECT id::text, "companyId"::text, name, check, threshold, severity
+		SELECT id::text, "companyId"::text, name, "check", threshold, severity
 		FROM device_health_rules
 		WHERE active = true
 	`)
@@ -82,7 +82,7 @@ func (e *Engine) evaluateHealth(ctx context.Context) error {
 	// Pull every device snapshot we might need. The set is small (one row
 	// per device) so a single query is fine.
 	dRows, err := pg.Query(ctx, `
-		SELECT id::text, "companyId"::text, last_seen_at, battery_volt, ignition_on
+		SELECT id::text, "companyId"::text, "lastSeenAt", "batteryVolt", "ignitionOn"
 		FROM devices
 	`)
 	if err != nil {

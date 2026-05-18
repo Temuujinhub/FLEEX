@@ -1,11 +1,14 @@
-// "Counters" tab — exposes the per-device GPRS byte counter and a small
+// "Counters" tab — exposes the per-device GPRS byte counter, a small
 // summary of the live odometer / engine hours snapshot from the device
-// row itself. Manual reset is per-month.
+// row, and a "Latest OBD readings" panel that decodes the most recent
+// raw packet's IO map into named signals (RPM, coolant temp, fuel %,
+// VIN, DTC count, etc.). Manual GPRS reset is per-month.
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import { EmptyState, formatBytes } from './shared';
+import { EmptyState, formatBytes, formatRelative } from './shared';
+import { decodeObd } from './obdSignals';
 
 export function CountersTab({ deviceId }: { deviceId: string }) {
   const qc = useQueryClient();
@@ -25,6 +28,16 @@ export function CountersTab({ deviceId }: { deviceId: string }) {
   });
   const [confirmReset, setConfirmReset] = useState(false);
 
+  // Latest raw packet → decoded OBD/CAN signals. Devices without an
+  // OBD adapter will simply have an empty decoded list, no error.
+  const messages = useQuery({
+    queryKey: ['messages', deviceId, 'latest-for-obd'],
+    queryFn: () => api.get(`/devices/${deviceId}/messages?limit=1`).then((r) => r.data),
+    refetchInterval: 30_000,
+  });
+  const latest = messages.data?.items?.[0];
+  const obd = decodeObd(latest?.payload);
+
   const rows: any[] = gprs.data ?? [];
   const d = device.data;
 
@@ -41,6 +54,39 @@ export function CountersTab({ deviceId }: { deviceId: string }) {
         <Stat label="Гүйлт (одометр)" value={d?.odometerKm != null ? `${d.odometerKm.toFixed(0)} km` : '—'} hint="GPS-аас уншигдсан утга" />
         <Stat label="Хөдөлгүүрийн цаг" value={d?.engineHours != null ? `${d.engineHours.toFixed(1)} h` : '—'} hint="GPS-аас уншигдсан утга" />
         <Stat label="Хүчдэл (батарей)" value={d?.batteryVolt != null ? `${d.batteryVolt.toFixed(1)} V` : '—'} hint="Гадаад тэжээлийн хүчдэл" />
+      </div>
+
+      {/* OBD / CAN signals — decoded from the latest raw packet. Vehicles
+          without an OBD adapter simply produce an empty list. */}
+      <div>
+        <div className="flex items-end justify-between mb-2">
+          <div>
+            <div className="text-xs font-semibold text-slate-500 uppercase tracking-widest">OBD / CAN утгууд</div>
+            <div className="text-[11px] text-slate-400">
+              {latest ? `Сүүлийн пакетаас · ${formatRelative(latest.receivedAt)}` : 'Сүүлийн пакет байхгүй'}
+            </div>
+          </div>
+        </div>
+        {obd.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-slate-300 px-4 py-6 text-center">
+            <div className="text-sm text-slate-600">OBD / CAN утга илрээгүй</div>
+            <div className="text-xs text-slate-400 mt-1">
+              Энэ машинд OBD адаптер холбогдоогүй эсвэл тус параметрүүдийг дэмждэггүй байж болно. Алдаа биш.
+            </div>
+          </div>
+        ) : (
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-2">
+            {obd.map(({ sig, value }) => (
+              <div key={sig.io} className="bg-slate-50 border border-slate-200 rounded-md px-3 py-2 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold truncate">{sig.label}</div>
+                  <div className="text-[10px] font-mono text-slate-400">{sig.io}</div>
+                </div>
+                <div className="text-sm font-semibold tabular-nums text-slate-900 shrink-0">{value}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div>

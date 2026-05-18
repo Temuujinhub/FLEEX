@@ -350,7 +350,7 @@ func (s *Store) resolveDevice(ctx context.Context, imei string) (DeviceLookup, b
 
 	var d DeviceLookup
 	row := s.pg.QueryRow(ctx,
-		`SELECT id::text, company_id::text FROM devices WHERE imei = $1 LIMIT 1`, imei)
+		`SELECT id::text, "companyId"::text FROM devices WHERE imei = $1 LIMIT 1`, imei)
 	if err := row.Scan(&d.ID, &d.CompanyID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			if s.rdb != nil {
@@ -403,15 +403,20 @@ func (s *Store) flushSnapshots(ctx context.Context, rows []Row) {
 	batch := &pgx.Batch{}
 	for id, sn := range latest {
 		batch.Queue(
+			// Devices columns are camelCase via Prisma (quoted in DDL), so
+			// the column names here must be double-quoted to match.
+			// Unquoted snake_case identifiers fold to all-lowercase and
+			// never resolve — that bug shipped to prod and stopped every
+			// snapshot UPDATE from going through.
 			`UPDATE devices SET
-				last_seen_at = $2,
-				last_lat = $3, last_lng = $4,
-				last_speed = $5, last_course = $6, last_altitude = $7,
-				ignition_on = COALESCE($8, ignition_on),
-				odometer_km = COALESCE($9, odometer_km),
-				engine_hours = COALESCE($10, engine_hours),
-				battery_volt = COALESCE($11, battery_volt),
-				updated_at = NOW()
+				"lastSeenAt"   = $2,
+				"lastLat"      = $3, "lastLng" = $4,
+				"lastSpeed"    = $5, "lastCourse" = $6, "lastAltitude" = $7,
+				"ignitionOn"   = COALESCE($8, "ignitionOn"),
+				"odometerKm"   = COALESCE($9, "odometerKm"),
+				"engineHours"  = COALESCE($10, "engineHours"),
+				"batteryVolt"  = COALESCE($11, "batteryVolt"),
+				"updatedAt"    = NOW()
 			WHERE id = $1::uuid`,
 			id, sn.t, sn.lat, sn.lng, sn.speed, sn.course, sn.alt,
 			sn.ig, sn.odo, sn.hrs, sn.bat,
