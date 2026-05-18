@@ -1,4 +1,4 @@
-import { Module, Controller, Post, Body, Param, Req, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Module, Controller, Get, Post, Body, Param, Query, Req, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { IsObject, IsOptional, IsString } from 'class-validator';
 import { Role } from '@prisma/client';
 import { Roles } from '../auth/roles.decorator';
@@ -37,12 +37,40 @@ class CommandsService {
     );
     return { ...cmd, id: cmd.id.toString() };
   }
+
+  async list(
+    deviceId: string,
+    actor: { role: Role; companyId: string | null },
+    opts: { limit: number },
+  ) {
+    const dev = await this.prisma.device.findUnique({ where: { id: deviceId } });
+    if (!dev) throw new NotFoundException();
+    if (actor.role !== 'SUPER_ADMIN' && dev.companyId !== actor.companyId) throw new ForbiddenException();
+    const items = await this.prisma.command.findMany({
+      where: { deviceId },
+      orderBy: { id: 'desc' },
+      take: opts.limit,
+    });
+    return items.map((c) => ({ ...c, id: c.id.toString() }));
+  }
 }
 
 @Controller('devices/:deviceId/commands')
 @Roles(Role.FLEET_MANAGER)
 class CommandsController {
   constructor(private readonly svc: CommandsService) {}
+
+  @Get()
+  @Audit('device.command.list', { resourceType: 'device', resourceIdParam: 'deviceId' })
+  list(
+    @Param('deviceId') deviceId: string,
+    @Req() req: any,
+    @Query('limit') limit = '50',
+  ) {
+    return this.svc.list(deviceId, req.user, {
+      limit: Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200),
+    });
+  }
 
   @Post()
   @Audit('device.command', { resourceType: 'device', resourceIdParam: 'deviceId', captureResult: true })
