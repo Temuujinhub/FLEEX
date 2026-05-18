@@ -80,6 +80,7 @@ class CreateDeviceDto {
 
   // Misc
   @IsOptional() @IsNumber() speedLimit?: number;
+  @IsOptional() @IsUUID() driverId?: string;
 }
 
 class UpdateDeviceDto {
