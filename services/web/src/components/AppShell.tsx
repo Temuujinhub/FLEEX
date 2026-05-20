@@ -27,7 +27,7 @@ const SECTIONS: {
     items: [
       { to: '/app/events',             label: 'Дохиоллууд',          min: 'VIEWER',         icon: <IconBell /> },
       { to: '/app/notification-rules', label: 'Дохиоллын дүрэм',     min: 'FLEET_MANAGER',  icon: <IconBell /> },
-      { to: '/app/health-rules',       label: 'Эрүүл мэндийн дүрэм', min: 'FLEET_MANAGER',  icon: <IconShield /> },
+      { to: '/app/health-rules',       label: 'Машин эрүүл мэнд',    min: 'FLEET_MANAGER',  icon: <IconShield /> },
       { to: '/app/eco-driving',        label: 'Эко жолоодлого',      min: 'VIEWER',         icon: <IconEco /> },
       { to: '/app/places',             label: 'Байршил · Цэгүүд',    min: 'VIEWER',         icon: <IconPin /> },
       { to: '/app/geofences',          label: 'Geofence бүс',        min: 'FLEET_MANAGER',  icon: <IconShield /> },

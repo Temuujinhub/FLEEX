@@ -74,14 +74,31 @@ export function BasemapPicker({ defaultKey }: { defaultKey?: BasemapKey }) {
   const map = useMap();
   const hasGoogle = !!googleMapsApiKey();
   const [googleReady, setGoogleReady] = useState<boolean>(!!window.google?.maps);
-  const [active, setActive] = useState<BasemapKey>(defaultKey ?? (hasGoogle ? 'google-hybrid' : 'osm'));
+  // Tracks whether the Google SDK actually loaded — if false after the
+  // loader resolves we treat the Google options as unavailable so the
+  // UI doesn't sit on a grey blank tile forever (the symptom we saw
+  // when the API key wasn't whitelisted for fleex.mn).
+  const [googleFailed, setGoogleFailed] = useState<boolean>(false);
+  const [active, setActive] = useState<BasemapKey>(
+    defaultKey ?? (hasGoogle ? 'google-hybrid' : 'osm'),
+  );
   const currentLayerRef = useRef<L.Layer | null>(null);
 
   useEffect(() => {
-    if (hasGoogle && !googleReady) {
-      loadGoogleMaps().then((ok) => setGoogleReady(ok));
+    if (hasGoogle && !googleReady && !googleFailed) {
+      loadGoogleMaps().then((ok) => {
+        if (ok) setGoogleReady(true);
+        else setGoogleFailed(true);
+      });
     }
-  }, [hasGoogle, googleReady]);
+  }, [hasGoogle, googleReady, googleFailed]);
+
+  // If the Google SDK fails to load (network block, missing key, or
+  // referrer not whitelisted in Google Cloud Console), automatically
+  // fall back to OSM so the user isn't staring at an empty map.
+  useEffect(() => {
+    if (googleFailed && active.startsWith('google-')) setActive('osm');
+  }, [googleFailed, active]);
 
   useEffect(() => {
     const isGoogle = active.startsWith('google-');
@@ -103,7 +120,10 @@ export function BasemapPicker({ defaultKey }: { defaultKey?: BasemapKey }) {
     };
   }, [active, googleReady, map]);
 
-  const options = ALL_OPTIONS.filter((o) => !o.google || hasGoogle);
+  // Hide Google options when the SDK has provably failed; keep them
+  // visible while the loader is still in flight so the user sees
+  // their preferred default until we know one way or the other.
+  const options = ALL_OPTIONS.filter((o) => !o.google || (hasGoogle && !googleFailed));
 
   return (
     <div className="leaflet-top leaflet-right" style={{ pointerEvents: 'auto' }}>
@@ -123,6 +143,12 @@ export function BasemapPicker({ defaultKey }: { defaultKey?: BasemapKey }) {
           </button>
         ))}
       </div>
+      {googleFailed && (
+        <div className="leaflet-control bg-amber-50 border border-amber-300 text-amber-900 text-[11px] rounded-lg shadow-md m-2 px-2.5 py-1.5 max-w-xs">
+          Google Maps ачаалагдсангүй — OSM руу шилжлээ. Админ Google Cloud Console-д
+          fleex.mn-ийг referrer-т нэмэх шаардлагатай.
+        </div>
+      )}
     </div>
   );
 }
