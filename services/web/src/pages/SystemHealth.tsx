@@ -158,10 +158,26 @@ function IntegrationsCard() {
   );
 }
 
+// Live shape check so the user is told 'this is a JWT / SMTP key' the
+// moment they paste, instead of after a save+test round-trip to Brevo.
+// Returns null for empty / clearly-fine input.
+function detectKeyProblem(key: Integration['key'], value: string): string | null {
+  const v = value.trim();
+  if (!v) return null;
+  if (key === 'brevo_api_key') {
+    if (v.startsWith('eyJ')) return 'Энэ JWT (MCP key) бололтой. Brevo дээр "Generate a new API key" → Type "API key" сонгож xkeysib- гэж эхэлсэн утгыг авна уу.';
+    if (v.endsWith('==')) return 'Энэ MCP/SMTP key бололтой ("==" -р төгссөн). Brevo v3 API key xkeysib- гэж эхэлж, "==" -гүй байх ёстой.';
+    if (!/^xkeysib-/i.test(v)) return 'Brevo v3 API key xkeysib- гэж эхлэх ёстой. Та SMTP key эсвэл өөр төрлийн token хуулсан байж болзошгүй.';
+    if (v.length < 60) return 'Хэт богино — Brevo v3 API key ~110 тэмдэгт байдаг.';
+  }
+  return null;
+}
+
 function IntegrationField({ integration, onSaved }: { integration: Integration; onSaved: () => void }) {
   const label = INTEGRATION_LABEL[integration.key];
   const [value, setValue] = useState('');
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const warn = detectKeyProblem(integration.key, value);
 
   // Reset draft whenever the row updates so a successful save clears
   // the input without leaving stale text behind.
@@ -220,6 +236,11 @@ function IntegrationField({ integration, onSaved }: { integration: Integration; 
           {save.isPending ? 'Хадгалж байна…' : 'Хадгалах'}
         </button>
       </div>
+      {warn && (
+        <div className="mt-2 px-3 py-2 rounded-md text-xs bg-amber-50 text-amber-800">
+          {warn}
+        </div>
+      )}
       {msg && (
         <div className={`mt-2 px-3 py-2 rounded-md text-xs ${msg.type === 'ok' ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'}`}>
           {msg.text}
