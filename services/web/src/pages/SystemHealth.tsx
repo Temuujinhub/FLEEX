@@ -48,7 +48,6 @@ interface Overview {
     lastAuditAt: string | null;
     httpsEnforced: boolean;
   };
-  compliance: { id: string; label: string; status: 'pass' | 'warn' | 'fail' | 'ops'; note?: string }[];
   uptimeSeconds: number;
   time: string;
 }
@@ -100,7 +99,6 @@ export function SystemHealth() {
           <FleetTrafficCards fleet={data.fleet} traffic={data.traffic} />
           <ResourcesCard r={data.resources} />
           <SecurityCard s={data.security} />
-          <ComplianceCard items={data.compliance} />
         </>
       )}
     </div>
@@ -323,60 +321,6 @@ function SecurityCard({ s }: { s: Overview['security'] }) {
   );
 }
 
-function ComplianceCard({ items }: { items: Overview['compliance'] }) {
-  const counts = items.reduce<Record<string, number>>(
-    (acc, item) => ({ ...acc, [item.status]: (acc[item.status] ?? 0) + 1 }),
-    {},
-  );
-  return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-5">
-      <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
-        <h2 className="font-semibold">Оюу Толгойн шаардлагатай харьцуулалт</h2>
-        <div className="flex gap-2 text-xs">
-          <Badge color="emerald">{counts.pass ?? 0} pass</Badge>
-          <Badge color="amber">{counts.warn ?? 0} warn</Badge>
-          <Badge color="rose">{counts.fail ?? 0} fail</Badge>
-          <Badge color="slate">{counts.ops ?? 0} ops</Badge>
-        </div>
-      </div>
-      <div className="divide-y divide-slate-100">
-        {items.map((item) => (
-          <div key={item.id} className="py-2 flex items-start gap-3">
-            <span
-              className={`mt-1 inline-block w-2 h-2 rounded-full flex-shrink-0 ${
-                item.status === 'pass'
-                  ? 'bg-emerald-500'
-                  : item.status === 'warn'
-                  ? 'bg-amber-500'
-                  : item.status === 'fail'
-                  ? 'bg-rose-500'
-                  : 'bg-slate-400'
-              }`}
-            />
-            <div className="flex-1">
-              <div className="text-sm font-medium">{item.label}</div>
-              {item.note && <div className="text-xs text-slate-500 mt-0.5">{item.note}</div>}
-            </div>
-            <span
-              className={`text-xs px-2 py-0.5 rounded-full uppercase tracking-wider ${
-                item.status === 'pass'
-                  ? 'bg-emerald-100 text-emerald-800'
-                  : item.status === 'warn'
-                  ? 'bg-amber-100 text-amber-800'
-                  : item.status === 'fail'
-                  ? 'bg-rose-100 text-rose-800'
-                  : 'bg-slate-100 text-slate-700'
-              }`}
-            >
-              {item.status}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function Stat({
   label,
   value,
@@ -398,16 +342,6 @@ function Stat({
       <div className="mt-1 text-lg font-semibold tabular-nums">{value}</div>
     </div>
   );
-}
-
-function Badge({ color, children }: { color: 'emerald' | 'amber' | 'rose' | 'slate'; children: React.ReactNode }) {
-  const bg: Record<string, string> = {
-    emerald: 'bg-emerald-100 text-emerald-800',
-    amber: 'bg-amber-100 text-amber-800',
-    rose: 'bg-rose-100 text-rose-800',
-    slate: 'bg-slate-100 text-slate-700',
-  };
-  return <span className={`inline-block px-2 py-0.5 rounded-full ${bg[color]}`}>{children}</span>;
 }
 
 function formatBytes(b: number): string {

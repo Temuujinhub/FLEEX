@@ -67,7 +67,6 @@ class SystemAdminService {
       traffic,
       resources,
       security,
-      compliance: this.otCompliance(services, fleet),
       uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
       time: new Date().toISOString(),
     };
@@ -219,39 +218,6 @@ class SystemAdminService {
       lastAuditAt: lastAudit?.occurredAt?.toISOString() ?? null,
       httpsEnforced: (this.config.get<string>('APP_URL') ?? '').startsWith('https://'),
     };
-  }
-
-  // Oyu Tolgoi GPS service technical requirements. The grading is a
-  // self-assessment derived from runtime signals where we can compute
-  // it (e.g. SMTP/SMS configured), and from feature presence otherwise.
-  // Items that are operational rather than software (24h support desk,
-  // physical repair) are marked as "ops" so the page can render them
-  // differently — they're not bugs we can close from code.
-  private otCompliance(services: Record<string, { ok: boolean }>, fleet: { devicesTotal: number }) {
-    return [
-      { id: 'web-ui', label: 'Web-based monitoring interface', status: 'pass' as const },
-      { id: 'panic', label: 'Panic button activation', status: 'pass' as const, note: 'PANIC event type wired into engine' },
-      { id: 'emergency-msg', label: 'Message / email for emergency, no byte limits', status: services.smtp.ok && services.sms.ok ? 'pass' as const : 'warn' as const, note: 'Email + SMS dispatch configured per notification rules' },
-      { id: 'reporting', label: 'Reporting without restrictions', status: 'pass' as const },
-      { id: 'speed', label: 'Speed monitoring with custom thresholds', status: 'pass' as const },
-      { id: 'driver-monitor', label: 'Driver monitoring', status: 'pass' as const },
-      { id: 'sat-map', label: 'Google satellite map basemap', status: 'warn' as const, note: 'Currently OSM; switchable via GOOGLE_MAPS_API_KEY' },
-      { id: 'remote-reset', label: 'Online modem resetting and fault detection', status: 'pass' as const, note: 'Commands module + device-health rules' },
-      { id: 'history-12m', label: 'Store History 12 months minimum', status: 'pass' as const, note: 'TimescaleDB hypertable retention configurable' },
-      { id: 'export', label: 'Export to Excel / PDF on all reports', status: 'pass' as const },
-      { id: 'geofence', label: 'Geofence with customizable boundaries', status: 'pass' as const },
-      { id: 'idle-stop', label: 'Idle, stop and delivery reports', status: 'pass' as const },
-      { id: 'harsh', label: 'Harsh driving reports & configuration', status: 'pass' as const },
-      { id: 'groups', label: 'Groups / categories for monitoring', status: 'pass' as const },
-      { id: 'unlimited-email', label: 'Unlimited email notifications', status: services.smtp.ok ? 'pass' as const : 'warn' as const },
-      { id: 'proximity', label: 'Proximity search and historical reports', status: 'warn' as const, note: 'Places nearest-search exists; historical proximity TBD' },
-      { id: 'engine-hours', label: 'Engine hours and odometer reports', status: 'pass' as const },
-      { id: 'remote-diag', label: 'Remote system diagnostics', status: 'pass' as const, note: 'Device health + commands' },
-      { id: 'scalable', label: 'Scalable solution with expansion options', status: 'pass' as const, note: `${fleet.devicesTotal} devices, TimescaleDB + Redis horizontal-friendly` },
-      { id: 'support-24h', label: '24-hour technical support center', status: 'ops' as const, note: 'Operational commitment, not a code feature' },
-      { id: 'repair-dept', label: 'Repair / support department for modems', status: 'ops' as const, note: 'Operational commitment, not a code feature' },
-      { id: 'cyber', label: 'Cyber security: audit log, JWT, RBAC, throttling, HTTPS', status: 'pass' as const, note: 'Tamper-evident audit chain, argon2, helmet, rate limit' },
-    ];
   }
 
   // The positions hypertable is marked @@ignore in the Prisma schema (the
