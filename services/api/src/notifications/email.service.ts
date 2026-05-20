@@ -57,14 +57,29 @@ export class EmailService implements OnModuleInit {
   }
 
   async send(to: string[], subject: string, text: string): Promise<void> {
-    if (!this.transporter) return;
+    if (!this.transporter) {
+      this.logger.warn(`SMTP disabled — skipping send to ${to.join(', ')}`);
+      return;
+    }
     if (to.length === 0) return;
-    await this.transporter.sendMail({
-      from: this.from,
-      to: to.join(', '),
-      replyTo: this.replyTo,
-      subject,
-      text,
-    });
+    try {
+      const info = await this.transporter.sendMail({
+        from: this.from,
+        to: to.join(', '),
+        replyTo: this.replyTo,
+        subject,
+        text,
+      });
+      this.logger.log(
+        `Sent to ${to.join(', ')} (messageId=${info.messageId} response=${info.response ?? 'n/a'})`,
+      );
+    } catch (err: any) {
+      // Capture the full SMTP envelope so the cause is visible in the
+      // container logs (auth, quota, sender verification, etc.).
+      this.logger.error(
+        `Send failed: to=${to.join(', ')} code=${err?.code ?? '?'} response=${err?.response ?? err?.message ?? '?'} command=${err?.command ?? '?'}`,
+      );
+      throw err;
+    }
   }
 }
