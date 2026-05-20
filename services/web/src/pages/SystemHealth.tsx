@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useAuth } from '../store/auth';
 
@@ -95,11 +95,135 @@ export function SystemHealth() {
       ) : (
         <>
           <ServicesCard services={data.services} uptimeSeconds={data.uptimeSeconds} />
+          <IntegrationsCard />
           <TestSendCard defaultEmail={me?.email} />
           <FleetTrafficCards fleet={data.fleet} traffic={data.traffic} />
           <ResourcesCard r={data.resources} />
           <SecurityCard s={data.security} />
         </>
+      )}
+    </div>
+  );
+}
+
+interface Integration {
+  key: 'brevo_api_key' | 'sms_api_key';
+  envVar: string;
+  configured: boolean;
+  source: 'db' | 'env' | 'none';
+  masked: string;
+  updatedAt: string | null;
+}
+
+const INTEGRATION_LABEL: Record<Integration['key'], { title: string; hint: string; placeholder: string }> = {
+  brevo_api_key: {
+    title: 'Brevo (имэйл) API key',
+    hint: 'app.brevo.com → Settings → SMTP & API → API keys. Port 587 хаалттай server-т HTTPS API ашиглана.',
+    placeholder: 'xkeysib-...',
+  },
+  sms_api_key: {
+    title: 'MessagePro / CallPro SMS key',
+    hint: 'CallPro-аас өгсөн x-api-key. SMS_FROM-той хамт ажиллана.',
+    placeholder: 'mp-...',
+  },
+};
+
+function IntegrationsCard() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({
+    queryKey: ['system-admin', 'integrations'],
+    queryFn: () => api.get<Integration[]>('/system-admin/integrations').then((r) => r.data),
+  });
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-5">
+      <h2 className="font-semibold mb-1">Гадаад үйлчилгээний түлхүүр</h2>
+      <p className="text-xs text-slate-500 mb-4">
+        Brevo / SMS gateway-ийн API key-г энд тавиад хадгалбал production server-руу SSH хийхгүйгээр шууд идэвхэжнэ.
+        Энд оруулсан утга .env дэх утгаас давамгайлна. Хоосон үлдээж хадгалбал DB утга арилж, .env эргэж идэвхэнэ.
+      </p>
+      {isLoading || !data ? (
+        <div className="text-sm text-slate-500">Татаж байна…</div>
+      ) : (
+        <div className="grid md:grid-cols-2 gap-4">
+          {data.map((i) => (
+            <IntegrationField key={i.key} integration={i} onSaved={() => {
+              qc.invalidateQueries({ queryKey: ['system-admin', 'integrations'] });
+              qc.invalidateQueries({ queryKey: ['system-admin', 'overview'] });
+            }} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IntegrationField({ integration, onSaved }: { integration: Integration; onSaved: () => void }) {
+  const label = INTEGRATION_LABEL[integration.key];
+  const [value, setValue] = useState('');
+  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  // Reset draft whenever the row updates so a successful save clears
+  // the input without leaving stale text behind.
+  useEffect(() => {
+    setValue('');
+  }, [integration.masked, integration.source]);
+
+  const save = useMutation({
+    mutationFn: () => api.put(`/system-admin/integrations/${integration.key}`, { value }).then((r) => r.data),
+    onSuccess: () => {
+      setMsg({ type: 'ok', text: 'Хадгалагдсан. Дараагийн илгээлтэд шинэ түлхүүр идэвхэнэ.' });
+      onSaved();
+    },
+    onError: (err: any) =>
+      setMsg({ type: 'err', text: err.response?.data?.message ?? err.message ?? 'Алдаа' }),
+  });
+
+  const sourceBadge =
+    integration.source === 'db' ? (
+      <span className="inline-block text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">DB</span>
+    ) : integration.source === 'env' ? (
+      <span className="inline-block text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">.env</span>
+    ) : (
+      <span className="inline-block text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-rose-100 text-rose-800">тохируулаагүй</span>
+    );
+
+  return (
+    <div className="border border-slate-200 rounded-xl p-4">
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <div className="text-sm font-medium">{label.title}</div>
+        {sourceBadge}
+      </div>
+      <div className="text-xs text-slate-500 mb-2">{label.hint}</div>
+      <div className="text-xs text-slate-600 mb-2">
+        Одоо: <span className="font-mono">{integration.configured ? integration.masked : '—'}</span>
+        {integration.updatedAt && (
+          <span className="ml-2 text-slate-400">({new Date(integration.updatedAt).toLocaleString()})</span>
+        )}
+      </div>
+      <div className="flex gap-2">
+        <input
+          type="password"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder={label.placeholder}
+          className="flex-1 px-3 py-2 border border-slate-300 rounded-md text-sm font-mono"
+        />
+        <button
+          onClick={() => {
+            setMsg(null);
+            save.mutate();
+          }}
+          disabled={save.isPending}
+          className="bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white px-4 py-2 rounded-md text-sm whitespace-nowrap"
+        >
+          {save.isPending ? 'Хадгалж байна…' : 'Хадгалах'}
+        </button>
+      </div>
+      {msg && (
+        <div className={`mt-2 px-3 py-2 rounded-md text-xs ${msg.type === 'ok' ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'}`}>
+          {msg.text}
+        </div>
       )}
     </div>
   );

@@ -171,6 +171,21 @@ model LandingImage {
   @@map("landing_images")
 }
 
+// Vendor secrets (Brevo API key, MessagePro SMS key, …) editable from
+// the System Health page so a SUPER_ADMIN can rotate keys without
+// SSHing the host to edit /opt/fleex/.env. DB rows take precedence
+// over the equivalent env var; missing rows fall through to .env so
+// existing deployments keep working. Values are stored as-is and only
+// returned masked over the API.
+model IntegrationSetting {
+  key         String   @id        // 'brevo_api_key', 'sms_api_key', ...
+  value       String
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  @@map("integration_settings")
+}
+
 enum DeviceStatus {
   ACTIVE
   INACTIVE

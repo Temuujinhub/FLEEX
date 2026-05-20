@@ -15,7 +15,10 @@ import {
   Injectable,
   Logger,
   Module,
+  Param,
   Post,
+  Put,
+  Req,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IsOptional, IsString } from 'class-validator';
@@ -28,6 +31,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../common/redis.service';
 import { EmailService } from '../notifications/email.service';
 import { SmsService } from '../notifications/sms.service';
+import {
+  INTEGRATION_ENV,
+  IntegrationKey,
+  IntegrationSettingsService,
+} from '../notifications/integration-settings.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 class TestEmailDto {
@@ -38,6 +46,11 @@ class TestEmailDto {
 class TestSmsDto {
   @IsString() to!: string;
   @IsOptional() @IsString() text?: string;
+}
+
+class UpdateIntegrationDto {
+  // Empty string clears the DB row, falling back to env (or disabled).
+  @IsString() value!: string;
 }
 
 @Injectable()
@@ -51,6 +64,7 @@ class SystemAdminService {
     private readonly email: EmailService,
     private readonly sms: SmsService,
     private readonly config: ConfigService,
+    private readonly integrations: IntegrationSettingsService,
   ) {}
 
   async overview() {
@@ -272,6 +286,25 @@ class SystemAdminService {
     }
   }
 
+  async listIntegrations() {
+    return this.integrations.list();
+  }
+
+  async updateIntegration(key: string, value: string, userId?: string) {
+    if (!(key in INTEGRATION_ENV)) {
+      throw new BadRequestException(`Unknown integration key: ${key}`);
+    }
+    await this.integrations.set(key as IntegrationKey, value, userId);
+    // Swap the new value into the live transports so the next test send
+    // uses it without a process restart.
+    if (key === 'brevo_api_key') {
+      await this.email.reload();
+    } else if (key === 'sms_api_key') {
+      await this.sms.reload();
+    }
+    return { ok: true, key };
+  }
+
   async sendTestSms(to: string, text?: string) {
     if (!this.sms.enabled()) {
       throw new BadRequestException('SMS not configured. Set SMS_PROVIDER/SMS_API_KEY/SMS_FROM in .env');
@@ -311,6 +344,20 @@ class SystemAdminController {
   @Audit('system-admin.test-sms', { resourceType: 'system-admin' })
   testSms(@Body() dto: TestSmsDto) {
     return this.svc.sendTestSms(dto.to, dto.text);
+  }
+
+  @Get('integrations')
+  @Audit('system-admin.integrations.list')
+  listIntegrations() {
+    return this.svc.listIntegrations();
+  }
+
+  // PUT body: { value: "xkeysib-..." }. Empty value clears the DB row
+  // so the env-var fallback (if any) takes back over.
+  @Put('integrations/:key')
+  @Audit('system-admin.integrations.update', { resourceType: 'integration' })
+  updateIntegration(@Param('key') key: string, @Body() dto: UpdateIntegrationDto, @Req() req: any) {
+    return this.svc.updateIntegration(key, dto.value, req?.user?.id);
   }
 }
 

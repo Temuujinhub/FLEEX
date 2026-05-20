@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
+import { IntegrationSettingsService } from './integration-settings.service';
 
 // EmailService talks to Brevo (or any provider) via one of two transports:
 //
@@ -13,6 +14,11 @@ import * as nodemailer from 'nodemailer';
 //
 // Production hit ETIMEDOUT on SMTP because the host's egress firewall
 // was blocking port 587 — the HTTPS path side-steps that entirely.
+//
+// The Brevo API key is resolved through IntegrationSettingsService so
+// SUPER_ADMIN can paste/rotate it from System Health without SSHing
+// the box. After a save the controller calls reload() to swing the
+// transport over without a process restart.
 @Injectable()
 export class EmailService implements OnModuleInit {
   private readonly logger = new Logger(EmailService.name);
@@ -24,11 +30,26 @@ export class EmailService implements OnModuleInit {
   private replyTo?: string;
   private transport: 'brevo-api' | 'smtp' | 'disabled' = 'disabled';
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly integrations: IntegrationSettingsService,
+  ) {}
 
   async onModuleInit() {
+    await this.reload();
+  }
+
+  // Idempotent (re)initialisation of the transport. Called on boot and
+  // again whenever a SUPER_ADMIN saves a new Brevo API key — that lets
+  // the change take effect on the next send instead of after a docker
+  // restart.
+  async reload() {
+    this.transporter = undefined;
+    this.brevoApiKey = undefined;
+    this.transport = 'disabled';
+
     const from = this.config.get<string>('SMTP_FROM');
-    const apiKey = this.config.get<string>('BREVO_API_KEY');
+    const apiKey = await this.integrations.resolve('brevo_api_key');
     const host = this.config.get<string>('SMTP_HOST');
     const user = this.config.get<string>('SMTP_USER');
     const pass = this.config.get<string>('SMTP_PASS');
@@ -185,6 +206,15 @@ export class EmailService implements OnModuleInit {
       this.logger.error(
         `SMTP send failed: to=${to.join(', ')} code=${err?.code ?? '?'} response=${err?.response ?? err?.message ?? '?'} command=${err?.command ?? '?'}`,
       );
+      // The host's egress firewall blocks 587/465. Rewrite the bare
+      // ETIMEDOUT into an actionable hint pointing the operator at
+      // the Brevo HTTPS API path, which is now configurable from the
+      // System Health UI (no SSH needed).
+      if (err?.code === 'ETIMEDOUT' || err?.code === 'ECONNREFUSED') {
+        throw new Error(
+          'SMTP port 587 timed out (egress firewall). Open "System Health → Гадаад үйлчилгээний түлхүүр", paste a Brevo API key from https://app.brevo.com/settings/keys/api, save, and resend.',
+        );
+      }
       throw err;
     }
   }

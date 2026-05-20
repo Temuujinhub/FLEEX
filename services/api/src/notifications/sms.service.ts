@@ -1,11 +1,15 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { IntegrationSettingsService } from './integration-settings.service';
 
 // MessagePro / CallPro SMS gateway. The vendor docs describe a single
 // GET endpoint with from/to/text query params and an x-api-key header,
 // rate-limited to 5 requests per second. We serialise sends through a
 // tiny FIFO queue so a burst of events doesn't trip the 503 throttle
 // response.
+//
+// SMS_API_KEY is resolved through IntegrationSettingsService — DB row
+// first, then env — so it can be rotated from the System Health page.
 
 const MESSAGEPRO_URL = 'https://api.messagepro.mn/send';
 const THROTTLE_MIN_GAP_MS = 250; // 4 req/sec, well under the 5 req/sec cap
@@ -19,11 +23,23 @@ export class SmsService implements OnModuleInit {
   private lastSendAt = 0;
   private chain: Promise<void> = Promise.resolve();
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly integrations: IntegrationSettingsService,
+  ) {}
 
-  onModuleInit() {
+  async onModuleInit() {
+    await this.reload();
+  }
+
+  // Reapplies config from DB+env. Invoked at boot and again after a
+  // SUPER_ADMIN updates the integration row from the UI.
+  async reload() {
+    this.enabledFlag = false;
+    this.apiKey = '';
+
     const provider = (this.config.get<string>('SMS_PROVIDER') ?? '').toLowerCase();
-    const apiKey = this.config.get<string>('SMS_API_KEY');
+    const apiKey = await this.integrations.resolve('sms_api_key');
     const from = this.config.get<string>('SMS_FROM');
 
     if (provider !== 'messagepro' || !apiKey || !from) {
