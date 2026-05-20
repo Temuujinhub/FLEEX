@@ -30,6 +30,10 @@ export class DevicesService {
       where,
       orderBy: { name: 'asc' },
       include: {
+        // Super admin sees devices across all tenants and needs the owning
+        // company to disambiguate the list (e.g. before transferring
+        // ownership). For non-super actors it's a no-op extra column.
+        company: { select: { id: true, name: true, slug: true } },
         group:  { select: { id: true, name: true } },
         garage: { select: { id: true, name: true } },
         driver: { select: { id: true, fullName: true } },
@@ -50,7 +54,12 @@ export class DevicesService {
   async get(id: string, actor: { role: Role; companyId: string | null }) {
     const d = await this.prisma.device.findUnique({
       where: { id },
-      include: { group: true, garage: true, driver: true },
+      include: {
+        company: { select: { id: true, name: true, slug: true } },
+        group: true,
+        garage: true,
+        driver: true,
+      },
     });
     if (!d) throw new NotFoundException();
     this.ensureSameTenant(actor, d.companyId);
@@ -100,6 +109,97 @@ export class DevicesService {
     await this.prisma.device.delete({ where: { id } });
     await this.redis.client.del(`ingestor:dev:${target.imei}`);
     return { ok: true };
+  }
+
+  // Move a device (and all of its tenant-scoped child rows) from one company
+  // to another. SUPER_ADMIN only — multi-tenant isolation means a regular
+  // company admin must never be able to lob a device into someone else's
+  // tenant. Group / garage / driver / custom-field values are dropped
+  // because they belong to the source tenant's catalogue and don't make
+  // sense in the destination. The IMEI is global so it stays put.
+  async transfer(
+    id: string,
+    actor: { role: Role; companyId: string | null },
+    dto: { companyId: string },
+  ) {
+    if (actor.role !== 'SUPER_ADMIN') throw new ForbiddenException('Only SUPER_ADMIN can transfer devices');
+
+    const device = await this.prisma.device.findUnique({ where: { id } });
+    if (!device) throw new NotFoundException('Device not found');
+    if (device.companyId === dto.companyId) {
+      throw new BadRequestException('Device already belongs to this company');
+    }
+
+    const target = await this.prisma.company.findUnique({ where: { id: dto.companyId } });
+    if (!target) throw new NotFoundException('Target company not found');
+    if (!target.isActive) throw new BadRequestException('Target company is disabled');
+
+    const toCompanyId = target.id;
+
+    const updated = await this.prisma.$transaction(
+      async (tx) => {
+        // 1. The device row itself. Group / garage / driver belong to the
+        //    source tenant — null them out so the destination admin starts
+        //    from a clean slate.
+        const next = await tx.device.update({
+          where: { id },
+          data: {
+            companyId: toCompanyId,
+            groupId: null,
+            garageId: null,
+            driverId: null,
+          },
+          include: {
+            company: { select: { id: true, name: true, slug: true } },
+            group:   { select: { id: true, name: true } },
+            garage:  { select: { id: true, name: true } },
+            driver:  { select: { id: true, fullName: true } },
+          },
+        });
+
+        // 2. Telemetry & ops history that carry their own companyId for
+        //    tenant-scoped queries. Each row keeps its deviceId — only the
+        //    tenant pointer moves.
+        await tx.event.updateMany({
+          where: { deviceId: id },
+          // Geofence references belong to the source tenant; the destination
+          // can't see those geofences, so the FK has to be cleared.
+          data: { companyId: toCompanyId, geofenceId: null },
+        });
+        await tx.sensor.updateMany({ where: { deviceId: id }, data: { companyId: toCompanyId } });
+        await tx.serviceTask.updateMany({ where: { deviceId: id }, data: { companyId: toCompanyId } });
+        await tx.trip.updateMany({ where: { deviceId: id }, data: { companyId: toCompanyId } });
+
+        // 3. The positions hypertable is intentionally `@@ignore`'d from
+        //    the Prisma Client (see schema comment) — use raw SQL.
+        await tx.$executeRaw`UPDATE positions SET company_id = ${toCompanyId}::uuid WHERE device_id = ${id}::uuid`;
+
+        // 4. CustomFieldValue rows reference `CustomField`s that belong to
+        //    the source tenant. The destination won't have those field
+        //    definitions, so the orphaned values are useless — drop them.
+        await tx.customFieldValue.deleteMany({ where: { entityId: id } });
+
+        // 5. Any notification rules in the source tenant referencing this
+        //    device need the id pulled out of their `deviceIds` array, or
+        //    they'd silently keep firing for a device that no longer
+        //    belongs to them.
+        await tx.$executeRaw`
+          UPDATE notification_rules
+          SET "deviceIds" = array_remove("deviceIds", ${id}::uuid)
+          WHERE ${id}::uuid = ANY("deviceIds")
+        `;
+
+        return next;
+      },
+      { timeout: 30_000, maxWait: 5_000 },
+    );
+
+    // Bust the ingestor's device cache so the next incoming packet picks
+    // up the new companyId instead of attributing positions to the old
+    // tenant for the first few seconds after transfer.
+    await this.redis.client.del(`ingestor:dev:${device.imei}`);
+
+    return updated;
   }
 
   // ── Bulk Excel import ────────────────────────────────────────
