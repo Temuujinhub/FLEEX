@@ -201,12 +201,8 @@ function RuleForm({ existing, onDone }: { existing: any | null; onDone: () => vo
       )}
       {channels.includes('SMS') && (
         <div className="space-y-2">
-          <div className="rounded-md border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2 text-xs flex items-start gap-2">
-            <span className="text-base leading-none">⚠</span>
-            <div>
-              <b>SMS суваг түр идэвхгүй.</b> Системийн админ MessagePro гэрээ хийсний дараа
-              нээгдэнэ. Энэ хооронд тохиргоог хадгалах боломжтой ч SMS илгээгдэхгүй.
-            </div>
+          <div className="rounded-md border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2 text-xs">
+            ⚠ <b>SMS түр идэвхгүй.</b> Системийн админд хандаж идэвхжүүлнэ үү.
           </div>
           <label className="block text-[11px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">Утаснууд (таслалаар тусгаарлана)</label>
           <input value={recipientPhones} onChange={(e) => setRecipientPhones(e.target.value)} placeholder="+97699112233, +97688220011" className={input} />
@@ -214,13 +210,8 @@ function RuleForm({ existing, onDone }: { existing: any | null; onDone: () => vo
       )}
       {channels.includes('WEBHOOK') && (
         <div className="space-y-2">
-          <div className="rounded-md border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2 text-xs flex items-start gap-2">
-            <span className="text-base leading-none">⚠</span>
-            <div>
-              <b>Webhook суваг түр идэвхгүй.</b> Аюулгүй байдлын шалгалт дуусаагүй учир
-              гадаад URL руу POST хийх боломжгүй. Идэвхжүүлэх шаардлагатай бол админд
-              хандана уу.
-            </div>
+          <div className="rounded-md border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2 text-xs">
+            ⚠ <b>Webhook түр идэвхгүй.</b> Системийн админд хандаж идэвхжүүлнэ үү.
           </div>
           <label className="block text-[11px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">Webhook URL</label>
           <input value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} placeholder="https://example.com/hook" className={input} />
