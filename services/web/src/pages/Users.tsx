@@ -1,4 +1,5 @@
 import { ReactNode, useMemo, useRef, useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { api } from '../lib/api';
@@ -95,7 +96,11 @@ export function Users() {
 
       {showHelp && <HelpPanel isSuper={isSuper} />}
 
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      {/* No overflow-hidden here — the per-row "..." dropdown is
+          positioned absolutely and needs to escape the table bounds.
+          (RowActions uses a portal anyway, but keeping this open also
+          lets future row-level popovers work without clipping.) */}
+      <div className="bg-white border border-slate-200 rounded-xl">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-600">
             <tr>
@@ -187,16 +192,43 @@ function RowActions({
   onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const qc = useQueryClient();
 
+  // Recalculate placement whenever the menu opens or the page scrolls /
+  // resizes. Rendering via portal into <body> dodges the table wrapper's
+  // overflow/clip behaviour (the bug where the dropdown rendered "inside"
+  // the table panel and got cut off).
   useEffect(() => {
     if (!open) return;
+    const place = () => {
+      const btn = buttonRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      const menuWidth = 208; // matches w-52 below
+      const left = Math.max(8, Math.min(window.innerWidth - menuWidth - 8, r.right - menuWidth));
+      // Flip above the button if there isn't room below.
+      const spaceBelow = window.innerHeight - r.bottom;
+      const top = spaceBelow > 220 ? r.bottom + 4 : r.top - 4 - 200;
+      setCoords({ top, left });
+    };
+    place();
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
     const onDocClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (buttonRef.current?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
+    return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+      document.removeEventListener('mousedown', onDocClick);
+    };
   }, [open]);
 
   // Хэрэглэгч өөрийгөө устгах / эрх дарах боломжгүй (frontend сэргийлэлт).
@@ -212,16 +244,21 @@ function RowActions({
   });
 
   return (
-    <div ref={ref} className="relative flex justify-end">
+    <div className="flex justify-end">
       <button
+        ref={buttonRef}
         onClick={() => setOpen((v) => !v)}
         className="rounded-md p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100"
         aria-label="Үйлдэл"
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" /></svg>
       </button>
-      {open && (
-        <div className="absolute right-0 top-8 z-30 w-52 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+      {open && coords && createPortal(
+        <div
+          ref={menuRef}
+          style={{ position: 'fixed', top: coords.top, left: coords.left }}
+          className="z-50 w-52 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden"
+        >
           <MenuItem label="Засах" onClick={() => { setOpen(false); onEdit(); }} />
           <MenuItem label="Нууц үг шинэчлэх" onClick={() => { setOpen(false); onReset(); }} />
           {!isSelf && (
@@ -238,7 +275,8 @@ function RowActions({
               onClick={() => { setOpen(false); onDelete(); }}
             />
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
