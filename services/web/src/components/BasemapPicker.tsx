@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMap } from 'react-leaflet';
 import L from 'leaflet';
-import 'leaflet.gridlayer.googlemutant';
+// Pin the UMD build of leaflet.gridlayer.googlemutant explicitly. The
+// default `module` entry (src/Leaflet.GoogleMutant.mjs) only assigns the
+// factory `L.gridLayer.googleMutant`, but the factory itself does
+// `new L.GridLayer.GoogleMutant(options)` — and that class is never
+// attached in the ESM build. The UMD `dist` bundle handles both, so
+// instantiation works the way the plugin's docs claim.
+import 'leaflet.gridlayer.googlemutant/dist/Leaflet.GoogleMutant.js';
 import { googleMapsApiKey, loadGoogleMaps } from '../lib/googleMaps';
 
 // Custom basemap chooser used by LiveMap / History / Places. We rolled

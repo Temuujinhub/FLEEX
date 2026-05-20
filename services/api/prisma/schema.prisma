@@ -55,6 +55,7 @@ model Company {
   healthRules       DeviceHealthRule[]
   notificationRules NotificationRule[]
   customFields      CustomField[]
+  tickets           SupportTicket[]
 
   @@map("companies")
 }
@@ -83,6 +84,8 @@ model User {
   geofences     Geofence[]
   auditLogs     AuditLog[]
   sessions      Session[]
+  tickets       SupportTicket[]    @relation("ticketSubmitter")
+  ticketReplies SupportTicketReply[]
 
   @@index([companyId])
   @@index([role])
@@ -972,4 +975,66 @@ model GprsCounter {
   @@unique([deviceId, yearMonth])
   @@index([yearMonth])
   @@map("gprs_counters")
+}
+
+// Support ticket inbox. Company admins file complaints / bug reports /
+// repair requests from inside their tenant; admin@fleex.mn (SUPER_ADMIN)
+// sees the full inbox across all companies and can reply. We intentionally
+// keep this lightweight (no attachments, no SLA timers) — it replaces the
+// old "phone us when something's broken" loop with an auditable trail.
+enum SupportTicketCategory {
+  COMPLAINT       // гомдол
+  BUG             // алдаа
+  REPAIR_REQUEST  // засварийн хүсэлт
+  OTHER           // бусад / асуулт
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum SupportTicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+model SupportTicket {
+  id           String                @id @default(uuid()) @db.Uuid
+  companyId    String                @db.Uuid
+  company      Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  submitterId  String                @db.Uuid
+  submitter    User                  @relation("ticketSubmitter", fields: [submitterId], references: [id], onDelete: Cascade)
+  category     SupportTicketCategory @default(OTHER)
+  priority     SupportTicketPriority @default(NORMAL)
+  status       SupportTicketStatus   @default(OPEN)
+  title        String
+  description  String
+  contactPhone String?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  resolvedAt   DateTime?
+
+  replies      SupportTicketReply[]
+
+  @@index([companyId, status])
+  @@index([status, createdAt])
+  @@map("support_tickets")
+}
+
+model SupportTicketReply {
+  id        String        @id @default(uuid()) @db.Uuid
+  ticketId  String        @db.Uuid
+  ticket    SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorId  String        @db.Uuid
+  author    User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  body      String
+  createdAt DateTime      @default(now())
+
+  @@index([ticketId, createdAt])
+  @@map("support_ticket_replies")
 }

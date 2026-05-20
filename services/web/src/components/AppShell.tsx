@@ -41,6 +41,7 @@ const SECTIONS: {
       { to: '/app/users',     label: 'Хэрэглэгчид', min: 'COMPANY_ADMIN',     icon: <IconUsers /> },
       { to: '/app/companies', label: 'Компаниуд',   min: 'SUPER_ADMIN',       icon: <IconBuilding /> },
       { to: '/app/landing-settings', label: 'Сайтын тохиргоо', min: 'SUPER_ADMIN', icon: <IconCog /> },
+      { to: '/app/support',   label: 'Дэмжлэг',     min: 'COMPANY_ADMIN',     icon: <IconLifeRing /> },
       { to: '/app/audit',     label: 'Аудит лог', min: 'COMPANY_ADMIN',       icon: <IconAudit /> },
       { to: '/app/system-health', label: 'Системийн эрүүл мэнд', min: 'SUPER_ADMIN', icon: <IconPulse /> },
     ],
@@ -346,6 +347,15 @@ function IconRadius() {
       <circle cx="12" cy="12" r="9" />
       <circle cx="12" cy="12" r="3" />
       <path d="M12 12 L18 6" />
+    </IconBase>
+  );
+}
+function IconLifeRing() {
+  return (
+    <IconBase>
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="3.5" />
+      <path d="M5 5l3.5 3.5M19 5l-3.5 3.5M5 19l3.5-3.5M19 19l-3.5-3.5" />
     </IconBase>
   );
 }
