@@ -10,5 +10,6 @@ import { NotificationDispatcherService } from './notification-dispatcher.service
 // global CommonModule and PrismaModule wired in AppModule.
 @Module({
   providers: [EmailService, SmsService, WebhookService, NotificationDispatcherService],
+  exports: [EmailService, SmsService],
 })
 export class NotificationsModule {}

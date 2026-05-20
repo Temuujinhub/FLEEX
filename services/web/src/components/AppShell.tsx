@@ -41,6 +41,7 @@ const SECTIONS: {
       { to: '/app/companies', label: 'Компаниуд',   min: 'SUPER_ADMIN',       icon: <IconBuilding /> },
       { to: '/app/landing-settings', label: 'Сайтын тохиргоо', min: 'SUPER_ADMIN', icon: <IconCog /> },
       { to: '/app/audit',     label: 'Аудит лог', min: 'COMPANY_ADMIN',       icon: <IconAudit /> },
+      { to: '/app/system-health', label: 'Системийн эрүүл мэнд', min: 'SUPER_ADMIN', icon: <IconPulse /> },
     ],
   },
 ];
@@ -328,6 +329,13 @@ function IconAudit() {
     <IconBase>
       <rect x="4" y="3" width="16" height="18" rx="2" />
       <path d="M8 8h8M8 12h8M8 16h5" />
+    </IconBase>
+  );
+}
+function IconPulse() {
+  return (
+    <IconBase>
+      <path d="M3 12h4l2-6 4 12 2-6h6" />
     </IconBase>
   );
 }
