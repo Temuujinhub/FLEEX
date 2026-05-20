@@ -2,6 +2,7 @@ import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { api } from '../lib/api';
+import { useAuth } from '../store/auth';
 import { ExcelImport } from '../components/ExcelImport';
 import { SensorsTab } from './devices/SensorsTab';
 import { CommandsTab } from './devices/CommandsTab';
@@ -73,6 +74,8 @@ export function Devices() {
   const [editTarget, setEditTarget] = useState<any | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [statusTarget, setStatusTarget] = useState<any | null>(null);
+  const [transferTarget, setTransferTarget] = useState<any | null>(null);
+  const isSuper = useAuth((s) => s.user?.role === 'SUPER_ADMIN');
 
   const params = new URLSearchParams();
   if (groupId) params.set('groupId', groupId);
@@ -211,6 +214,7 @@ export function Devices() {
               <tr>
                 <th className="text-left px-4 py-3 font-semibold">Машин</th>
                 <th className="text-left px-4 py-3 font-semibold">IMEI</th>
+                {isSuper && <th className="text-left px-4 py-3 font-semibold">Компани</th>}
                 <th className="text-left px-4 py-3 font-semibold">Дугаар</th>
                 <th className="text-left px-4 py-3 font-semibold">Жолооч</th>
                 <th className="text-left px-4 py-3 font-semibold">Гранж</th>
@@ -222,11 +226,11 @@ export function Devices() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {devices.isLoading && (
-                <tr><td colSpan={9} className="px-4 py-10 text-center text-slate-400">Уншиж байна…</td></tr>
+                <tr><td colSpan={isSuper ? 10 : 9} className="px-4 py-10 text-center text-slate-400">Уншиж байна…</td></tr>
               )}
               {!devices.isLoading && (devices.data ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-16 text-center">
+                  <td colSpan={isSuper ? 10 : 9} className="px-4 py-16 text-center">
                     <div className="text-slate-400 text-sm">Машин олдсонгүй</div>
                     <button
                       onClick={() => setShowAdd(true)}
@@ -257,6 +261,11 @@ export function Devices() {
                       </div>
                     </td>
                     <td className="px-4 py-3 text-slate-600 tabular-nums">{d.imei}</td>
+                    {isSuper && (
+                      <td className="px-4 py-3 text-slate-700">
+                        {d.company?.name ?? <span className="text-slate-400">—</span>}
+                      </td>
+                    )}
                     <td className="px-4 py-3 text-slate-600">{d.plateNumber ?? '—'}</td>
                     <td className="px-4 py-3 text-slate-700">
                       {d.driver?.fullName ?? <span className="text-slate-400">—</span>}
@@ -283,6 +292,7 @@ export function Devices() {
                         onEdit={() => setEditTarget(d)}
                         onCheck={() => setStatusTarget(d)}
                         onDelete={() => setDeleteTarget(d)}
+                        onTransfer={isSuper ? () => setTransferTarget(d) : undefined}
                       />
                     </td>
                   </tr>
@@ -312,6 +322,9 @@ export function Devices() {
       )}
       {deleteTarget && (
         <DeleteDeviceModal device={deleteTarget} onClose={() => setDeleteTarget(null)} />
+      )}
+      {transferTarget && (
+        <TransferDeviceModal device={transferTarget} onClose={() => setTransferTarget(null)} />
       )}
       {statusTarget && (
         <ConnectionStatusModal device={statusTarget} onClose={() => setStatusTarget(null)} />
@@ -997,8 +1010,15 @@ function VIcon({ name }: { name: string }) {
 // never reach Edit / GPS-check / Delete on the most recent device.
 // Inline icon buttons are always visible and one click each.
 function DeviceRowActions({
-  onEdit, onCheck, onDelete,
-}: { device: any; onEdit: () => void; onCheck: () => void; onDelete: () => void }) {
+  onEdit, onCheck, onDelete, onTransfer,
+}: {
+  device: any;
+  onEdit: () => void;
+  onCheck: () => void;
+  onDelete: () => void;
+  // Provided only for SUPER_ADMIN — moves the device to a different tenant.
+  onTransfer?: () => void;
+}) {
   return (
     <div className="flex justify-end items-center gap-0.5">
       <button
@@ -1024,6 +1044,21 @@ function DeviceRowActions({
           <circle cx="12" cy="12" r="1" />
         </svg>
       </button>
+      {onTransfer && (
+        <button
+          onClick={onTransfer}
+          title="Өөр компанид шилжүүлэх"
+          aria-label="Өөр компанид шилжүүлэх"
+          className="rounded-md p-1.5 text-slate-500 hover:text-amber-700 hover:bg-amber-50 transition"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M16 3l4 4-4 4" />
+            <path d="M20 7H8" />
+            <path d="M8 21l-4-4 4-4" />
+            <path d="M4 17h12" />
+          </svg>
+        </button>
+      )}
       <button
         onClick={onDelete}
         title="Устгах"
@@ -1073,6 +1108,120 @@ function DeleteDeviceModal({ device, onClose }: { device: any; onClose: () => vo
         <button onClick={onClose} className="rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-sm font-medium px-4 py-2">Цуцлах</button>
         <button onClick={() => mutation.mutate()} disabled={!canDelete || mutation.isPending} className="rounded-md bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold px-5 py-2 disabled:opacity-50 disabled:cursor-not-allowed">
           {mutation.isPending ? 'Устгаж байна…' : 'Бүрмөсөн устгах'}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+// ── Transfer device to another company (SUPER_ADMIN only) ────────
+// Moves a device — including its position history, events, sensors, trips
+// and service tasks — from one tenant to another. The destination admin
+// has to re-assign group / garage / driver themselves because those rows
+// belong to the source tenant's catalogue.
+function TransferDeviceModal({ device, onClose }: { device: any; onClose: () => void }) {
+  const [targetCompanyId, setTargetCompanyId] = useState('');
+  const [confirmText, setConfirmText] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const qc = useQueryClient();
+
+  const companies = useQuery({
+    queryKey: ['companies'],
+    queryFn: () => api.get('/companies').then((r) => r.data as Array<{
+      id: string; name: string; slug: string; isActive: boolean;
+    }>),
+  });
+  // The current tenant can't be a transfer target — that's a no-op the
+  // backend would reject with 400 anyway.
+  const options = useMemo(
+    () => (companies.data ?? []).filter((c) => c.id !== device.companyId && c.isActive),
+    [companies.data, device.companyId],
+  );
+
+  const mutation = useMutation({
+    mutationFn: () => api.post(`/devices/${device.id}/transfer`, { companyId: targetCompanyId }).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['devices'] });
+      qc.invalidateQueries({ queryKey: ['drivers'] });
+      onClose();
+    },
+    onError: (e: any) => {
+      const msg = e?.response?.data?.message;
+      setError(Array.isArray(msg) ? msg.join(', ') : msg ?? 'Шилжүүлэх үед алдаа гарлаа');
+    },
+  });
+
+  const canSubmit =
+    targetCompanyId &&
+    confirmText.trim() === device.imei &&
+    !mutation.isPending;
+
+  return (
+    <ModalShell title="Машиныг өөр компанид шилжүүлэх" onClose={onClose} maxWidth="max-w-lg">
+      <div className="p-6 space-y-4">
+        <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-900">
+          <b>{device.name}</b> ({device.imei}) машиныг
+          {device.company?.name ? <> <b>{device.company.name}</b> компаниас</> : null}
+          {' '}өөр компанид шилжүүлэх гэж байна.
+        </div>
+
+        <Field label="Хүлээн авагч компани *">
+          <select
+            value={targetCompanyId}
+            onChange={(e) => setTargetCompanyId(e.target.value)}
+            className={input}
+            disabled={companies.isLoading}
+          >
+            <option value="">— Компани сонгох —</option>
+            {options.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          {!companies.isLoading && options.length === 0 && (
+            <div className="text-[11px] text-rose-700 mt-1">
+              Шилжүүлэх боломжтой идэвхтэй компани олдсонгүй.
+            </div>
+          )}
+        </Field>
+
+        <div className="rounded-md bg-slate-50 border border-slate-200 text-xs text-slate-700 px-3 py-2 space-y-1.5">
+          <div className="font-semibold text-slate-900">Шилжүүлсний дараа:</div>
+          <ul className="list-disc list-inside space-y-0.5">
+            <li>Машины <b>гранж · алба нэгж · жолооч</b> хуваарилалт цуцлагдана (тэдгээр нь хуучин компанийн харьяалал).</li>
+            <li>GPS-н <b>байршил, үйл явдал, мэдрэгч, замууд, засварын ажил</b> бүгд шинэ компанид шилжинэ.</li>
+            <li>Хуучин компанийн <b>нэмэлт талбарын утга</b> арилгагдана.</li>
+            <li>Хуучин компанийн <b>мэдэгдлийн дүрэм</b>-ээс тус IMEI хасагдана.</li>
+            <li>GPS төхөөрөмжийн физик IMEI өөрчлөгдөхгүй — дараагийн packet шинэ компанид бүртгэгдэнэ.</li>
+          </ul>
+        </div>
+
+        <Field label={`Баталгаажуулахын тулд IMEI-г бичнэ үү (${device.imei})`}>
+          <input
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder={device.imei}
+            className={input}
+          />
+        </Field>
+
+        {error && (
+          <div className="rounded-md bg-rose-50 border border-rose-200 text-rose-800 text-sm px-3 py-2">{error}</div>
+        )}
+      </div>
+
+      <div className="border-t border-slate-200 px-6 py-3 flex justify-end gap-2 bg-slate-50">
+        <button
+          onClick={onClose}
+          className="rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-sm font-medium px-4 py-2"
+        >
+          Цуцлах
+        </button>
+        <button
+          onClick={() => { setError(null); mutation.mutate(); }}
+          disabled={!canSubmit}
+          className="rounded-md bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold px-5 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {mutation.isPending ? 'Шилжүүлж байна…' : 'Шилжүүлэх'}
         </button>
       </div>
     </ModalShell>

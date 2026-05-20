@@ -83,6 +83,10 @@ class CreateDeviceDto {
   @IsOptional() @IsUUID() driverId?: string;
 }
 
+class TransferDeviceDto {
+  @IsUUID() companyId!: string;
+}
+
 class UpdateDeviceDto {
   @IsOptional() @IsString() name?: string;
   @IsOptional() @IsUUID() groupId?: string;
@@ -161,6 +165,16 @@ export class DevicesController {
   @Audit('device.delete', { resourceType: 'device', resourceIdParam: 'id' })
   remove(@Param('id') id: string, @Req() req: any) {
     return this.svc.remove(id, req.user);
+  }
+
+  // Cross-tenant device ownership transfer. SUPER_ADMIN only — this is a
+  // multi-tenant break-glass that hands the device (and its telemetry
+  // history) over to a different company.
+  @Post(':id/transfer')
+  @Roles(Role.SUPER_ADMIN)
+  @Audit('device.transfer', { resourceType: 'device', resourceIdParam: 'id', captureResult: true })
+  transfer(@Param('id') id: string, @Body() dto: TransferDeviceDto, @Req() req: any) {
+    return this.svc.transfer(id, req.user, dto);
   }
 
   // ── Excel import / template ────────────────────────────────
