@@ -37,11 +37,14 @@ server {
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    # CSP allows OpenStreetMap, Esri satellite, OpenTopoMap tile servers. If
-    # you switch back to Google Maps, add https://maps.googleapis.com to
-    # script-src and https://*.googleapis.com / https://*.gstatic.com to
-    # img-src and connect-src.
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; img-src 'self' data: blob: https://images.unsplash.com https://*.tile.openstreetmap.org https://server.arcgisonline.com https://*.tile.opentopomap.org https://unpkg.com; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' wss: ws: https://*.tile.openstreetmap.org https://server.arcgisonline.com https://*.tile.opentopomap.org; frame-ancestors 'self';" always;
+    # CSP allows:
+    #   - OSM, Esri satellite, OpenTopoMap tile servers
+    #   - Google Maps JS SDK + tile servers (script/img/connect/worker)
+    #     for the satellite+hybrid+roadmap basemaps required by Oyu Tolgoi
+    # Google Maps fetches tiles from *.googleapis.com / *.gstatic.com and
+    # spins up web workers backed by blob: URIs — both need explicit
+    # allowance.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://maps.googleapis.com https://maps.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; img-src 'self' data: blob: https://images.unsplash.com https://*.tile.openstreetmap.org https://server.arcgisonline.com https://*.tile.opentopomap.org https://unpkg.com https://maps.googleapis.com https://maps.gstatic.com https://*.googleapis.com https://*.gstatic.com https://*.ggpht.com; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' wss: ws: https://*.tile.openstreetmap.org https://server.arcgisonline.com https://*.tile.opentopomap.org https://maps.googleapis.com https://*.googleapis.com https://*.gstatic.com; worker-src 'self' blob:; frame-ancestors 'self';" always;
 
     limit_conn conn_zone 50;
 

@@ -13,6 +13,7 @@ import { History } from './pages/History';
 import { Events } from './pages/Events';
 import { Geofences } from './pages/Geofences';
 import { Reports } from './pages/Reports';
+import { ProximityReport } from './pages/ProximityReport';
 import { Audit } from './pages/Audit';
 import { SystemHealth } from './pages/SystemHealth';
 import { Users } from './pages/Users';
@@ -51,6 +52,7 @@ export function App() {
         <Route path="/app/health-rules" element={<DeviceHealthRules />} />
         <Route path="/app/geofences" element={<Geofences />} />
         <Route path="/app/reports" element={<Reports />} />
+        <Route path="/app/proximity" element={<ProximityReport />} />
         <Route path="/app/users" element={<Users />} />
         <Route path="/app/companies" element={<Companies />} />
         <Route path="/app/profile" element={<Profile />} />

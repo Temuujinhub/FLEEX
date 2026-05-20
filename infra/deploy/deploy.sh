@@ -44,7 +44,35 @@ git reset --hard "origin/$REF"
 NEW_COMMIT="$(git rev-parse HEAD)"
 log "New commit: $NEW_COMMIT"
 
+sync_csp_into_tls_conf() {
+  # The TLS server block is renamed from fleex-tls.conf.disabled to
+  # fleex-tls.conf the first time `enable-tls.sh` runs. After that point,
+  # `git reset --hard` no longer touches it because the live file is
+  # untracked. So when we tighten / extend the CSP in the .disabled
+  # template we need to copy the new header into the live file
+  # explicitly. Idempotent: safe to run on every deploy.
+  local src="infra/nginx/conf.d/fleex-tls.conf.disabled"
+  local dst="infra/nginx/conf.d/fleex-tls.conf"
+  [[ -f "$dst" && -f "$src" ]] || return 0
+
+  local new_csp
+  new_csp="$(grep -E '^[[:space:]]*add_header Content-Security-Policy' "$src" || true)"
+  [[ -n "$new_csp" ]] || return 0
+
+  if ! grep -qF "$new_csp" "$dst"; then
+    log "Syncing CSP header from .disabled template into live fleex-tls.conf"
+    # Replace the existing CSP line in-place. Both template and live
+    # file always have exactly one CSP line in the 443 server block.
+    awk -v csp="$new_csp" '
+      /add_header Content-Security-Policy/ { print csp; next }
+      { print }
+    ' "$dst" > "$dst.tmp" && mv "$dst.tmp" "$dst"
+  fi
+}
+
 build_and_up() {
+  sync_csp_into_tls_conf
+
   log "docker compose build"
   docker compose -f "$COMPOSE_FILE" build --pull
 

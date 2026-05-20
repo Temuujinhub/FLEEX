@@ -32,6 +32,14 @@ export class EmailService implements OnModuleInit {
       port,
       secure,
       auth: { user, pass },
+      // Fail fast when the SMTP relay is unresponsive (e.g. Brevo quota
+      // exhausted, DNS hijack, ISP block). Default nodemailer timeouts
+      // are 60s+ which would race the frontend axios timeout (30s) and
+      // surface as a generic "timeout exceeded" instead of an
+      // actionable SMTP error.
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 15_000,
     });
     this.from = from;
     this.replyTo = this.config.get<string>('SMTP_REPLY_TO') || undefined;

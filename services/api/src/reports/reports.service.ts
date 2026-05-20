@@ -211,6 +211,189 @@ export class ReportsService {
       doc.end();
     });
   }
+
+  // ── Historical proximity report ────────────────────────────
+  // "Which vehicles were within R meters of point (lat, lng) between
+  // [from, to]?" Backs the Oyu Tolgoi requirement for proximity search
+  // and is used for incident investigation ("who was near the panic
+  // event location") and operational analysis ("how many trucks
+  // visited refuelling bay #3 today"). Uses Haversine in raw SQL on
+  // the positions hypertable so we don't ship a million rows through
+  // the API just to filter them in JS. A bounding-box pre-filter keeps
+  // TimescaleDB chunk pruning effective even on year-long ranges.
+  async proximityReport(
+    actor: { role: Role; companyId: string | null },
+    from: Date,
+    to: Date,
+    lat: number,
+    lng: number,
+    radiusM: number,
+  ) {
+    if (!isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+      throw new NotFoundException('Invalid coordinates');
+    }
+    const clampedRadius = Math.max(10, Math.min(50_000, radiusM));
+
+    // Pad the bbox by 20% so we never miss a candidate on the boundary
+    // (especially relevant near the poles where the cos(lat) lookup
+    // gets numerically unstable).
+    const latPad = (clampedRadius / 111_000) * 1.2;
+    const lngPad = (clampedRadius / (111_000 * Math.max(0.1, Math.cos((lat * Math.PI) / 180)))) * 1.2;
+
+    const isSuper = actor.role === 'SUPER_ADMIN';
+    // For non-SUPER_ADMIN we filter by company_id; for SUPER_ADMIN we pass
+    // any valid UUID alongside `isSuper=true` so the OR short-circuits
+    // without forcing the planner to cast an empty string to uuid (which
+    // would error during planning even though the branch is unreachable).
+    const companyId = actor.companyId ?? '00000000-0000-0000-0000-000000000000';
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        device_id: string;
+        time: Date;
+        latitude: number;
+        longitude: number;
+        speed: number | null;
+        distance_m: number;
+        device_name: string;
+        plate_number: string | null;
+        imei: string;
+      }>
+    >`
+      SELECT
+        p.device_id,
+        p.time,
+        p.latitude,
+        p.longitude,
+        p.speed,
+        d.name AS device_name,
+        d."plateNumber" AS plate_number,
+        d.imei,
+        2 * 6371000 * asin(sqrt(
+          power(sin(radians((p.latitude - ${lat}) / 2)), 2) +
+          cos(radians(${lat})) * cos(radians(p.latitude)) *
+          power(sin(radians((p.longitude - ${lng}) / 2)), 2)
+        )) AS distance_m
+      FROM positions p
+      JOIN devices d ON d.id = p.device_id
+      WHERE p.time BETWEEN ${from} AND ${to}
+        AND (${isSuper} OR p.company_id = ${companyId}::uuid)
+        AND p.latitude BETWEEN ${lat - latPad} AND ${lat + latPad}
+        AND p.longitude BETWEEN ${lng - lngPad} AND ${lng + lngPad}
+        AND 2 * 6371000 * asin(sqrt(
+          power(sin(radians((p.latitude - ${lat}) / 2)), 2) +
+          cos(radians(${lat})) * cos(radians(p.latitude)) *
+          power(sin(radians((p.longitude - ${lng}) / 2)), 2)
+        )) <= ${clampedRadius}
+      ORDER BY p.time ASC
+      LIMIT 5000;
+    `;
+
+    // Roll the row-level hits up to a per-device summary so the UI can
+    // show "5 vehicles passed within range; truck #42 came closest at
+    // 12m". The full row list is also returned for the table view.
+    const perDevice = new Map<
+      string,
+      {
+        deviceId: string;
+        deviceName: string;
+        plateNumber: string | null;
+        imei: string;
+        hits: number;
+        minDistanceM: number;
+        firstSeenAt: Date;
+        lastSeenAt: Date;
+      }
+    >();
+    for (const r of rows) {
+      const existing = perDevice.get(r.device_id);
+      if (!existing) {
+        perDevice.set(r.device_id, {
+          deviceId: r.device_id,
+          deviceName: r.device_name,
+          plateNumber: r.plate_number,
+          imei: r.imei,
+          hits: 1,
+          minDistanceM: Number(r.distance_m),
+          firstSeenAt: r.time,
+          lastSeenAt: r.time,
+        });
+      } else {
+        existing.hits += 1;
+        existing.minDistanceM = Math.min(existing.minDistanceM, Number(r.distance_m));
+        if (r.time < existing.firstSeenAt) existing.firstSeenAt = r.time;
+        if (r.time > existing.lastSeenAt) existing.lastSeenAt = r.time;
+      }
+    }
+
+    return {
+      query: { lat, lng, radiusM: clampedRadius, from, to },
+      truncated: rows.length >= 5000,
+      summary: [...perDevice.values()].sort((a, b) => a.minDistanceM - b.minDistanceM),
+      hits: rows.map((r) => ({
+        deviceId: r.device_id,
+        deviceName: r.device_name,
+        plateNumber: r.plate_number,
+        imei: r.imei,
+        time: r.time,
+        lat: Number(r.latitude),
+        lng: Number(r.longitude),
+        speed: r.speed != null ? Number(r.speed) : null,
+        distanceM: Number(r.distance_m),
+      })),
+    };
+  }
+
+  async proximityExportExcel(
+    actor: { role: Role; companyId: string | null },
+    from: Date,
+    to: Date,
+    lat: number,
+    lng: number,
+    radiusM: number,
+  ): Promise<Buffer> {
+    const data = await this.proximityReport(actor, from, to, lat, lng, radiusM);
+    const wb = new ExcelJS.Workbook();
+    const summary = wb.addWorksheet('Summary');
+    summary.columns = [
+      { header: 'Vehicle', key: 'deviceName', width: 28 },
+      { header: 'Plate', key: 'plateNumber', width: 14 },
+      { header: 'IMEI', key: 'imei', width: 20 },
+      { header: 'Hits', key: 'hits', width: 8 },
+      { header: 'Min distance (m)', key: 'minDistanceM', width: 16 },
+      { header: 'First seen', key: 'firstSeenAt', width: 22 },
+      { header: 'Last seen', key: 'lastSeenAt', width: 22 },
+    ];
+    for (const row of data.summary) {
+      summary.addRow({
+        ...row,
+        minDistanceM: Math.round(row.minDistanceM),
+        firstSeenAt: row.firstSeenAt.toISOString(),
+        lastSeenAt: row.lastSeenAt.toISOString(),
+      });
+    }
+
+    const hits = wb.addWorksheet('Hits');
+    hits.columns = [
+      { header: 'Time', key: 'time', width: 22 },
+      { header: 'Vehicle', key: 'deviceName', width: 28 },
+      { header: 'Plate', key: 'plateNumber', width: 14 },
+      { header: 'Lat', key: 'lat', width: 12 },
+      { header: 'Lng', key: 'lng', width: 12 },
+      { header: 'Distance (m)', key: 'distanceM', width: 14 },
+      { header: 'Speed', key: 'speed', width: 8 },
+    ];
+    for (const row of data.hits) {
+      hits.addRow({
+        ...row,
+        time: row.time.toISOString(),
+        distanceM: Math.round(row.distanceM),
+      });
+    }
+
+    const buf = await wb.xlsx.writeBuffer();
+    return Buffer.from(buf);
+  }
 }
 
 // Streaming helper kept for future use when reports outgrow Buffer.
