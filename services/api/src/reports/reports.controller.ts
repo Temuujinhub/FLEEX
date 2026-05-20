@@ -84,4 +84,52 @@ export class ReportsController {
     res.setHeader('Content-Disposition', `attachment; filename="trip-${id}.pdf"`);
     res.send(buf);
   }
+
+  // Historical proximity report — "which vehicles passed within radiusM
+  // meters of (lat, lng) between from and to". Backs the OT requirement
+  // and the incident-investigation workflow ("who was near the panic
+  // event?"). Returns a per-device summary alongside the full hit list.
+  @Get('proximity')
+  @Audit('report.proximity')
+  proximity(
+    @Query('lat') lat: string,
+    @Query('lng') lng: string,
+    @Query('radiusM') radiusM: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Req() req: any,
+  ) {
+    const r = this.range(from, to);
+    const latN = Number(lat);
+    const lngN = Number(lng);
+    const radiusN = Number(radiusM);
+    if (!Number.isFinite(latN) || !Number.isFinite(lngN) || !Number.isFinite(radiusN)) {
+      throw new BadRequestException('lat, lng, radiusM must be numbers');
+    }
+    return this.svc.proximityReport(req.user, r.from, r.to, latN, lngN, radiusN);
+  }
+
+  @Get('proximity/excel')
+  @Audit('report.proximity.excel')
+  async proximityExcel(
+    @Query('lat') lat: string,
+    @Query('lng') lng: string,
+    @Query('radiusM') radiusM: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const r = this.range(from, to);
+    const latN = Number(lat);
+    const lngN = Number(lng);
+    const radiusN = Number(radiusM);
+    if (!Number.isFinite(latN) || !Number.isFinite(lngN) || !Number.isFinite(radiusN)) {
+      throw new BadRequestException('lat, lng, radiusM must be numbers');
+    }
+    const buf = await this.svc.proximityExportExcel(req.user, r.from, r.to, latN, lngN, radiusN);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="proximity-${Date.now()}.xlsx"`);
+    res.send(buf);
+  }
 }

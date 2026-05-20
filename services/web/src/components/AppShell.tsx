@@ -32,6 +32,7 @@ const SECTIONS: {
       { to: '/app/places',             label: 'Байршил · Цэгүүд',    min: 'VIEWER',         icon: <IconPin /> },
       { to: '/app/geofences',          label: 'Geofence бүс',        min: 'FLEET_MANAGER',  icon: <IconShield /> },
       { to: '/app/reports',            label: 'Тайлан',              min: 'VIEWER',         icon: <IconChart /> },
+      { to: '/app/proximity',          label: 'Орчмын тайлан',       min: 'VIEWER',         icon: <IconRadius /> },
     ],
   },
   {
@@ -336,6 +337,15 @@ function IconPulse() {
   return (
     <IconBase>
       <path d="M3 12h4l2-6 4 12 2-6h6" />
+    </IconBase>
+  );
+}
+function IconRadius() {
+  return (
+    <IconBase>
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 12 L18 6" />
     </IconBase>
   );
 }
