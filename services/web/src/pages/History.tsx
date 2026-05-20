@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { MapContainer, TileLayer, Marker, Polyline, useMap } from 'react-leaflet';
+import { MapContainer, Marker, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { api } from '../lib/api';
+import { BasemapPicker } from '../components/BasemapPicker';
 
 // "Маршрут · Түүх" — pick a device + date range, draw the traveled path
 // on the map as a continuous polyline. Each stop (speed under 2 km/h
@@ -151,11 +152,7 @@ export function History() {
           scrollWheelZoom
           style={{ height: '100%', width: '100%' }}
         >
-          <TileLayer
-            attribution='&copy; OpenStreetMap'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            maxZoom={19}
-          />
+          <BasemapPicker />
           {polyline.length >= 2 && (
             <Polyline positions={polyline} pathOptions={{ color: '#1670f1', weight: 4, opacity: 0.85 }} />
           )}

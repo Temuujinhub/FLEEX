@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, LayersControl, useMap } from 'react-leaflet';
+import { MapContainer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { useQuery } from '@tanstack/react-query';
 import { api, WS_URL, getToken } from '../lib/api';
+import { BasemapPicker } from '../components/BasemapPicker';
 import 'leaflet/dist/leaflet.css';
 
 // Leaflet's default marker icons are loaded from a CDN that breaks under
@@ -131,30 +132,10 @@ export function LiveMap() {
           scrollWheelZoom
           style={{ height: '100%', width: '100%' }}
         >
-          {/* User can switch between OSM street view and Esri satellite. */}
-          <LayersControl position="topright">
-            <LayersControl.BaseLayer checked name="OpenStreetMap">
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                maxZoom={19}
-              />
-            </LayersControl.BaseLayer>
-            <LayersControl.BaseLayer name="Satellite (Esri)">
-              <TileLayer
-                attribution='Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics'
-                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-                maxZoom={19}
-              />
-            </LayersControl.BaseLayer>
-            <LayersControl.BaseLayer name="Topographic (OpenTopoMap)">
-              <TileLayer
-                attribution='Map data: &copy; OpenStreetMap contributors, SRTM | Style: &copy; OpenTopoMap (CC-BY-SA)'
-                url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
-                maxZoom={17}
-              />
-            </LayersControl.BaseLayer>
-          </LayersControl>
+          {/* Default to Google Hybrid (satellite + labels) to match the
+              Oyu Tolgoi requirement. OSM/Esri remain as offline-friendly
+              fallbacks if the Google Maps script fails to load. */}
+          <BasemapPicker />
 
           {withCoords.map((d) => (
             <Marker
