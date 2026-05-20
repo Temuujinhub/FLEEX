@@ -59,7 +59,6 @@ export class EmailService implements OnModuleInit {
       return;
     }
     this.from = from;
-    this.replyTo = this.config.get<string>('SMTP_REPLY_TO') || undefined;
     // Parse "Display Name <email@domain>" for the API path, which
     // requires name and email as separate fields.
     const m = from.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
@@ -68,6 +67,16 @@ export class EmailService implements OnModuleInit {
       this.fromEmail = m[2].trim();
     } else {
       this.fromEmail = from.trim();
+    }
+    // SMTP_REPLY_TO accepts the same "Name <email>" shape as SMTP_FROM
+    // and may also be a bare email or empty. Brevo's API rejects the
+    // whole send with 400 invalid_parameter if we hand it anything
+    // that's not a valid bare email, so extract the address and drop
+    // the field entirely when it doesn't look like one.
+    const rawReply = this.config.get<string>('SMTP_REPLY_TO');
+    this.replyTo = parseReplyTo(rawReply);
+    if (rawReply && !this.replyTo) {
+      this.logger.warn(`SMTP_REPLY_TO="${rawReply}" is not a valid email; dropping replyTo header`);
     }
 
     if (apiKey) {
@@ -241,4 +250,17 @@ export class EmailService implements OnModuleInit {
       throw err;
     }
   }
+}
+
+// Accept the same "Display Name <email>" shape as SMTP_FROM, a bare
+// email, or anything trimming to empty. Returns the bare email if it
+// looks like one, otherwise undefined so the caller can drop the
+// replyTo header (Brevo 400s on any malformed value).
+function parseReplyTo(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  const m = trimmed.match(/^\s*"?[^"<]*?"?\s*<([^>]+)>\s*$/);
+  const candidate = m ? m[1].trim() : trimmed;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidate) ? candidate : undefined;
 }
