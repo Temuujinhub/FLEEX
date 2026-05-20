@@ -91,7 +91,7 @@ class SystemAdminService {
 
     out.smtp = {
       ok: this.email.enabled(),
-      detail: this.email.enabled() ? `${this.config.get('SMTP_HOST')}:${this.config.get('SMTP_PORT')}` : 'not configured',
+      detail: this.email.enabled() ? this.email.describe() : 'not configured',
     };
     out.sms = {
       ok: this.sms.enabled(),
