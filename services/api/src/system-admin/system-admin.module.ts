@@ -251,8 +251,25 @@ class SystemAdminService {
       '',
       'If you received this, your SMTP integration is working.',
     ].join('\n');
-    await this.email.send([trimmed], subject ?? '[Fleex] SMTP test', body);
-    return { ok: true, to: trimmed };
+    try {
+      await this.email.send([trimmed], subject ?? '[Fleex] SMTP test', body);
+      return { ok: true, to: trimmed };
+    } catch (err: any) {
+      // Bubble up the actual SMTP/nodemailer error so the operator can
+      // see what's wrong (auth failure, quota exceeded, unverified
+      // sender, etc.) instead of a generic 500. Without this the
+      // System Health page was useless for diagnostics — it always
+      // just said "Internal server error".
+      const message =
+        err?.response ||
+        err?.responseCode ||
+        err?.code ||
+        err?.message ||
+        'Unknown SMTP error';
+      throw new BadRequestException(
+        `SMTP send failed: ${typeof message === 'string' ? message : JSON.stringify(message)}`,
+      );
+    }
   }
 
   async sendTestSms(to: string, text?: string) {
@@ -261,8 +278,15 @@ class SystemAdminService {
     }
     const trimmed = to.trim();
     const body = text ?? `Fleex test ${new Date().toISOString().slice(11, 19)} UTC`;
-    await this.sms.send([trimmed], body);
-    return { ok: true, to: trimmed };
+    try {
+      await this.sms.send([trimmed], body);
+      return { ok: true, to: trimmed };
+    } catch (err: any) {
+      const message = err?.response || err?.code || err?.message || 'Unknown SMS error';
+      throw new BadRequestException(
+        `SMS send failed: ${typeof message === 'string' ? message : JSON.stringify(message)}`,
+      );
+    }
   }
 }
 
