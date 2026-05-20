@@ -159,12 +159,20 @@ export class EmailService implements OnModuleInit {
         // the operator can act (e.g. "unauthorized" → bad API key,
         // "not_enough_credits" → top up, "invalid_parameter" → bad
         // sender/recipient).
+        let code = String(res.status);
         let parsedMessage = bodyText;
         try {
           const j = JSON.parse(bodyText);
-          parsedMessage = `${j.code ?? res.status}: ${j.message ?? bodyText}`;
+          code = j.code ?? code;
+          parsedMessage = `${code}: ${j.message ?? bodyText}`;
         } catch {
           /* keep raw body */
+        }
+        // 401 / unauthorized usually means the operator pasted an SMTP
+        // key (smtp tab) instead of an API key (API keys & MCP tab).
+        // Tack on the fix so they don't have to guess.
+        if (res.status === 401 || /unauthor/i.test(code) || /key not found/i.test(parsedMessage)) {
+          parsedMessage += ' — Энэ нь SMTP key биш API key байх ёстой. https://app.brevo.com/settings/keys/api → "API keys & MCP" tab → "Generate a new API key" дарж xkeysib-... утгыг авна уу.';
         }
         throw new Error(`Brevo API ${res.status}: ${parsedMessage}`);
       }
