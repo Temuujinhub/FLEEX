@@ -168,11 +168,26 @@ export class EmailService implements OnModuleInit {
         } catch {
           /* keep raw body */
         }
-        // 401 / unauthorized usually means the operator pasted an SMTP
-        // key (smtp tab) instead of an API key (API keys & MCP tab).
-        // Tack on the fix so they don't have to guess.
+        // 401 / unauthorized usually means the operator pasted the wrong
+        // key — Brevo keeps three different kinds on one page and only
+        // the v3 API key works with /v3/smtp/email:
+        //   - SMTP key (smtp tab) — works only with nodemailer over 587
+        //   - MCP key (API tab, MCP badge, base64 ending in '==') —
+        //     Model Context Protocol only, no email send
+        //   - API key (API tab, no badge, starts with `xkeysib-`) — ✓
+        // Tack on the fix so they don't have to guess which mistake.
         if (res.status === 401 || /unauthor/i.test(code) || /key not found/i.test(parsedMessage)) {
-          parsedMessage += ' — Энэ нь SMTP key биш API key байх ёстой. https://app.brevo.com/settings/keys/api → "API keys & MCP" tab → "Generate a new API key" дарж xkeysib-... утгыг авна уу.';
+          const looksLikeMcp = /==$/.test(this.brevoApiKey ?? '');
+          const looksLikeV3 = /^xkeysib-/i.test(this.brevoApiKey ?? '');
+          let hint = '';
+          if (looksLikeMcp) {
+            hint = ' — Энэ MCP key байна (MCP badge-тэй, == -ээр төгсдөг). MCP key-ээр имэйл илгээх боломжгүй. Тус хуудаснаас "Generate a new API key" → Key type "API key" сонгож xkeysib-... гэж эхэлсэн утгыг авна уу.';
+          } else if (!looksLikeV3) {
+            hint = ' — Энэ нь v3 API key биш бололтой (xkeysib- гэж эхлэхгүй байна). SMTP key эсвэл MCP key биш, https://app.brevo.com/settings/keys/api → "Generate a new API key" → "API key" сонгож үүсгэнэ үү.';
+          } else {
+            hint = ' — Key зөв форматтай ч Brevo татгалзаж байна. Key хүчингүй болсон/устгагдсан байж болзошгүй — шинээр үүсгэж дахин оруулна уу.';
+          }
+          parsedMessage += hint;
         }
         throw new Error(`Brevo API ${res.status}: ${parsedMessage}`);
       }
