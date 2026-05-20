@@ -1,10 +1,11 @@
 import { ReactNode, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { MapContainer, TileLayer, Marker, Circle, Popup, useMapEvents, useMap } from 'react-leaflet';
+import { MapContainer, Marker, Circle, Popup, useMapEvents, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import clsx from 'clsx';
 import 'leaflet/dist/leaflet.css';
 import { api } from '../lib/api';
+import { BasemapPicker } from '../components/BasemapPicker';
 
 // Байршил / Places — drop named markers on the map for depots, loading
 // bays, refuelling stations, etc. The right column is a Leaflet map; the
@@ -147,10 +148,7 @@ export function Places() {
           </div>
 
           <MapContainer center={UB_CENTER} zoom={11} className="h-full w-full">
-            <TileLayer
-              attribution='&copy; OpenStreetMap'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
+            <BasemapPicker />
             <MapClickPicker onPick={(latlng) => { setPicking(latlng); setShowAdd(true); }} />
             {selected && <PanTo lat={selected.latitude} lng={selected.longitude} />}
             {list.map((p) => {

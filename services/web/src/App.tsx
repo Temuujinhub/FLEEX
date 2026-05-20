@@ -14,6 +14,7 @@ import { Events } from './pages/Events';
 import { Geofences } from './pages/Geofences';
 import { Reports } from './pages/Reports';
 import { Audit } from './pages/Audit';
+import { SystemHealth } from './pages/SystemHealth';
 import { Users } from './pages/Users';
 import { Companies } from './pages/Companies';
 import { Groups } from './pages/Groups';
@@ -54,6 +55,7 @@ export function App() {
         <Route path="/app/companies" element={<Companies />} />
         <Route path="/app/profile" element={<Profile />} />
         <Route path="/app/audit" element={<Audit />} />
+        <Route path="/app/system-health" element={<SystemHealth />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

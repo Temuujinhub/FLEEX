@@ -29,6 +29,7 @@ import { TripsModule } from './trips/trips.module';
 import { DeviceHealthModule } from './device-health/device-health.module';
 import { NotificationRulesModule } from './notification-rules/notification-rules.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { SystemAdminModule } from './system-admin/system-admin.module';
 import { CustomFieldsModule } from './custom-fields/custom-fields.module';
 import { EcoModule } from './eco/eco.module';
 import { GprsModule } from './gprs/gprs.module';
@@ -72,6 +73,7 @@ import { TimescaleInitService } from './common/timescale-init.service';
     DeviceHealthModule,
     NotificationRulesModule,
     NotificationsModule,
+    SystemAdminModule,
     CustomFieldsModule,
     EcoModule,
     GprsModule,
