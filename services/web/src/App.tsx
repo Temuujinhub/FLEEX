@@ -14,6 +14,7 @@ import { Events } from './pages/Events';
 import { Geofences } from './pages/Geofences';
 import { Reports } from './pages/Reports';
 import { ProximityReport } from './pages/ProximityReport';
+import { SupportTickets } from './pages/SupportTickets';
 import { Audit } from './pages/Audit';
 import { SystemHealth } from './pages/SystemHealth';
 import { Users } from './pages/Users';
@@ -53,6 +54,7 @@ export function App() {
         <Route path="/app/geofences" element={<Geofences />} />
         <Route path="/app/reports" element={<Reports />} />
         <Route path="/app/proximity" element={<ProximityReport />} />
+        <Route path="/app/support" element={<SupportTickets />} />
         <Route path="/app/users" element={<Users />} />
         <Route path="/app/companies" element={<Companies />} />
         <Route path="/app/profile" element={<Profile />} />
