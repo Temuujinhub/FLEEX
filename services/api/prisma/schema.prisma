@@ -256,6 +256,12 @@ model Place {
   color       String?   // hex, drives marker / circle colour
   icon        String?   // optional icon key from the UI palette
   active      Boolean   @default(true)
+  // Back-link to the CIRCLE geofence auto-created when radiusM is set.
+  // The PlacesService keeps it in sync (lat/lng/radiusM -> geometry,
+  // name -> name) so existing geofence enter/exit dispatch picks up the
+  // place without separate plumbing.
+  geofenceId  String?   @db.Uuid @unique
+  geofence    Geofence? @relation(fields: [geofenceId], references: [id], onDelete: SetNull)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -524,10 +530,23 @@ model Geofence {
   shape       GeofenceShape
   // For CIRCLE: { lat, lng, radiusM }. For POLYGON: { points: [[lng,lat],...] }.
   geometry    Json
-  speedLimit  Float?
+  // Day-window default speed limit, retained for backward compat. The
+  // events engine combines this with the optional night override below
+  // — if speedLimitNight is set and the device's clock falls in the
+  // [nightStart, nightEnd) window (HH:mm, in the company timezone),
+  // the night number is used instead. nightStart > nightEnd means the
+  // window crosses midnight (e.g. 22:00 → 06:00).
+  speedLimit       Float?
+  speedLimitNight  Float?
+  nightStart       String?  // HH:mm
+  nightEnd         String?  // HH:mm
   active      Boolean       @default(true)
   alertOnEnter Boolean      @default(true)
   alertOnExit  Boolean      @default(true)
+  // Auto-managed reverse link when the geofence was spawned from a
+  // Place row. Lets the dispatcher tag GEOFENCE_ENTER/EXIT events with
+  // the originating placeId so Place-scoped rules can match.
+  place        Place?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
@@ -911,6 +930,10 @@ model NotificationRule {
   deviceIds       String[]              @db.Uuid
   groupIds        String[]              @db.Uuid
   geofenceIds     String[]              @db.Uuid
+  // Empty array = any place. Non-empty restricts the rule to
+  // GEOFENCE_ENTER/EXIT events whose underlying geofence is the auto-
+  // managed one for a listed place. Pairs with Place.geofenceId.
+  placeIds        String[]              @db.Uuid
   minSeverity     String                @default("INFO")
   channels        NotificationChannel[]
   recipientEmails String[]

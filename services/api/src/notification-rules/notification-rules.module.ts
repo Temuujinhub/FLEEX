@@ -1,5 +1,5 @@
 import { Module, Controller, Get, Post, Patch, Delete, Body, Param, Req, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { IsArray, IsBoolean, IsEnum, IsIn, IsOptional, IsString, IsUUID, Length } from 'class-validator';
+import { IsArray, IsBoolean, IsEmail, IsEnum, IsIn, IsOptional, IsString, IsUrl, IsUUID, Length, Matches } from 'class-validator';
 import { EventType, NotificationChannel, Role } from '@prisma/client';
 import { Roles } from '../auth/roles.decorator';
 import { Audit } from '../audit/audit.decorator';
@@ -10,17 +10,22 @@ import { PrismaService } from '../prisma/prisma.service';
 // the active rules on startup and refreshes them periodically (or on
 // rule mutation; for now we just poll).
 
+// E.164-ish: leading + and 8-15 digits. Mongolian numbers may also be
+// entered as bare 8-digit locals, which the SMS service normalises.
+const PHONE_RE = /^(\+?\d{8,15})$/;
+
 class CreateRuleDto {
   @IsString() @Length(1, 80) name!: string;
   @IsEnum(EventType) triggerType!: EventType;
   @IsOptional() @IsArray() @IsUUID('all', { each: true }) deviceIds?: string[];
   @IsOptional() @IsArray() @IsUUID('all', { each: true }) groupIds?: string[];
   @IsOptional() @IsArray() @IsUUID('all', { each: true }) geofenceIds?: string[];
+  @IsOptional() @IsArray() @IsUUID('all', { each: true }) placeIds?: string[];
   @IsOptional() @IsIn(['INFO', 'WARNING', 'CRITICAL']) minSeverity?: string;
   @IsOptional() @IsArray() @IsEnum(NotificationChannel, { each: true }) channels?: NotificationChannel[];
-  @IsOptional() @IsArray() @IsString({ each: true }) recipientEmails?: string[];
-  @IsOptional() @IsArray() @IsString({ each: true }) recipientPhones?: string[];
-  @IsOptional() @IsString() webhookUrl?: string;
+  @IsOptional() @IsArray() @IsEmail({}, { each: true, message: 'Each recipientEmails entry must be a valid email' }) recipientEmails?: string[];
+  @IsOptional() @IsArray() @Matches(PHONE_RE, { each: true, message: 'Each recipientPhones entry must be 8–15 digits (optional + prefix)' }) recipientPhones?: string[];
+  @IsOptional() @IsUrl({ require_protocol: true, protocols: ['http', 'https'] }, { message: 'webhookUrl must be http(s) URL' }) webhookUrl?: string;
   @IsOptional() @IsString() template?: string;
   @IsOptional() @IsBoolean() active?: boolean;
 }
@@ -31,11 +36,12 @@ class UpdateRuleDto {
   @IsOptional() @IsArray() @IsUUID('all', { each: true }) deviceIds?: string[];
   @IsOptional() @IsArray() @IsUUID('all', { each: true }) groupIds?: string[];
   @IsOptional() @IsArray() @IsUUID('all', { each: true }) geofenceIds?: string[];
+  @IsOptional() @IsArray() @IsUUID('all', { each: true }) placeIds?: string[];
   @IsOptional() @IsIn(['INFO', 'WARNING', 'CRITICAL']) minSeverity?: string;
   @IsOptional() @IsArray() @IsEnum(NotificationChannel, { each: true }) channels?: NotificationChannel[];
-  @IsOptional() @IsArray() @IsString({ each: true }) recipientEmails?: string[];
-  @IsOptional() @IsArray() @IsString({ each: true }) recipientPhones?: string[];
-  @IsOptional() @IsString() webhookUrl?: string;
+  @IsOptional() @IsArray() @IsEmail({}, { each: true, message: 'Each recipientEmails entry must be a valid email' }) recipientEmails?: string[];
+  @IsOptional() @IsArray() @Matches(PHONE_RE, { each: true, message: 'Each recipientPhones entry must be 8–15 digits (optional + prefix)' }) recipientPhones?: string[];
+  @IsOptional() @IsUrl({ require_protocol: true, protocols: ['http', 'https'] }, { message: 'webhookUrl must be http(s) URL' }) webhookUrl?: string;
   @IsOptional() @IsString() template?: string;
   @IsOptional() @IsBoolean() active?: boolean;
 }
@@ -60,6 +66,7 @@ class NotificationRulesService {
         deviceIds: dto.deviceIds ?? [],
         groupIds: dto.groupIds ?? [],
         geofenceIds: dto.geofenceIds ?? [],
+        placeIds: dto.placeIds ?? [],
         minSeverity: dto.minSeverity ?? 'INFO',
         channels: dto.channels ?? ['IN_APP'],
         recipientEmails: dto.recipientEmails ?? [],
