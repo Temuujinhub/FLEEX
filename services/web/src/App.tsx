@@ -9,6 +9,7 @@ import { Places } from './pages/Places';
 import { ServiceTasks } from './pages/ServiceTasks';
 import { LandingSettings } from './pages/LandingSettings';
 import { LiveMap } from './pages/LiveMap';
+import { Dispatch } from './pages/Dispatch';
 import { History } from './pages/History';
 import { Events } from './pages/Events';
 import { Geofences } from './pages/Geofences';
@@ -40,6 +41,7 @@ export function App() {
       >
         <Route path="/app" element={<Dashboard />} />
         <Route path="/app/map" element={<LiveMap />} />
+        <Route path="/app/dispatch" element={<Dispatch />} />
         <Route path="/app/devices" element={<Devices />} />
         <Route path="/app/drivers" element={<Drivers />} />
         <Route path="/app/groups" element={<Groups />} />
