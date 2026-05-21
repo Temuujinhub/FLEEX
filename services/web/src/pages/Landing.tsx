@@ -577,25 +577,6 @@ export function Landing() {
               </article>
             ))}
           </div>
-
-          <div className="mt-12 rounded-2xl border border-brand-300/30 bg-brand-500/10 backdrop-blur p-6 md:p-8 flex flex-col md:flex-row gap-6 items-start md:items-center justify-between">
-            <div>
-              <div className="text-brand-200 text-sm font-semibold uppercase tracking-widest">OT HSE compliance</div>
-              <h3 className="mt-1 text-xl md:text-2xl font-bold">
-                HSE-S-001 · S-002 · S-010 · OPS-D-007 · OPS-M-012 шаардлагуудтай нийцлэг
-              </h3>
-              <p className="mt-2 text-sm text-brand-100/85 max-w-2xl">
-                Lone-worker, speed management, emergency response, dispatch monitoring, preventive maintenance —
-                бүгд нэг систем дотор гар бичигтгүйгээр автоматжуулсан.
-              </p>
-            </div>
-            <a
-              href="#contact"
-              className="rounded-md bg-white text-brand-900 px-5 py-3 font-semibold hover:bg-brand-50 transition shadow-lg whitespace-nowrap"
-            >
-              Демо захиалах →
-            </a>
-          </div>
         </div>
       </section>
 
