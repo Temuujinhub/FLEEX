@@ -10,7 +10,7 @@ import { api, API_BASE, getToken } from '../lib/api';
 // derived from those (event filters, idle / engine slices of trip) or
 // flagged "удахгүй" so we don't pretend something is wired up.
 
-type Kind = 'trip' | 'trip-idle' | 'trip-engine' | 'events' | 'coming-soon';
+type Kind = 'trip' | 'trip-idle' | 'trip-engine' | 'events' | 'idle-billing' | 'coming-soon';
 
 interface Template {
   id: string;
@@ -81,6 +81,9 @@ const TEMPLATES: Template[] = [
   { id: 'fuel',    cat: 'Ашиглалт',   name: 'Шатхууны зарцуулалт',
     description: 'Цэнэглэлт, хэрэглээ, гэнэтийн алдагдал.',
     kind: 'coming-soon', icon: <I.Fuel /> },
+  { id: 'idle-billing', cat: 'Ашиглалт', name: 'Idle нэхэмжлэл',
+    description: 'Жолооч тус бүрийн зогссон цаг × тарифаар тооцсон дүн.',
+    kind: 'idle-billing', icon: <I.Pause /> },
 
   // ── Төхөөрөмж ────────────────────────────────────────────
   { id: 'ignition', cat: 'Төхөөрөмж', name: 'Хөдөлгүүр асаалт/унтраалт',
@@ -119,10 +122,13 @@ export function Reports() {
   const [tplId, setTplId] = useState<string>('trip');
   const [search, setSearch] = useState('');
   const [deviceId, setDeviceId] = useState('');
+  // Idle-billing tariff is decoupled from device selection — the report is
+  // a cross-driver aggregate, so we ask for an ₮/цаг rate instead.
+  const [tariff, setTariff] = useState('50000');
   const [preset, setPreset] = useState<string>('7d');
   const [from, setFrom] = useState<string>(toLocalInput(new Date(Date.now() - 7 * 86_400_000)));
   const [to, setTo] = useState<string>(toLocalInput(new Date()));
-  const [generated, setGenerated] = useState<{ tplId: string; deviceId: string; from: string; to: string } | null>(null);
+  const [generated, setGenerated] = useState<{ tplId: string; deviceId: string; from: string; to: string; tariff: string } | null>(null);
 
   const tpl = TEMPLATES.find((t) => t.id === tplId) ?? TEMPLATES[0];
 
@@ -148,15 +154,38 @@ export function Reports() {
     setTo(toLocalInput(t));
   };
 
-  const canRun = Boolean(deviceId) && tpl.kind !== 'coming-soon';
+  const isIdleBilling = tpl.kind === 'idle-billing';
+  const canRun = tpl.kind === 'coming-soon'
+    ? false
+    : isIdleBilling
+      ? Number(tariff) > 0
+      : Boolean(deviceId);
 
   const run = () => {
     if (!canRun) return;
-    setGenerated({ tplId: tpl.id, deviceId, from, to });
+    setGenerated({ tplId: tpl.id, deviceId, from, to, tariff });
   };
 
   const download = (fmt: 'excel' | 'pdf') => {
     if (!generated) return;
+    if (generated.tplId === 'idle-billing') {
+      // PDF not yet supported for idle billing — Excel is sufficient
+      // for back-office invoicing today.
+      if (fmt !== 'excel') return;
+      const url =
+        `${API_BASE}/reports/idle-billing/excel` +
+        `?from=${new Date(generated.from).toISOString()}&to=${new Date(generated.to).toISOString()}` +
+        `&tariff=${encodeURIComponent(generated.tariff)}`;
+      fetch(url, { headers: { Authorization: `Bearer ${getToken()}` } })
+        .then((r) => r.blob())
+        .then((b) => {
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(b);
+          a.download = `idle-billing-${generated.from}_${generated.to}.xlsx`;
+          a.click();
+        });
+      return;
+    }
     const url =
       `${API_BASE}/reports/trip/${generated.deviceId}/${fmt}` +
       `?from=${new Date(generated.from).toISOString()}&to=${new Date(generated.to).toISOString()}`;
@@ -268,25 +297,41 @@ export function Reports() {
             <div className="text-xs text-slate-500">{tpl.description}</div>
           </div>
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-            <Field label="Машин">
-              <select
-                value={deviceId}
-                onChange={(e) => setDeviceId(e.target.value)}
-                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-              >
-                <option value="">— Сонгох —</option>
-                {(devices.data ?? []).map((d: any) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name} {d.plateNumber ? `· ${d.plateNumber}` : ''}
-                  </option>
-                ))}
-              </select>
-              {(devices.data ?? []).length === 0 && (
-                <div className="mt-1 text-[11px] text-amber-700">
-                  Бүртгэгдсэн машин алга — эхлээд "Машин · Төхөөрөмж" хэсэгт нэмнэ үү.
+            {isIdleBilling ? (
+              <Field label="Тариф (₮/цаг)">
+                <input
+                  type="number"
+                  min="0"
+                  step="100"
+                  value={tariff}
+                  onChange={(e) => setTariff(e.target.value)}
+                  className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+                <div className="mt-1 text-[11px] text-slate-500">
+                  Жнь: 50000. Тариф × нийт idle цаг = тус жолоочид нэхэмжлэх дүн.
                 </div>
-              )}
-            </Field>
+              </Field>
+            ) : (
+              <Field label="Машин">
+                <select
+                  value={deviceId}
+                  onChange={(e) => setDeviceId(e.target.value)}
+                  className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                >
+                  <option value="">— Сонгох —</option>
+                  {(devices.data ?? []).map((d: any) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name} {d.plateNumber ? `· ${d.plateNumber}` : ''}
+                    </option>
+                  ))}
+                </select>
+                {(devices.data ?? []).length === 0 && (
+                  <div className="mt-1 text-[11px] text-amber-700">
+                    Бүртгэгдсэн машин алга — эхлээд "Машин · Төхөөрөмж" хэсэгт нэмнэ үү.
+                  </div>
+                )}
+              </Field>
+            )}
 
             <Field label="Хугацааны хүрээ">
               <div className="grid grid-cols-3 gap-1.5">
@@ -348,7 +393,8 @@ export function Reports() {
               </button>
               <button
                 onClick={() => download('pdf')}
-                disabled={!generated || tpl.kind === 'coming-soon'}
+                disabled={!generated || tpl.kind === 'coming-soon' || isIdleBilling}
+                title={isIdleBilling ? 'PDF удахгүй гарна — одоохондоо Excel ашиглана уу' : ''}
                 className="flex-1 rounded-md bg-rose-600 hover:bg-rose-500 text-white text-sm py-2 disabled:opacity-50 transition"
               >
                 PDF
@@ -361,6 +407,12 @@ export function Reports() {
         <main className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
           {!generated ? (
             <EmptyResult tpl={tpl} />
+          ) : generated.tplId === 'idle-billing' ? (
+            <IdleBillingResult
+              from={generated.from}
+              to={generated.to}
+              tariff={Number(generated.tariff)}
+            />
           ) : (
             <ReportResult
               tpl={TEMPLATES.find((t) => t.id === generated.tplId) ?? tpl}
@@ -741,3 +793,100 @@ function eventLabel(t: string) {
 }
 
 // (icon glyphs declared up top so TEMPLATES can reference them without TDZ)
+
+function IdleBillingResult({ from, to, tariff }: { from: string; to: string; tariff: number }) {
+  const q = useQuery({
+    queryKey: ['reports', 'idle-billing', from, to, tariff],
+    queryFn: () =>
+      api
+        .get(
+          `/reports/idle-billing?from=${new Date(from).toISOString()}&to=${new Date(to).toISOString()}&tariff=${tariff}`,
+        )
+        .then((r) => r.data as {
+          tariffPerHour: number;
+          rows: Array<{
+            driverId: string;
+            driverName: string;
+            employeeId: string | null;
+            idleS: number;
+            idleHours: number;
+            amount: number;
+          }>;
+          totals: { idleS: number; idleHours: number; amount: number };
+        }),
+  });
+
+  if (q.isLoading) return <div className="p-6"><SkeletonResult /></div>;
+  if (q.isError) return <div className="p-6 text-sm text-rose-700">Алдаа гарлаа.</div>;
+  if (!q.data) return null;
+  const fmt = new Intl.NumberFormat('mn-MN');
+
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <header className="px-6 py-4 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <div className="text-xs uppercase tracking-widest text-brand-700/80 font-semibold">Ашиглалт</div>
+          <h2 className="text-lg font-bold mt-0.5">Idle нэхэмжлэл</h2>
+        </div>
+        <div className="text-right text-xs text-slate-500">
+          <div>{new Date(from).toLocaleDateString('mn-MN')} → {new Date(to).toLocaleDateString('mn-MN')}</div>
+          <div className="font-medium text-slate-700">Тариф: {fmt.format(q.data.tariffPerHour)} ₮/цаг</div>
+        </div>
+      </header>
+
+      <div className="px-6 pt-4 grid grid-cols-3 gap-3">
+        <StatTile label="Нийт жолооч" value={fmt.format(q.data.rows.length)} />
+        <StatTile label="Нийт idle цаг" value={fmt.format(q.data.totals.idleHours) + ' ц'} />
+        <StatTile label="Нийт дүн" value={fmt.format(q.data.totals.amount) + ' ₮'} highlight />
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="rounded-lg border border-slate-200 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                <th className="px-3 py-2 text-left">Жолооч</th>
+                <th className="px-3 py-2 text-left">Ажилтны ID</th>
+                <th className="px-3 py-2 text-right">Idle (цаг)</th>
+                <th className="px-3 py-2 text-right">Дүн (₮)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {q.data.rows.length === 0 ? (
+                <tr><td colSpan={4} className="px-3 py-6 text-center text-xs text-slate-400">Энэ хугацаанд бүртгэгдсэн idle мэдээ алга.</td></tr>
+              ) : q.data.rows.map((r) => (
+                <tr key={r.driverId}>
+                  <td className="px-3 py-2">{r.driverName}</td>
+                  <td className="px-3 py-2 text-slate-500">{r.employeeId ?? '—'}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{fmt.format(r.idleHours)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums font-medium">{fmt.format(r.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+            {q.data.rows.length > 0 && (
+              <tfoot className="bg-slate-50 font-semibold">
+                <tr>
+                  <td colSpan={2} className="px-3 py-2">НИЙТ</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{fmt.format(q.data.totals.idleHours)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{fmt.format(q.data.totals.amount)} ₮</td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatTile({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className={clsx(
+      'rounded-xl border px-4 py-3',
+      highlight ? 'bg-brand-50 border-brand-200' : 'bg-slate-50 border-slate-200',
+    )}>
+      <div className="text-[11px] uppercase tracking-widest text-slate-500 font-semibold">{label}</div>
+      <div className={clsx('mt-1 text-2xl font-extrabold tabular-nums', highlight ? 'text-brand-700' : 'text-slate-900')}>{value}</div>
+    </div>
+  );
+}

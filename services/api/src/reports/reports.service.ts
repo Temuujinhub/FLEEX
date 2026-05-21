@@ -394,6 +394,125 @@ export class ReportsService {
     const buf = await wb.xlsx.writeBuffer();
     return Buffer.from(buf);
   }
+
+  // ── Idle billing ────────────────────────────────────────────────
+  // Aggregates DriverScore.idleS over the requested window, multiplies
+  // by the per-hour tariff supplied by the caller, and returns one row
+  // per driver plus a grand total. Surfaces a financial number ops can
+  // bill back to the operating site for unproductive engine-on time.
+  async idleBilling(
+    actor: { role: Role; companyId: string | null },
+    from: Date,
+    to: Date,
+    tariffPerHour: number,
+  ): Promise<{
+    from: string;
+    to: string;
+    tariffPerHour: number;
+    rows: Array<{
+      driverId: string;
+      driverName: string;
+      employeeId: string | null;
+      idleS: number;
+      idleHours: number;
+      amount: number;
+    }>;
+    totals: { idleS: number; idleHours: number; amount: number };
+  }> {
+    const where: any = { date: { gte: from, lte: to } };
+    if (actor.role !== 'SUPER_ADMIN') where.companyId = actor.companyId ?? undefined;
+
+    const scores = await this.prisma.driverScore.findMany({
+      where,
+      select: {
+        driverId: true,
+        idleS: true,
+        driver: { select: { fullName: true, employeeId: true } },
+      },
+    });
+
+    const byDriver = new Map<
+      string,
+      { driverName: string; employeeId: string | null; idleS: number }
+    >();
+    for (const s of scores) {
+      const cur = byDriver.get(s.driverId) ?? {
+        driverName: s.driver?.fullName ?? '—',
+        employeeId: s.driver?.employeeId ?? null,
+        idleS: 0,
+      };
+      cur.idleS += s.idleS;
+      byDriver.set(s.driverId, cur);
+    }
+
+    const rows = Array.from(byDriver.entries())
+      .map(([driverId, v]) => {
+        const idleHours = v.idleS / 3600;
+        return {
+          driverId,
+          driverName: v.driverName,
+          employeeId: v.employeeId,
+          idleS: v.idleS,
+          idleHours: Math.round(idleHours * 100) / 100,
+          amount: Math.round(idleHours * tariffPerHour),
+        };
+      })
+      .sort((a, b) => b.idleS - a.idleS);
+
+    const totals = rows.reduce(
+      (acc, r) => {
+        acc.idleS += r.idleS;
+        acc.idleHours += r.idleHours;
+        acc.amount += r.amount;
+        return acc;
+      },
+      { idleS: 0, idleHours: 0, amount: 0 },
+    );
+    totals.idleHours = Math.round(totals.idleHours * 100) / 100;
+
+    return {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      tariffPerHour,
+      rows,
+      totals,
+    };
+  }
+
+  async idleBillingExcel(
+    actor: { role: Role; companyId: string | null },
+    from: Date,
+    to: Date,
+    tariffPerHour: number,
+  ): Promise<Buffer> {
+    const data = await this.idleBilling(actor, from, to, tariffPerHour);
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Idle billing');
+    ws.columns = [
+      { header: 'Жолооч', key: 'driverName', width: 30 },
+      { header: 'Ажилтны ID', key: 'employeeId', width: 14 },
+      { header: 'Idle (цаг)', key: 'idleHours', width: 12 },
+      { header: 'Тариф (₮/цаг)', key: 'tariff', width: 14 },
+      { header: 'Дүн (₮)', key: 'amount', width: 16 },
+    ];
+    for (const r of data.rows) {
+      ws.addRow({
+        driverName: r.driverName,
+        employeeId: r.employeeId ?? '',
+        idleHours: r.idleHours,
+        tariff: tariffPerHour,
+        amount: r.amount,
+      });
+    }
+    ws.addRow({});
+    ws.addRow({
+      driverName: 'НИЙТ',
+      idleHours: data.totals.idleHours,
+      amount: data.totals.amount,
+    }).font = { bold: true };
+    const buf = await wb.xlsx.writeBuffer();
+    return Buffer.from(buf);
+  }
 }
 
 // Streaming helper kept for future use when reports outgrow Buffer.

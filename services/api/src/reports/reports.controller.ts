@@ -109,6 +109,42 @@ export class ReportsController {
     return this.svc.proximityReport(req.user, r.from, r.to, latN, lngN, radiusN);
   }
 
+  // Idle billing — sums DriverScore.idleS per driver across the window
+  // and multiplies by the supplied tariff. tariff is a query param so
+  // the same data is queryable at any rate without persisting tariff
+  // config (companies can vary it per site / per contract).
+  @Get('idle-billing')
+  @Audit('report.idle_billing')
+  idleBilling(
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Query('tariff') tariff: string,
+    @Req() req: any,
+  ) {
+    const r = this.range(from, to);
+    const t = Number(tariff);
+    if (!Number.isFinite(t) || t < 0) throw new BadRequestException('tariff must be a non-negative number');
+    return this.svc.idleBilling(req.user, r.from, r.to, t);
+  }
+
+  @Get('idle-billing/excel')
+  @Audit('report.idle_billing.excel')
+  async idleBillingExcel(
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Query('tariff') tariff: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const r = this.range(from, to);
+    const t = Number(tariff);
+    if (!Number.isFinite(t) || t < 0) throw new BadRequestException('tariff must be a non-negative number');
+    const buf = await this.svc.idleBillingExcel(req.user, r.from, r.to, t);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="idle-billing-${from}_${to}.xlsx"`);
+    res.send(buf);
+  }
+
   @Get('proximity/excel')
   @Audit('report.proximity.excel')
   async proximityExcel(
