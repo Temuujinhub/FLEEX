@@ -128,9 +128,29 @@ function RuleForm({ existing, onDone }: { existing: any | null; onDone: () => vo
   const [recipientEmails, setRecipientEmails] = useState((existing?.recipientEmails ?? []).join(', '));
   const [recipientPhones, setRecipientPhones] = useState((existing?.recipientPhones ?? []).join(', '));
   const [webhookUrl, setWebhookUrl] = useState(existing?.webhookUrl ?? '');
+  const [placeIds, setPlaceIds] = useState<string[]>(existing?.placeIds ?? []);
   const [template, setTemplate] = useState(existing?.template ?? '{DEVICE}: {TYPE} ({LOCATION})');
   const [active, setActive] = useState(existing?.active ?? true);
   const [error, setError] = useState<string | null>(null);
+
+  // Place picker only shows for geofence-enter/exit triggers — Places
+  // are anchors that auto-create a circle geofence in the background.
+  const placeFilterApplies = triggerType === 'GEOFENCE_ENTER' || triggerType === 'GEOFENCE_EXIT';
+  const placesQ = useQuery({
+    queryKey: ['places', 'for-rule'],
+    queryFn: () => api.get('/places').then((r) => r.data as Array<{ id: string; name: string; type: string; geofenceId: string | null }>),
+    enabled: placeFilterApplies,
+  });
+
+  const emailIssues = recipientEmails
+    .split(',').map((s) => s.trim()).filter(Boolean)
+    .filter((e) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+  const phoneIssues = recipientPhones
+    .split(',').map((s) => s.trim()).filter(Boolean)
+    .filter((p) => !/^\+?\d{8,15}$/.test(p));
+  const webhookIssue = webhookUrl && !/^https?:\/\/\S+$/i.test(webhookUrl)
+    ? 'Webhook URL http(s):// эхэлсэн бүрэн хаяг байх ёстой.'
+    : null;
 
   const save = useMutation({
     mutationFn: (payload: any) =>
@@ -197,24 +217,69 @@ function RuleForm({ existing, onDone }: { existing: any | null; onDone: () => vo
         <div>
           <label className="block text-[11px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">Имэйлүүд (таслалаар тусгаарлана)</label>
           <input value={recipientEmails} onChange={(e) => setRecipientEmails(e.target.value)} placeholder="ops@example.com, manager@example.com" className={input} />
+          {emailIssues.length > 0 && (
+            <div className="mt-1 text-xs text-amber-700">
+              Зөв бус имэйл: {emailIssues.join(', ')}
+            </div>
+          )}
         </div>
       )}
       {channels.includes('SMS') && (
-        <div className="space-y-2">
-          <div className="rounded-md border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2 text-xs">
-            ⚠ <b>SMS түр идэвхгүй.</b> Системийн админд хандаж идэвхжүүлнэ үү.
-          </div>
+        <div>
           <label className="block text-[11px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">Утаснууд (таслалаар тусгаарлана)</label>
           <input value={recipientPhones} onChange={(e) => setRecipientPhones(e.target.value)} placeholder="+97699112233, +97688220011" className={input} />
+          {phoneIssues.length > 0 && (
+            <div className="mt-1 text-xs text-amber-700">
+              Зөв бус утас (+ ба 8-15 орон): {phoneIssues.join(', ')}
+            </div>
+          )}
         </div>
       )}
       {channels.includes('WEBHOOK') && (
-        <div className="space-y-2">
-          <div className="rounded-md border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2 text-xs">
-            ⚠ <b>Webhook түр идэвхгүй.</b> Системийн админд хандаж идэвхжүүлнэ үү.
-          </div>
+        <div>
           <label className="block text-[11px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">Webhook URL</label>
           <input value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} placeholder="https://example.com/hook" className={input} />
+          {webhookIssue && <div className="mt-1 text-xs text-amber-700">{webhookIssue}</div>}
+        </div>
+      )}
+
+      {placeFilterApplies && (
+        <div>
+          <label className="block text-[11px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">
+            Тодорхой Place-ээр шүүх (заавал биш)
+          </label>
+          {placesQ.isLoading ? (
+            <div className="text-xs text-slate-400">Уншиж байна…</div>
+          ) : (placesQ.data ?? []).filter((p) => p.geofenceId).length === 0 ? (
+            <div className="text-xs text-slate-500">
+              radiusM-тэй Place алга байна. Эхлээд "Байршил · Цэгүүд" хуудаснаас радиустай цэг үүсгэнэ үү.
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {(placesQ.data ?? []).filter((p) => p.geofenceId).map((p) => {
+                const on = placeIds.includes(p.id);
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() =>
+                      setPlaceIds(on ? placeIds.filter((x) => x !== p.id) : [...placeIds, p.id])
+                    }
+                    className={clsx(
+                      'rounded-md border px-3 py-1.5 text-xs transition',
+                      on ? 'border-brand-500 bg-brand-50 text-brand-800' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300',
+                    )}
+                  >
+                    {p.name}
+                    <span className="ml-1 text-[10px] text-slate-400">{p.type}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <div className="mt-1 text-[11px] text-slate-500">
+            Хоосон үлдээвэл бүх geofence-д хүчинтэй. Place сонгосон үед тухайн Place-ийн авто-geofence-д л зориулагдана.
+          </div>
         </div>
       )}
 
@@ -232,6 +297,9 @@ function RuleForm({ existing, onDone }: { existing: any | null; onDone: () => vo
         <button
           onClick={() => {
             if (!name.trim()) return setError('Нэрээ оруулна уу');
+            if (emailIssues.length > 0) return setError('Имэйлийн формат буруу байна');
+            if (phoneIssues.length > 0) return setError('Утасны формат буруу байна');
+            if (webhookIssue) return setError(webhookIssue);
             save.mutate({
               name: name.trim(),
               triggerType,
@@ -240,6 +308,7 @@ function RuleForm({ existing, onDone }: { existing: any | null; onDone: () => vo
               recipientEmails: recipientEmails.split(',').map((s) => s.trim()).filter(Boolean),
               recipientPhones: recipientPhones.split(',').map((s) => s.trim()).filter(Boolean),
               webhookUrl: webhookUrl || undefined,
+              placeIds: placeFilterApplies ? placeIds : [],
               template,
               active,
             });
