@@ -20,7 +20,7 @@
 | 5 | Driver shift hierarchy | ⏳ Үлдсэн | — |
 | 6 | Dispatcher board v1 | ✅ Хийгдсэн | `2069d93` + `33fb7aa` |
 | 7 | Idle billing тайлан | ✅ Хийгдсэн | `f3c53e6` |
-| 8 | Sensor calibration UI | ⏳ Үлдсэн | — |
+| 8 | Sensor calibration UI | ✅ Хийгдсэн | (энэ commit) |
 | 9 | Lone-worker alert | ✅ Хийгдсэн | (энэ commit) |
 | 10 | Service prediction | ⏳ Үлдсэн | — |
 
