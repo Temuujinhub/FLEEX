@@ -226,6 +226,9 @@ function RuleForm({ existing, onDone }: { existing: any | null; onDone: () => vo
       )}
       {channels.includes('SMS') && (
         <div>
+          <div className="mb-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+            ⚠ SMS суваг идэвхгүй байж болзошгүй — системийн админтай холбогдож идэвхжүүлээрэй.
+          </div>
           <label className="block text-[11px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">Утаснууд (таслалаар тусгаарлана)</label>
           <input value={recipientPhones} onChange={(e) => setRecipientPhones(e.target.value)} placeholder="+97699112233, +97688220011" className={input} />
           {phoneIssues.length > 0 && (
@@ -237,6 +240,9 @@ function RuleForm({ existing, onDone }: { existing: any | null; onDone: () => vo
       )}
       {channels.includes('WEBHOOK') && (
         <div>
+          <div className="mb-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+            ⚠ Webhook суваг идэвхгүй байж болзошгүй — системийн админтай холбогдож идэвхжүүлээрэй.
+          </div>
           <label className="block text-[11px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">Webhook URL</label>
           <input value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} placeholder="https://example.com/hook" className={input} />
           {webhookIssue && <div className="mt-1 text-xs text-amber-700">{webhookIssue}</div>}
