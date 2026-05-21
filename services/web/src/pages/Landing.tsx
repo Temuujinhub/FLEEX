@@ -5,9 +5,9 @@ import { api, API_BASE } from '../lib/api';
 // Default copy when the operator has not customised the landing page
 // through the super-admin settings page. The CMS-backed values
 // override these when present.
-const DEFAULT_HERO_TAGLINE = 'Fleet Flexible — Танай флотын уян хатан удирдлага';
+const DEFAULT_HERO_TAGLINE = 'Уурхайн жолоочдыг хамгаалж, шифт KPI-г автоматжуулсан флот удирдлага';
 const DEFAULT_HERO_SUBTEXT =
-  'Уул уурхай, хүргэлт, нийтийн тээвэр, машин түрээсийн флотыг нэг цонхноос удирдах боломжтой. Teltonika Pro GPS дээр суурилсан, монгол хэлтэй, Монголд hosting хийсэн.';
+  'Уул уурхайн HSE policy шаардлагуудыг код-гүй биелүүлсэн систем. Lone-worker автомат сэрэмжлүүлэг, panic ⇒ ойролцоох жолоочдод 30 секундийн дотор тусламж, идэвхгүй цагийн нэхэмжлэлийн Excel, ээлжийн тайлан, засварын урьдчилсан тооцоо. Teltonika Pro GPS дээр суурилсан, монгол хэлтэй, Монголд hosting хийсэн.';
 
 // Fallback Unsplash photos for every image slot. The CMS overrides these
 // when the super admin uploads a replacement.
@@ -40,21 +40,34 @@ function resolveImage(
 // contact (CTA repeated), footer.
 
 const NAV = [
-  { href: '#why',       label: 'Яагаад Fleex?' },
-  { href: '#use-cases', label: 'Хэрэглээний салбар' },
-  { href: '#features',  label: 'Боломжууд' },
-  { href: '#pricing',   label: 'Үнэ' },
-  { href: '#contact',   label: 'Холбоо барих' },
+  { href: '#why',              label: 'Яагаад Fleex?' },
+  { href: '#highlights-2026',  label: 'Mining 2026' },
+  { href: '#use-cases',        label: 'Хэрэглээний салбар' },
+  { href: '#features',         label: 'Боломжууд' },
+  { href: '#pricing',          label: 'Үнэ' },
+  { href: '#contact',          label: 'Холбоо барих' },
 ];
 
 const KEY_NUMBERS = [
-  { value: '10–15%', label: 'Шатахуун хэмнэлт' },
-  { value: '30%',    label: 'Зогсолтын цаг буурна' },
+  { value: '< 30с',  label: 'PANIC ⇒ хариу үйлдэл' },
+  { value: '2ц',     label: 'Lone-worker risk детект' },
+  { value: '14 хон', label: 'Засвар урьдчилан мэдэгдэх' },
   { value: '1000+',  label: 'Зэрэгцээ төхөөрөмж' },
-  { value: '24/7',   label: 'Монгол хэлээр дэмжлэг' },
 ];
 
 const WHY_FLEEX = [
+  {
+    icon: '🆘',
+    title: '"Lone worker" автомат хамгаалалт',
+    body:
+      'Жолооч 2 цаг хариу алга, эсвэл хөдөлгөөнгүй зогссон бол менежерт автомат сэрэмжлүүлэг. Pit-ийн алслагдсан хэсэгт зүрхний түгшилт, гэнэтийн осолд орсон жолоочийг яаралтай олж тусална. OT-н HSE-S-001 policy-ийг гар бичигтгүй автоматжуулсан.',
+  },
+  {
+    icon: '🚨',
+    title: 'PANIC ⇒ 5km дотор шууд SMS',
+    body:
+      'Жолооч улаан товч дармагц 5km радиуст ажиллаж буй жолоочдийн утсанд Google Maps холбоостой SMS яваад дуусчихсан байна. Radio call хүлээх шаардлагагүй — 30 секундийн дотор анхны хариу үйлдэл.',
+  },
   {
     icon: '⛽',
     title: 'Шатахууны зардлыг 10–15% бууруулна',
@@ -65,13 +78,31 @@ const WHY_FLEEX = [
     icon: '⏱️',
     title: 'Хөдөлгүүр сул зогсох цагийг 30%-аар хасна',
     body:
-      'Машин асаалттай, хурд 0 байх бүх минутыг тоолж дансанд бичнэ. Жолооч, диспетчерийн KPI-д тусгахад машин эргэлт өөрөө хурдасна.',
+      'Машин асаалттай, хурд 0 байх бүх минутыг тоолж дансанд бичнэ. Idle цаг × ₮/цаг тарифаар нэхэмжлэх дүн Excel-ийн товчоор гарна — нягтлан бодогчид баримтжина.',
   },
   {
     icon: '🤖',
     title: 'Жолооч бүрд 0–100 онооны үнэлгээ',
     body:
-      'Огцом хурдсалт, ширүүн тоормосолт, хурдны хэтрэлт зэргийг үйл явдал бүрээр тоолж сар бүр оноогоор үнэлнэ. Хамгийн анхааралтай жолоочиддоо урамшуулал өгөхөд хэрэглэдэг.',
+      'Сар бүрийн 1-нд жолооч бүрд scorecard PDF автоматаар email-ээр явна — HR-н ажлыг 2-3 цагаар хэмнэдэг. Менежерт rank-н нэгдсэн тайлан давхар.',
+  },
+  {
+    icon: '📋',
+    title: 'Dispatcher live kanban',
+    body:
+      'Бүх машинаа нэг харагдацанд — хөдөлж буй, хүлээж буй, холбоо тасарсан. 50+ машинтай pit-д map-р pin scan хийх шаардлагагүй; "25м зогссон" гэх timer-р шууд анхааралд авна.',
+  },
+  {
+    icon: '🌙',
+    title: 'Geofence өдөр / шөнийн хурдны хязгаар',
+    body:
+      'Нэг geofence-д хоёр хурд — өдрийн 50, шөнийн 30. Цагаар автомат сэлгэгдэнэ. Haul road-ийн шуурга, харанхуйн нөхцөлд аюулгүй байдлыг код-гүй тохиргоогоор хангана.',
+  },
+  {
+    icon: '🔧',
+    title: 'Засварын урьдчилсан тооцоолол',
+    body:
+      'Одометр + сүүлийн 30 хоногийн дундаж км/өдөр → "Oil change 12 хоногийн дараа болно". 14 хоногийн өмнө менежерт автомат email — workshop slot, ОУ-аас захиалах эд ангид lead time өгнө.',
   },
   {
     icon: '🔑',
@@ -98,8 +129,15 @@ const USE_CASES = [
     title: 'Уул уурхай · Хүнд тоног төхөөрөмж',
     imgKey: 'use-case-mining' as const,
     body:
-      'БелАЗ, CAT 793 ангиллын самосвал, экскаватор, бульдозер, грейдер, дугуйт ачигч. Тоосжилт ихтэй, -40°C-ийн хүйтэн нөхцөлд ажиллахад зориулсан төхөөрөмжүүд хэрэглэдэг.',
-    bullets: ['Хязгаар бүс (geofence) зөрчлийг шууд илрүүлэх', 'Хурд хэтрэлт, panic дохиолол', 'Мото цаг, түлшний зарцуулалт хянах'],
+      'БелАЗ, CAT 793 ангиллын самосвал, экскаватор, бульдозер, грейдер, дугуйт ачигч. Тоосжилт ихтэй, -40°C-ийн хүйтэн нөхцөлд ажиллахад зориулсан төхөөрөмжүүд хэрэглэдэг. OT-н HSE policy шаардлагуудтай (lone-worker, speed management, dispatch monitoring, emergency response) автомат нийцэлтэй.',
+    bullets: [
+      'Lone-worker автомат risk event (2ц+ хариу алга)',
+      'PANIC дохио ⇒ ойролцоох жолоочдод 5km дотор SMS',
+      'Geofence-д өдөр / шөнийн хурдны хязгаар',
+      'Brigade ээлжийг өнгөөр ялгасан Dispatcher live board',
+      'Idle цаг × тариф = нэхэмжлэх дүн (Excel)',
+      'Workshop slot — засвар 14 хоногийн өмнө автомат сэрэмжлүүлэг',
+    ],
   },
   {
     title: 'Хотын хүргэлт',
@@ -140,22 +178,32 @@ const FEATURES = [
   {
     icon: '⛽',
     title: 'Шатахуун мэдрэгчийн интеграц',
-    body: 'CAN-bus / fuel-probe-аас бодит зарцуулалт, цэнэглэлт, гэнэтийн алдагдлыг 1 минутын дотор илрүүлж дохио өгнө.',
+    body: 'CAN-bus / fuel-probe-аас бодит зарцуулалт, цэнэглэлт, гэнэтийн алдагдлыг 1 минутын дотор илрүүлж дохио өгнө. Калибрацийг хүснэгтэн хэлбэрээр оруулна — JSON код бичих хэрэггүй.',
   },
   {
     icon: '🔧',
-    title: 'Хөдөлгүүрийн оношлогоо',
-    body: 'OBD-II / CAN bus унших, engine hours, RPM, температур, алдааны код (DTC). Засварын төлөвлөгөө автоматжуулсан.',
+    title: 'Засварын урьдчилсан тооцоолол',
+    body: 'Одометр + сүүлийн 30 хоногийн дундаж км/өдөр → "Oil change 12 хоногийн дараа". 14 хоног үлдсэн үед менежерт автомат email — workshop slot захиалах цаг хангалттай.',
   },
   {
     icon: '🤖',
-    title: 'AI жолоочийн зан төлвийн аналитик',
-    body: 'Хурдсалт, тоормосолт, эргэлт, унтаа жолоодлогын дохиолол. Eco-driving 0–100 оноо. Машин эвдрэл урьдчилан таамаглах.',
+    title: 'Жолоочийн scorecard (cron)',
+    body: 'Сар бүрийн 1-нд жолооч бүрт оноо нь email-ээр автомат. Eco-driving 0–100. Манагерт rank-сан нэгдсэн тайлан. HR-н ажлыг 2-3 цагаар хэмнэдэг.',
+  },
+  {
+    icon: '🆘',
+    title: 'Lone-worker safety алгоритм',
+    body: 'Жолооч 2 цаг хариу алга, эсвэл хөдөлгөөнгүй зогссон бол автомат risk event. Pit-ийн алслагдсан хэсэгт зүрхний түгшилт, гэнэтийн осолд орсон жолоочийг шууд илрүүлнэ.',
+  },
+  {
+    icon: '🚨',
+    title: 'PANIC ⇒ ойролцоох жолоочдод',
+    body: 'Жолооч улаан товч дармагц 5km дотор ажиллаж буй жолоочдод Google Maps холбоостой SMS. Radio call хүлээх шаардлагагүй — 30 секундийн анхны хариу.',
   },
   {
     icon: '🛑',
     title: 'Алсаас хөдөлгүүр унтраах / асаах',
-    body: 'Жолооч аюултай байдалд орсон, машин хулгайлагдсан, түрээсийн төлбөр төлөгдөөгүй тохиолдолд алсаас хяналт.',
+    body: 'Жолооч аюултай байдалд орсон, машин хулгайлагдсан, түрээсийн төлбөр төлөгдөөгүй тохиолдолд алсаас хяналт. RFID карт уншуулж л дахин асна.',
   },
   {
     icon: '🎥',
@@ -163,19 +211,110 @@ const FEATURES = [
     body: 'Mobile брэндийн dash-cam төхөөрөмжтэй интеграц. Осол гарсан агшинд өмнө/хойно 30 секундийн бичлэгийг автоматаар хадгална.',
   },
   {
+    icon: '📍',
+    title: 'Place ↔ Geofence авто-синхрон',
+    body: 'Газрын зураг дээр Place тэмдэглэхэд автомат geofence үүснэ. Refuel station, weighbridge, dumping bay тус бүрд орох/гарах автомат event — production KPI шууд бэлэн.',
+  },
+  {
+    icon: '🌙',
+    title: 'Geofence өдөр / шөнийн хурд',
+    body: 'Нэг бүс, хоёр хурд — өдрийн 50, шөнийн 30. Цагаар автомат сэлгэгдэнэ. Haul road шуурга, харанхуйд аюулгүй байдлыг код-гүй хангана.',
+  },
+  {
+    icon: '📋',
+    title: 'Dispatcher live kanban',
+    body: 'Хөдөлж буй / хүлээж буй / холбоо тасарсан 3-баганат самбар. 50+ машин дээр map-р pin scan хийх шаардлагагүй — "25м зогссон" timer-р шууд анхааруулна.',
+  },
+  {
+    icon: '👥',
+    title: 'Driver shift hierarchy',
+    body: 'Бригад / ээлжийг model болгож тус тусдаа тайлан. Өглөөний vs шөнийн ээлжийн idle, оноо, ачаалал — менежер аль нь илүү бүтээмжтэй вэ гэдгийг хэмжинэ.',
+  },
+  {
+    icon: '💰',
+    title: 'Idle billing — Excel',
+    body: 'Жолооч тус бүрийн idle цаг × ₮/цаг тариф = нэхэмжлэх дүн. Shift-ээр шүүгдэнэ. Нягтлан бодогчид Excel-ийн товчоор шууд татаж явуулна.',
+  },
+  {
     icon: '🗺️',
     title: 'Geofence ба маршрут',
-    body: 'Polygon / circle бүс, давхар бүс, маршрут хазайлт, түр оруулга/гарга мэдэгдэл. Бүс нутгийн хурдны хязгаарыг тус тусад нь тохируулна.',
+    body: 'Polygon / circle бүс, давхар бүс, маршрут хазайлт, түр оруулга/гарга мэдэгдэл. Place-ээр Geofence авто-үүсгэх.',
   },
   {
     icon: '📊',
     title: 'KPI тайлан, экспорт',
-    body: '12 сарын дата хадгалалт, TimescaleDB compression. Excel / PDF-ээр трип, idle, fuel, driver, geofence тайлан.',
+    body: '12 сарын дата хадгалалт, TimescaleDB compression. Excel / PDF-ээр трип, idle, fuel, driver, geofence, scorecard тайлан.',
   },
   {
     icon: '🔐',
     title: 'Аудит, эрхийн түвшин',
     body: '6-түвшинт RBAC (SUPER_ADMIN → VIEWER), tamper-evident hash chain audit log, multi-tenant tenant-isolation.',
+  },
+];
+
+// 2026 онд нэмэгдсэн шинэ боломжуудыг тусгайлан онцолж байгаа hero list.
+// Landing page-ийн дунд section болгож харуулна — энэ нь бид-ийн уул уурхайн
+// сектортой ажиллах гэрээний дараах хөгжүүлэлтийн тойм.
+const HIGHLIGHTS_2026 = [
+  {
+    badge: 'SAFETY',
+    title: 'Lone-worker автомат хамгаалалт',
+    body:
+      'OT-н HSE-S-001 policy-ийг гар бичигтгүй автоматжуулсан. 2 цаг хариу/хөдөлгөөнгүй ⇒ автомат risk event ⇒ менежерт SMS+email. Pit-ийн алслагдсан хэсэгт хэн ч хэдийнэ "хүн ажиллаж байна" гэдгийг харна.',
+  },
+  {
+    badge: 'SAFETY',
+    title: 'PANIC ⇒ автомат хамтрагч',
+    body:
+      'Жолооч улаан товч дармагц 5km радиуст идэвхтэй машин нэг бүрд Google Maps холбоостой SMS. Анхны хариу үйлдэл 30 секундийн дотор — radio операторт хүлээх алгасуулсан.',
+  },
+  {
+    badge: 'OPERATIONS',
+    title: 'Dispatcher live board',
+    body:
+      'Pit supervisor нь LiveMap-ийн pin цэгүүдийг scan хийхээ болино. 3-баганат kanban (хөдөлж / хүлээж / холбоогүй) дээр идэвхгүй машин 10 минут болмогц шилжих — авто-эрэмбэлэгдсэн анхааруулга.',
+  },
+  {
+    badge: 'OPERATIONS',
+    title: 'Driver shift hierarchy',
+    body:
+      'Brigade-уудыг өнгөөр ялгасан — диспетчер pit-д нэг харахдаа аль ээлж аль машинд хариуцаж байгааг шууд харна. Idle billing, eco-driving leaderboard ээлжээр шүүгдэнэ.',
+  },
+  {
+    badge: 'FINANCE',
+    title: 'Idle billing нэхэмжлэл',
+    body:
+      'Идэвхгүй ажилласан цаг × тариф = нэхэмжлэх дүн. Shift-ээр шүүж, Excel-ийн товчоор шууд татах. OT-н contractor-уудын нэхэмжлэл нэг өдөр биш, 5 минут болсон.',
+  },
+  {
+    badge: 'PREDICTIVE',
+    title: 'Засварын урьдчилсан тооцоолол',
+    body:
+      'Одометр + сүүлийн 30 хоногийн дундаж км → "Oil change 12 хоногийн дараа". 14 хоног үлдсэн үед автомат email. Workshop slot, ОУ-аас захиалах эд ангид 15 хоногийн lead time өгсөн.',
+  },
+  {
+    badge: 'COMPLIANCE',
+    title: 'Geofence өдөр / шөнийн хурд',
+    body:
+      'Нэг бүс, хоёр хурдны хязгаар, цагаар автомат сэлгэлт. Haul road шуурга, харанхуйн нөхцөлд аюулгүй байдлын policy-г code-гүй тохиргоогоор хангана. HSE-S-002 шаардлагатай нийцлэг.',
+  },
+  {
+    badge: 'PRODUCTIVITY',
+    title: 'Place ↔ Geofence авто-синхрон',
+    body:
+      'Refuel station, weighbridge, dumping bay тус бүрд цэг тэмдэглээд geofence авто-үүснэ. Орох/гарах бүх event бүртгэгдэх — production cycle, шатхууны хулгай нэг л dataset.',
+  },
+  {
+    badge: 'HR',
+    title: 'Жолоочийн scorecard cron',
+    body:
+      'Сар бүрийн 1-нд жолооч бүрд PDF email-ээр автоматаар явна. HR-ийн manual Excel ажлыг 2-3 цагаар хэмнэсэн. Менежерт rank-сан нэгдсэн тайлан хавсралттай.',
+  },
+  {
+    badge: 'CALIBRATION',
+    title: 'Sensor calibration UI',
+    body:
+      'Шатахуун мэдрэгчийн калибраци хүснэгтэн editor + real-time preview chart. JSON код бичдэг DevOps-н дамжуулга цуцалсан — менежер 5 минутад шинэчилнэ.',
   },
 ];
 
@@ -275,10 +414,12 @@ export function Landing() {
               </a>
             </div>
             <div className="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-sm text-brand-100/80">
-              <span>✓ Teltonika FMC150 / FMC650 / FMM650</span>
-              <span>✓ Garmin dezl OTR610</span>
-              <span>✓ AI Eco-driving</span>
-              <span>✓ 1-wire RFID</span>
+              <span>✓ Lone-worker автомат сэрэмжлүүлэг</span>
+              <span>✓ PANIC ⇒ 5km дотор тусламж</span>
+              <span>✓ Dispatcher live kanban</span>
+              <span>✓ Shift KPI · Idle billing Excel</span>
+              <span>✓ Засварын урьдчилсан тооцоо</span>
+              <span>✓ Teltonika FMC650 / Garmin dezl</span>
             </div>
           </div>
           <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur shadow-2xl">
@@ -401,6 +542,59 @@ export function Landing() {
                 </div>
               </article>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ───────── 2026 highlights ───────── */}
+      <section id="highlights-2026" className="relative py-20 bg-gradient-to-br from-slate-900 via-brand-900 to-slate-900 text-white overflow-hidden">
+        <div className="absolute inset-0 opacity-[0.08]"
+             style={{ backgroundImage: 'radial-gradient(circle at 20% 20%, #fff 0, transparent 50%), radial-gradient(circle at 80% 70%, #fff 0, transparent 40%)' }} />
+        <div className="relative max-w-7xl mx-auto px-6">
+          <div className="max-w-3xl">
+            <p className="uppercase tracking-widest text-brand-300 text-sm font-semibold">2026 — Mining-grade шинэчлэлт</p>
+            <h2 className="mt-2 text-3xl md:text-4xl lg:text-5xl font-extrabold leading-tight">
+              Уурхайн нэгэн жил <span className="text-brand-300">аюулгүй ажиллах</span> 10 шинэ боломж
+            </h2>
+            <p className="mt-5 text-lg text-brand-100/90 leading-relaxed">
+              Оюу Толгойн тендерийн дараах хөгжүүлэлтийн үр дүн —
+              HSE policy-уудыг код-гүй биелүүлж, диспетчерийн гар ажиллагааг автоматжуулсан.
+              Эдгээр бүгд production-д аль хэдийн ажиллаж байна.
+            </p>
+          </div>
+
+          <div className="mt-12 grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {HIGHLIGHTS_2026.map((h) => (
+              <article
+                key={h.title}
+                className="rounded-xl border border-white/10 bg-white/5 backdrop-blur p-5 hover:bg-white/10 hover:border-brand-300/40 transition"
+              >
+                <span className="inline-block rounded-full bg-brand-500/20 text-brand-200 text-[10px] font-bold uppercase tracking-widest px-2.5 py-1">
+                  {h.badge}
+                </span>
+                <div className="mt-3 font-semibold text-lg leading-snug">{h.title}</div>
+                <p className="mt-2 text-sm text-brand-100/80 leading-relaxed">{h.body}</p>
+              </article>
+            ))}
+          </div>
+
+          <div className="mt-12 rounded-2xl border border-brand-300/30 bg-brand-500/10 backdrop-blur p-6 md:p-8 flex flex-col md:flex-row gap-6 items-start md:items-center justify-between">
+            <div>
+              <div className="text-brand-200 text-sm font-semibold uppercase tracking-widest">OT HSE compliance</div>
+              <h3 className="mt-1 text-xl md:text-2xl font-bold">
+                HSE-S-001 · S-002 · S-010 · OPS-D-007 · OPS-M-012 шаардлагуудтай нийцлэг
+              </h3>
+              <p className="mt-2 text-sm text-brand-100/85 max-w-2xl">
+                Lone-worker, speed management, emergency response, dispatch monitoring, preventive maintenance —
+                бүгд нэг систем дотор гар бичигтгүйгээр автоматжуулсан.
+              </p>
+            </div>
+            <a
+              href="#contact"
+              className="rounded-md bg-white text-brand-900 px-5 py-3 font-semibold hover:bg-brand-50 transition shadow-lg whitespace-nowrap"
+            >
+              Демо захиалах →
+            </a>
           </div>
         </div>
       </section>
