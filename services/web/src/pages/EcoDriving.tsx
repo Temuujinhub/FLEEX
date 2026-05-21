@@ -51,6 +51,7 @@ export function EcoDriving() {
   const [weights, setWeights] = useState<Record<string, number>>(
     () => Object.fromEntries(WEIGHTS.map((w) => [w.type, w.defaultWeight])),
   );
+  const [shiftId, setShiftId] = useState('');
 
   const applyPreset = (id: string) => {
     setPreset(id);
@@ -68,12 +69,18 @@ export function EcoDriving() {
       const v = weights[w.type] ?? 0;
       if (v > 0) u.append('w', `${w.type}:${v}`);
     }
+    if (shiftId) u.set('shiftId', shiftId);
     return u.toString();
-  }, [from, to, weights]);
+  }, [from, to, weights, shiftId]);
 
   const scores = useQuery({
     queryKey: ['driver-scores', params],
     queryFn: () => api.get(`/reports/driver-scores?${params}`).then((r) => r.data),
+  });
+
+  const shifts = useQuery({
+    queryKey: ['shifts'],
+    queryFn: () => api.get('/shifts').then((r) => r.data as Array<{ id: string; name: string; color: string | null }>),
   });
 
   const rows: any[] = scores.data?.rows ?? [];
@@ -109,6 +116,17 @@ export function EcoDriving() {
                 {p.label}
               </button>
             ))}
+            <select
+              value={shiftId}
+              onChange={(e) => setShiftId(e.target.value)}
+              className="text-xs rounded-md px-2.5 py-1.5 border border-slate-200 bg-white text-slate-700 hover:border-brand-300"
+              title="Ээлжээр шүүх"
+            >
+              <option value="">Бүх ээлж</option>
+              {(shifts.data ?? []).map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
           </div>
         </div>
 
@@ -204,7 +222,22 @@ export function EcoDriving() {
                     <tr key={r.device.id} className="hover:bg-slate-50 align-top">
                       <td className="px-4 py-3 text-xs text-slate-400 tabular-nums pt-4">{i + 1}</td>
                       <td className="px-4 py-3">
-                        <div className="font-medium">{r.driver?.fullName ?? '— жолоочгүй —'}</div>
+                        <div className="font-medium flex items-center gap-1.5">
+                          {r.driver?.fullName ?? '— жолоочгүй —'}
+                          {r.driver?.shift && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium border"
+                              style={{
+                                background: r.driver.shift.color ? r.driver.shift.color + '20' : '#f1f5f9',
+                                borderColor: r.driver.shift.color || '#cbd5e1',
+                                color: r.driver.shift.color || '#475569',
+                              }}
+                              title={`Ээлж: ${r.driver.shift.name}`}
+                            >
+                              {r.driver.shift.name}
+                            </span>
+                          )}
+                        </div>
                         <div className="text-xs text-slate-500">
                           {r.device.name}{r.device.plateNumber ? ` · ${r.device.plateNumber}` : ''}
                         </div>

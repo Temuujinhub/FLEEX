@@ -94,6 +94,7 @@ export class ReportsService {
     from: Date,
     to: Date,
     weights: Record<string, number>,
+    shiftId?: string,
   ) {
     const where: any = { occurredAt: { gte: from, lte: to } };
     if (actor.role !== 'SUPER_ADMIN') where.companyId = actor.companyId ?? undefined;
@@ -109,11 +110,24 @@ export class ReportsService {
       counts.set(e.deviceId, m);
     }
 
+    // Shift filter applies at the device level via the device's
+    // current driver assignment. A device with no driver, or whose
+    // driver isn't on the requested shift, is excluded — same model
+    // the idle billing report uses, kept consistent so a manager who
+    // expects "this driver in this shift" sees the same row set.
+    const deviceWhere: any = actor.role === 'SUPER_ADMIN' ? {} : { companyId: actor.companyId ?? undefined };
+    if (shiftId) deviceWhere.driver = { shiftId };
+
     const devices = await this.prisma.device.findMany({
-      where: actor.role === 'SUPER_ADMIN' ? {} : { companyId: actor.companyId ?? undefined },
+      where: deviceWhere,
       select: {
         id: true, name: true, plateNumber: true, vehicleType: true,
-        driver: { select: { id: true, fullName: true, employeeId: true } },
+        driver: {
+          select: {
+            id: true, fullName: true, employeeId: true,
+            shift: { select: { id: true, name: true, color: true } },
+          },
+        },
       },
     });
 

@@ -40,6 +40,7 @@ export class ReportsController {
     @Query('from') from: string,
     @Query('to') to: string,
     @Query('w') w: string | string[] | undefined,
+    @Query('shiftId') shiftId: string | undefined,
     @Req() req: any,
   ) {
     const r = this.range(from, to);
@@ -50,7 +51,7 @@ export class ReportsController {
       const n = Number(v);
       if (k && !Number.isNaN(n)) weights[k] = n;
     }
-    return this.svc.driverScores(req.user, r.from, r.to, weights);
+    return this.svc.driverScores(req.user, r.from, r.to, weights, shiftId || undefined);
   }
 
   @Get('trip/:deviceId/excel')
