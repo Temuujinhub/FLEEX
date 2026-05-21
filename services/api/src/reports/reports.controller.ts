@@ -113,6 +113,38 @@ export class ReportsController {
   // and multiplies by the supplied tariff. tariff is a query param so
   // the same data is queryable at any rate without persisting tariff
   // config (companies can vary it per site / per contract).
+  // Driver scorecard PDF — pulled on demand from the driver profile.
+  // The full "1st-of-month auto-email" loop is roadmap Эрэмбэ 2 v2;
+  // this endpoint is what the v2 cron job will call internally, so
+  // shipping it first means the UI feature is usable today.
+  @Get('driver-scorecard/:driverId')
+  @Audit('report.driver_scorecard', { resourceType: 'driver', resourceIdParam: 'driverId' })
+  driverScorecard(
+    @Param('driverId') driverId: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Req() req: any,
+  ) {
+    const r = this.range(from, to);
+    return this.svc.driverScorecard(req.user, driverId, r.from, r.to);
+  }
+
+  @Get('driver-scorecard/:driverId/pdf')
+  @Audit('report.driver_scorecard.pdf', { resourceType: 'driver', resourceIdParam: 'driverId' })
+  async driverScorecardPdf(
+    @Param('driverId') driverId: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const r = this.range(from, to);
+    const buf = await this.svc.driverScorecardPdf(req.user, driverId, r.from, r.to);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="scorecard-${driverId}-${from}_${to}.pdf"`);
+    res.send(buf);
+  }
+
   @Get('idle-billing')
   @Audit('report.idle_billing')
   idleBilling(
