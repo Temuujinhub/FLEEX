@@ -394,6 +394,256 @@ export class ReportsService {
     const buf = await wb.xlsx.writeBuffer();
     return Buffer.from(buf);
   }
+
+  // ── Idle billing ────────────────────────────────────────────────
+  // Aggregates DriverScore.idleS over the requested window, multiplies
+  // by the per-hour tariff supplied by the caller, and returns one row
+  // per driver plus a grand total. Surfaces a financial number ops can
+  // bill back to the operating site for unproductive engine-on time.
+  async idleBilling(
+    actor: { role: Role; companyId: string | null },
+    from: Date,
+    to: Date,
+    tariffPerHour: number,
+  ): Promise<{
+    from: string;
+    to: string;
+    tariffPerHour: number;
+    rows: Array<{
+      driverId: string;
+      driverName: string;
+      employeeId: string | null;
+      idleS: number;
+      idleHours: number;
+      amount: number;
+    }>;
+    totals: { idleS: number; idleHours: number; amount: number };
+  }> {
+    const where: any = { date: { gte: from, lte: to } };
+    if (actor.role !== 'SUPER_ADMIN') where.companyId = actor.companyId ?? undefined;
+
+    const scores = await this.prisma.driverScore.findMany({
+      where,
+      select: {
+        driverId: true,
+        idleS: true,
+        driver: { select: { fullName: true, employeeId: true } },
+      },
+    });
+
+    const byDriver = new Map<
+      string,
+      { driverName: string; employeeId: string | null; idleS: number }
+    >();
+    for (const s of scores) {
+      const cur = byDriver.get(s.driverId) ?? {
+        driverName: s.driver?.fullName ?? '—',
+        employeeId: s.driver?.employeeId ?? null,
+        idleS: 0,
+      };
+      cur.idleS += s.idleS;
+      byDriver.set(s.driverId, cur);
+    }
+
+    const rows = Array.from(byDriver.entries())
+      .map(([driverId, v]) => {
+        const idleHours = v.idleS / 3600;
+        return {
+          driverId,
+          driverName: v.driverName,
+          employeeId: v.employeeId,
+          idleS: v.idleS,
+          idleHours: Math.round(idleHours * 100) / 100,
+          amount: Math.round(idleHours * tariffPerHour),
+        };
+      })
+      .sort((a, b) => b.idleS - a.idleS);
+
+    const totals = rows.reduce(
+      (acc, r) => {
+        acc.idleS += r.idleS;
+        acc.idleHours += r.idleHours;
+        acc.amount += r.amount;
+        return acc;
+      },
+      { idleS: 0, idleHours: 0, amount: 0 },
+    );
+    totals.idleHours = Math.round(totals.idleHours * 100) / 100;
+
+    return {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      tariffPerHour,
+      rows,
+      totals,
+    };
+  }
+
+  // ── Driver scorecard (PDF, on-demand) ──────────────────────────
+  // One driver, one month: aggregate DriverScore rows + Trip totals
+  // and render a single-page PDF the manager can attach to the monthly
+  // review. The cron-scheduled "1st of month, e-mail to driver" loop
+  // is deferred (roadmap Эрэмбэ 2 v2) — what's here today is the
+  // hand-pulled version that exercises the same data path.
+  async driverScorecard(
+    actor: { role: Role; companyId: string | null },
+    driverId: string,
+    from: Date,
+    to: Date,
+  ): Promise<{
+    driver: { id: string; fullName: string; employeeId: string | null };
+    period: { from: string; to: string };
+    totals: {
+      distanceKm: number;
+      drivingHours: number;
+      idleHours: number;
+      harshAccel: number;
+      harshBrake: number;
+      harshCorner: number;
+      speedingEvents: number;
+    };
+    score: number;
+    daily: Array<{ date: string; score: number; distanceKm: number }>;
+  }> {
+    const driver = await this.prisma.driver.findUnique({
+      where: { id: driverId },
+      select: { id: true, fullName: true, employeeId: true, companyId: true },
+    });
+    if (!driver) throw new Error('Driver not found');
+    if (actor.role !== 'SUPER_ADMIN' && driver.companyId !== actor.companyId) {
+      throw new Error('Forbidden');
+    }
+    const scores = await this.prisma.driverScore.findMany({
+      where: { driverId, date: { gte: from, lte: to } },
+      orderBy: { date: 'asc' },
+    });
+    const totals = scores.reduce(
+      (acc, s) => {
+        acc.distanceKm += s.distanceKm;
+        acc.drivingHours += s.durationS / 3600;
+        acc.idleHours += s.idleS / 3600;
+        acc.harshAccel += s.harshAccel;
+        acc.harshBrake += s.harshBrake;
+        acc.harshCorner += s.harshCorner;
+        acc.speedingEvents += s.speedingEvents;
+        return acc;
+      },
+      {
+        distanceKm: 0, drivingHours: 0, idleHours: 0,
+        harshAccel: 0, harshBrake: 0, harshCorner: 0, speedingEvents: 0,
+      },
+    );
+    const score = scores.length === 0
+      ? 100
+      : scores.reduce((s, r) => s + r.score, 0) / scores.length;
+    return {
+      driver: { id: driver.id, fullName: driver.fullName, employeeId: driver.employeeId },
+      period: { from: from.toISOString(), to: to.toISOString() },
+      totals: {
+        distanceKm: Math.round(totals.distanceKm * 10) / 10,
+        drivingHours: Math.round(totals.drivingHours * 10) / 10,
+        idleHours: Math.round(totals.idleHours * 10) / 10,
+        harshAccel: totals.harshAccel,
+        harshBrake: totals.harshBrake,
+        harshCorner: totals.harshCorner,
+        speedingEvents: totals.speedingEvents,
+      },
+      score: Math.round(score * 10) / 10,
+      daily: scores.map((s) => ({
+        date: s.date.toISOString().slice(0, 10),
+        score: Math.round(s.score * 10) / 10,
+        distanceKm: Math.round(s.distanceKm * 10) / 10,
+      })),
+    };
+  }
+
+  async driverScorecardPdf(
+    actor: { role: Role; companyId: string | null },
+    driverId: string,
+    from: Date,
+    to: Date,
+  ): Promise<Buffer> {
+    const data = await this.driverScorecard(actor, driverId, from, to);
+    return new Promise<Buffer>((resolve, reject) => {
+      const doc = new PDFDocument({ margin: 40 });
+      const chunks: Buffer[] = [];
+      doc.on('data', (c) => chunks.push(c as Buffer));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      doc.fontSize(18).text('Fleex — Жолоочийн scorecard', { align: 'center' });
+      doc.moveDown(0.3);
+      doc.fontSize(11).fillColor('gray').text(
+        `${data.driver.fullName}${data.driver.employeeId ? ' · ' + data.driver.employeeId : ''}`,
+        { align: 'center' },
+      );
+      doc.fillColor('black');
+      doc.moveDown();
+
+      const kv = (k: string, v: string) => {
+        doc.font('Helvetica-Bold').text(k + ': ', { continued: true });
+        doc.font('Helvetica').text(v);
+      };
+      kv('Хугацаа', `${from.toISOString().slice(0, 10)} → ${to.toISOString().slice(0, 10)}`);
+      doc.moveDown(0.5);
+
+      doc.fontSize(28).fillColor(data.score >= 80 ? '#059669' : data.score >= 60 ? '#d97706' : '#dc2626')
+        .text(`Дундаж оноо: ${data.score.toFixed(1)} / 100`, { align: 'center' });
+      doc.fillColor('black').fontSize(11);
+      doc.moveDown();
+
+      doc.font('Helvetica-Bold').text('Хураангуй');
+      doc.font('Helvetica');
+      kv('Нийт зам', `${data.totals.distanceKm} км`);
+      kv('Хөдөлгөөнд', `${data.totals.drivingHours} ц`);
+      kv('Зогссон (idle)', `${data.totals.idleHours} ц`);
+      doc.moveDown(0.5);
+
+      doc.font('Helvetica-Bold').text('Зөрчлүүд (тоо)');
+      doc.font('Helvetica');
+      kv('Гэнэт хурдалсан', String(data.totals.harshAccel));
+      kv('Гэнэт тоормосолсон', String(data.totals.harshBrake));
+      kv('Гэнэт эргэсэн', String(data.totals.harshCorner));
+      kv('Хурд хэтрэлт', String(data.totals.speedingEvents));
+
+      doc.end();
+    });
+  }
+
+  async idleBillingExcel(
+    actor: { role: Role; companyId: string | null },
+    from: Date,
+    to: Date,
+    tariffPerHour: number,
+  ): Promise<Buffer> {
+    const data = await this.idleBilling(actor, from, to, tariffPerHour);
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Idle billing');
+    ws.columns = [
+      { header: 'Жолооч', key: 'driverName', width: 30 },
+      { header: 'Ажилтны ID', key: 'employeeId', width: 14 },
+      { header: 'Idle (цаг)', key: 'idleHours', width: 12 },
+      { header: 'Тариф (₮/цаг)', key: 'tariff', width: 14 },
+      { header: 'Дүн (₮)', key: 'amount', width: 16 },
+    ];
+    for (const r of data.rows) {
+      ws.addRow({
+        driverName: r.driverName,
+        employeeId: r.employeeId ?? '',
+        idleHours: r.idleHours,
+        tariff: tariffPerHour,
+        amount: r.amount,
+      });
+    }
+    ws.addRow({});
+    ws.addRow({
+      driverName: 'НИЙТ',
+      idleHours: data.totals.idleHours,
+      amount: data.totals.amount,
+    }).font = { bold: true };
+    const buf = await wb.xlsx.writeBuffer();
+    return Buffer.from(buf);
+  }
 }
 
 // Streaming helper kept for future use when reports outgrow Buffer.

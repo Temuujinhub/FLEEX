@@ -118,7 +118,11 @@ export function SensorsTab({ deviceId }: { deviceId: string }) {
   );
 }
 
+interface CalibPoint { raw: string; real: string }
+
 function SensorForm({ deviceId, existing, onDone }: { deviceId: string; existing: any | null; onDone: () => void }) {
+  const existingCalib: Array<{ raw: number; real: number }> | null =
+    Array.isArray(existing?.calibration) ? existing.calibration : null;
   const [form, setForm] = useState({
     name: existing?.name ?? '',
     type: existing?.type ?? 'VOLTAGE',
@@ -128,6 +132,18 @@ function SensorForm({ deviceId, existing, onDone }: { deviceId: string; existing
     offset: String(existing?.offset ?? 0),
     invert: !!existing?.invert,
   });
+  // Two-mode calibration: LINEAR (raw × multiplier + offset, default)
+  // or PIECEWISE (lookup of raw → real with linear interpolation between
+  // points). Switching to PIECEWISE seeds two starter rows so the user
+  // sees the shape of the input immediately.
+  const [mode, setMode] = useState<'LINEAR' | 'PIECEWISE'>(
+    existingCalib && existingCalib.length >= 2 ? 'PIECEWISE' : 'LINEAR',
+  );
+  const [calib, setCalib] = useState<CalibPoint[]>(
+    existingCalib && existingCalib.length > 0
+      ? existingCalib.map((p) => ({ raw: String(p.raw), real: String(p.real) }))
+      : [{ raw: '0', real: '0' }, { raw: '5000', real: '100' }],
+  );
   const [error, setError] = useState<string | null>(null);
   const save = useMutation({
     mutationFn: (payload: any) =>
@@ -159,13 +175,54 @@ function SensorForm({ deviceId, existing, onDone }: { deviceId: string; existing
         <Field label="Нэгж">
           <input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} placeholder="V" className={input} />
         </Field>
-        <Field label="Үржигдэхүүн" hint="value = raw × мульти + offset">
-          <input value={form.multiplier} onChange={(e) => setForm({ ...form, multiplier: e.target.value })} className={input} />
-        </Field>
-        <Field label="Offset">
-          <input value={form.offset} onChange={(e) => setForm({ ...form, offset: e.target.value })} className={input} />
-        </Field>
+        {mode === 'LINEAR' && (
+          <>
+            <Field label="Үржигдэхүүн" hint="value = raw × мульти + offset">
+              <input value={form.multiplier} onChange={(e) => setForm({ ...form, multiplier: e.target.value })} className={input} />
+            </Field>
+            <Field label="Offset">
+              <input value={form.offset} onChange={(e) => setForm({ ...form, offset: e.target.value })} className={input} />
+            </Field>
+          </>
+        )}
       </div>
+
+      <div className="rounded-md border border-slate-200 bg-white p-3 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="text-xs uppercase tracking-widest text-slate-500 font-semibold">
+            Калибраци
+          </div>
+          <div className="inline-flex rounded-md border border-slate-200 overflow-hidden text-xs">
+            <button
+              type="button"
+              onClick={() => setMode('LINEAR')}
+              className={clsx('px-3 py-1.5', mode === 'LINEAR' ? 'bg-brand-600 text-white' : 'bg-white text-slate-700 hover:bg-slate-50')}
+            >
+              Шугаман
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('PIECEWISE')}
+              className={clsx('px-3 py-1.5 border-l border-slate-200', mode === 'PIECEWISE' ? 'bg-brand-600 text-white' : 'bg-white text-slate-700 hover:bg-slate-50')}
+            >
+              Хүснэгт (piecewise)
+            </button>
+          </div>
+        </div>
+
+        {mode === 'LINEAR' ? (
+          <div className="text-[11px] text-slate-500">
+            value = raw × {form.multiplier || '?'} + {form.offset || '0'}
+          </div>
+        ) : (
+          <PiecewiseEditor
+            unit={form.unit || 'value'}
+            points={calib}
+            onChange={setCalib}
+          />
+        )}
+      </div>
+
       {error && <div className="text-xs text-rose-700">{error}</div>}
       <div className="flex justify-end gap-2">
         <button onClick={onDone} className="rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-sm font-medium px-3 py-2">Цуцлах</button>
@@ -173,13 +230,31 @@ function SensorForm({ deviceId, existing, onDone }: { deviceId: string; existing
           onClick={() => {
             if (form.name.trim().length < 1) return setError('Нэрээ оруулна уу');
             if (!form.sourceParam.trim()) return setError('Эх параметр оруулна уу');
+            let calibPayload: Array<{ raw: number; real: number }> | null = null;
+            if (mode === 'PIECEWISE') {
+              const parsed: Array<{ raw: number; real: number }> = [];
+              for (const row of calib) {
+                const r = parseFloat(row.raw);
+                const v = parseFloat(row.real);
+                if (Number.isNaN(r) || Number.isNaN(v)) {
+                  return setError('Хүснэгтэд тоо биш утга оруулсан байна');
+                }
+                parsed.push({ raw: r, real: v });
+              }
+              if (parsed.length < 2) {
+                return setError('Piecewise калибраци дор хаяж 2 цэг шаардлагатай');
+              }
+              parsed.sort((a, b) => a.raw - b.raw);
+              calibPayload = parsed;
+            }
             save.mutate({
               name: form.name.trim(),
               type: form.type,
               sourceParam: form.sourceParam.trim(),
               unit: form.unit || undefined,
-              multiplier: parseFloat(form.multiplier) || 1,
-              offset: parseFloat(form.offset) || 0,
+              multiplier: mode === 'LINEAR' ? (parseFloat(form.multiplier) || 1) : 1,
+              offset: mode === 'LINEAR' ? (parseFloat(form.offset) || 0) : 0,
+              calibration: calibPayload,
               invert: form.invert,
             });
           }}
@@ -203,4 +278,115 @@ function renderValue(s: any): string {
   if (s.lastValue != null) return `${s.lastValue}${s.unit ? ' ' + s.unit : ''}`;
   if (s.lastText) return s.lastText;
   return '—';
+}
+
+function PiecewiseEditor({
+  unit,
+  points,
+  onChange,
+}: {
+  unit: string;
+  points: CalibPoint[];
+  onChange: (p: CalibPoint[]) => void;
+}) {
+  const numericPoints = points
+    .map((p) => ({ raw: parseFloat(p.raw), real: parseFloat(p.real) }))
+    .filter((p) => !Number.isNaN(p.raw) && !Number.isNaN(p.real))
+    .sort((a, b) => a.raw - b.raw);
+
+  return (
+    <div className="grid md:grid-cols-2 gap-3">
+      <div className="space-y-2">
+        <div className="grid grid-cols-[1fr_1fr_auto] gap-2 text-[11px] uppercase tracking-widest text-slate-500 font-semibold">
+          <div>Raw (мВ / тоо)</div>
+          <div>Бодит ({unit})</div>
+          <div className="w-7" />
+        </div>
+        {points.map((p, idx) => (
+          <div key={idx} className="grid grid-cols-[1fr_1fr_auto] gap-2">
+            <input
+              value={p.raw}
+              onChange={(e) => {
+                const next = points.slice();
+                next[idx] = { ...next[idx], raw: e.target.value };
+                onChange(next);
+              }}
+              placeholder="0"
+              className={input}
+            />
+            <input
+              value={p.real}
+              onChange={(e) => {
+                const next = points.slice();
+                next[idx] = { ...next[idx], real: e.target.value };
+                onChange(next);
+              }}
+              placeholder="0"
+              className={input}
+            />
+            <button
+              type="button"
+              onClick={() => onChange(points.filter((_, i) => i !== idx))}
+              disabled={points.length <= 2}
+              className="text-rose-500 hover:text-rose-700 disabled:opacity-30 text-lg leading-none"
+              title="Цэг устгах"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() => onChange([...points, { raw: '', real: '' }])}
+          className="text-xs text-brand-700 hover:text-brand-900 font-medium"
+        >
+          + Цэг нэмэх
+        </button>
+      </div>
+
+      <div>
+        <div className="text-[11px] uppercase tracking-widest text-slate-500 font-semibold mb-1">
+          Урьдчилан харах
+        </div>
+        <CalibChart points={numericPoints} unit={unit} />
+      </div>
+    </div>
+  );
+}
+
+function CalibChart({ points, unit }: { points: Array<{ raw: number; real: number }>; unit: string }) {
+  if (points.length < 2) {
+    return (
+      <div className="h-32 flex items-center justify-center text-xs text-slate-400 border border-dashed border-slate-200 rounded">
+        Дор хаяж 2 цэг оруулна уу.
+      </div>
+    );
+  }
+  const W = 220;
+  const H = 130;
+  const PAD = 22;
+  const xs = points.map((p) => p.raw);
+  const ys = points.map((p) => p.real);
+  const xMin = Math.min(...xs); const xMax = Math.max(...xs);
+  const yMin = Math.min(...ys); const yMax = Math.max(...ys);
+  const xR = xMax - xMin || 1;
+  const yR = yMax - yMin || 1;
+  const toX = (v: number) => PAD + ((v - xMin) / xR) * (W - 2 * PAD);
+  const toY = (v: number) => H - PAD - ((v - yMin) / yR) * (H - 2 * PAD);
+  const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${toX(p.raw).toFixed(1)} ${toY(p.real).toFixed(1)}`).join(' ');
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-32 bg-slate-50 rounded border border-slate-200">
+      <line x1={PAD} y1={H - PAD} x2={W - PAD} y2={H - PAD} stroke="#cbd5e1" strokeWidth={1} />
+      <line x1={PAD} y1={PAD} x2={PAD} y2={H - PAD} stroke="#cbd5e1" strokeWidth={1} />
+      <path d={path} fill="none" stroke="#0ea5e9" strokeWidth={2} />
+      {points.map((p, i) => (
+        <circle key={i} cx={toX(p.raw)} cy={toY(p.real)} r={3} fill="#0ea5e9" />
+      ))}
+      <text x={PAD} y={12} fontSize="9" fill="#475569">{yMax.toFixed(1)} {unit}</text>
+      <text x={PAD} y={H - 4} fontSize="9" fill="#475569">{yMin.toFixed(1)} {unit}</text>
+      <text x={W - PAD - 40} y={H - 4} fontSize="9" fill="#475569" textAnchor="start">raw {xMax.toFixed(0)}</text>
+      <text x={PAD + 2} y={H - PAD - 2} fontSize="9" fill="#475569">raw {xMin.toFixed(0)}</text>
+    </svg>
+  );
 }

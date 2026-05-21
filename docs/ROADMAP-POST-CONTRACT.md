@@ -9,6 +9,21 @@
 > бүрд ажлын тооцоолол хийгдсэн (бага = 1-3 өдөр, дунд = 1-2 долоо хоног,
 > том = 2-4 долоо хоног).
 
+## Явц (live)
+
+| Эрэмбэ | Нэр | Төлөв | Commit |
+|---|---|---|---|
+| 1 | Place ↔ Geofence sync | ✅ Хийгдсэн | `7494dc1` + `d0f382a` |
+| 2 | Driver scorecard PDF (on-demand v1) | ✅ Хийгдсэн | (энэ commit). Cron v2 хойшлогдсон |
+| 3 | PANIC ойролцоо машин зарлуулах | ✅ Хийгдсэн | `7494dc1` |
+| 4 | Geofence өдөр/шөнө хурд | ✅ Хийгдсэн | `7494dc1` + `d0f382a` |
+| 5 | Driver shift hierarchy | ⏳ Үлдсэн | — |
+| 6 | Dispatcher board v1 | ✅ Хийгдсэн | `2069d93` + `33fb7aa` |
+| 7 | Idle billing тайлан | ✅ Хийгдсэн | `f3c53e6` |
+| 8 | Sensor calibration UI | ✅ Хийгдсэн | (энэ commit) |
+| 9 | Lone-worker alert | ✅ Хийгдсэн | (энэ commit) |
+| 10 | Service prediction (v1: linear) | ✅ Хийгдсэн | (энэ commit) |
+
 ---
 
 ## ⭐ Эрэмбэ 1 — Place ↔ Geofence sync + Place-based alert

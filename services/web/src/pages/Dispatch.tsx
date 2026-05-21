@@ -160,7 +160,7 @@ export function Dispatch() {
       <header className="px-6 md:px-8 py-5 bg-white border-b border-slate-200">
         <div className="flex items-end justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-2xl font-bold">Дамжуулагч самбар</h1>
+            <h1 className="text-2xl font-bold">Dispatcher</h1>
             <p className="text-sm text-slate-500 mt-1">
               Машин бүрийн одоогийн төлвийг нэг харагдацанд. Идэвхгүй удсан машин болон холбоо тасарсан машин дээр анхаарлаа төвлөрүүлээрэй.
             </p>

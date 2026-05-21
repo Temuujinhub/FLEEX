@@ -1,7 +1,7 @@
 import { ReactNode, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { api } from '../lib/api';
+import { api, API_BASE, getToken } from '../lib/api';
 import { ExcelImport } from '../components/ExcelImport';
 import { useAuth } from '../store/auth';
 
@@ -59,6 +59,28 @@ export function Drivers() {
       }).length,
     };
   }, [drivers.data]);
+
+  // Pull last month's scorecard PDF on demand. Range is calendar-month
+  // aligned (1st 00:00 → next 1st 00:00 of previous month) so the file
+  // matches the once-per-month manager review cadence.
+  const downloadScorecard = async (driverId: string, name: string) => {
+    const now = new Date();
+    const firstOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const firstOfPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const from = firstOfPrevMonth.toISOString();
+    const to = firstOfThisMonth.toISOString();
+    const url = `${API_BASE}/reports/driver-scorecard/${driverId}/pdf?from=${from}&to=${to}`;
+    const resp = await fetch(url, { headers: { Authorization: `Bearer ${getToken()}` } });
+    if (!resp.ok) {
+      alert('Scorecard татаж чадсангүй');
+      return;
+    }
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `scorecard-${name.replace(/\s+/g, '_')}-${firstOfPrevMonth.toISOString().slice(0, 7)}.pdf`;
+    a.click();
+  };
 
   return (
     <div className="h-full flex flex-col bg-slate-100">
@@ -194,18 +216,26 @@ export function Drivers() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {canEdit ? (
+                    <div className="inline-flex items-center gap-1.5">
                       <button
                         type="button"
-                        onClick={() => setEditing(d)}
-                        title="Жолоочийн мэдээлэл засах"
+                        onClick={() => downloadScorecard(d.id, d.fullName)}
+                        title="Өмнөх сарын scorecard PDF татах"
                         className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 hover:border-brand-300 text-slate-700 text-xs font-medium px-2.5 py-1.5 transition"
                       >
-                        <PencilIcon /> Засах
+                        Scorecard
                       </button>
-                    ) : (
-                      <span className="text-slate-300 text-xs">—</span>
-                    )}
+                      {canEdit ? (
+                        <button
+                          type="button"
+                          onClick={() => setEditing(d)}
+                          title="Жолоочийн мэдээлэл засах"
+                          className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 hover:border-brand-300 text-slate-700 text-xs font-medium px-2.5 py-1.5 transition"
+                        >
+                          <PencilIcon /> Засах
+                        </button>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               ))}
