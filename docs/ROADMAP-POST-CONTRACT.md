@@ -17,7 +17,7 @@
 | 2 | Driver scorecard PDF (on-demand v1) | ✅ Хийгдсэн | (энэ commit). Cron v2 хойшлогдсон |
 | 3 | PANIC ойролцоо машин зарлуулах | ✅ Хийгдсэн | `7494dc1` |
 | 4 | Geofence өдөр/шөнө хурд | ✅ Хийгдсэн | `7494dc1` + `d0f382a` |
-| 5 | Driver shift hierarchy | ⏳ Үлдсэн | — |
+| 5 | Driver shift hierarchy (v1) | ✅ Хийгдсэн | (энэ commit). Shift-aware reports v2 |
 | 6 | Dispatcher board v1 | ✅ Хийгдсэн | `2069d93` + `33fb7aa` |
 | 7 | Idle billing тайлан | ✅ Хийгдсэн | `f3c53e6` |
 | 8 | Sensor calibration UI | ✅ Хийгдсэн | (энэ commit) |

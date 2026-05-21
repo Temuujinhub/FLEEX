@@ -45,6 +45,7 @@ class CreateDriverDto {
   @IsOptional() @IsString() shortName?: string;
   @IsOptional() @IsString() employeeId?: string;
   @IsOptional() @IsUUID() groupId?: string;
+  @IsOptional() @IsUUID() shiftId?: string;
   @IsOptional() @IsString() rfidCard?: string;
   @IsOptional() @IsString() phone?: string;
   @IsOptional() @IsString() email?: string;
@@ -65,6 +66,7 @@ class UpdateDriverDto {
   @IsOptional() @IsString() shortName?: string;
   @IsOptional() @IsString() employeeId?: string;
   @IsOptional() @IsUUID() groupId?: string;
+  @IsOptional() @IsUUID() shiftId?: string;
   @IsOptional() @IsString() rfidCard?: string;
   @IsOptional() @IsString() phone?: string;
   @IsOptional() @IsString() email?: string;

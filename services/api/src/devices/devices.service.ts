@@ -36,7 +36,14 @@ export class DevicesService {
         company: { select: { id: true, name: true, slug: true } },
         group:  { select: { id: true, name: true } },
         garage: { select: { id: true, name: true } },
-        driver: { select: { id: true, fullName: true } },
+        driver: {
+          select: {
+            id: true,
+            fullName: true,
+            phone: true,
+            shift: { select: { id: true, name: true, color: true, startTime: true, endTime: true } },
+          },
+        },
       },
     });
 

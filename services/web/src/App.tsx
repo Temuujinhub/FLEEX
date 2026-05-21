@@ -10,6 +10,7 @@ import { ServiceTasks } from './pages/ServiceTasks';
 import { LandingSettings } from './pages/LandingSettings';
 import { LiveMap } from './pages/LiveMap';
 import { Dispatch } from './pages/Dispatch';
+import { Shifts } from './pages/Shifts';
 import { History } from './pages/History';
 import { Events } from './pages/Events';
 import { Geofences } from './pages/Geofences';
@@ -45,6 +46,7 @@ export function App() {
         <Route path="/app/devices" element={<Devices />} />
         <Route path="/app/drivers" element={<Drivers />} />
         <Route path="/app/groups" element={<Groups />} />
+        <Route path="/app/shifts" element={<Shifts />} />
         <Route path="/app/eco-driving" element={<EcoDriving />} />
         <Route path="/app/places" element={<Places />} />
         <Route path="/app/service-tasks" element={<ServiceTasks />} />

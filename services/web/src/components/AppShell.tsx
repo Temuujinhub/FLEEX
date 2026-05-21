@@ -19,6 +19,7 @@ const SECTIONS: {
       { to: '/app/devices',   label: 'Машин · Төхөөрөмж', min: 'VIEWER',      icon: <IconTruck /> },
       { to: '/app/drivers',   label: 'Жолооч · Ажилчид', min: 'VIEWER',       icon: <IconDriver /> },
       { to: '/app/groups',    label: 'Алба нэгж', min: 'FLEET_MANAGER',       icon: <IconLayers /> },
+      { to: '/app/shifts',    label: 'Ээлж', min: 'FLEET_MANAGER',            icon: <IconLayers /> },
       { to: '/app/service-tasks', label: 'Засвар үйлчилгээ', min: 'VIEWER',   icon: <IconWrench /> },
       { to: '/app/history',   label: 'Маршрут · Түүх', min: 'VIEWER',         icon: <IconRoute /> },
     ],
