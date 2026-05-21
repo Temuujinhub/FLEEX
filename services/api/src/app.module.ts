@@ -10,6 +10,7 @@ import { UsersModule } from './users/users.module';
 import { CompaniesModule } from './companies/companies.module';
 import { DevicesModule } from './devices/devices.module';
 import { GroupsModule } from './groups/groups.module';
+import { ShiftsModule } from './shifts/shifts.module';
 import { GaragesModule } from './garages/garages.module';
 import { DriversModule } from './drivers/drivers.module';
 import { PlacesModule } from './places/places.module';
@@ -58,6 +59,7 @@ import { TimescaleInitService } from './common/timescale-init.service';
     CompaniesModule,
     DevicesModule,
     GroupsModule,
+    ShiftsModule,
     GaragesModule,
     DriversModule,
     PlacesModule,

@@ -125,10 +125,16 @@ export function Reports() {
   // Idle-billing tariff is decoupled from device selection — the report is
   // a cross-driver aggregate, so we ask for an ₮/цаг rate instead.
   const [tariff, setTariff] = useState('50000');
+  const [shiftId, setShiftId] = useState('');
   const [preset, setPreset] = useState<string>('7d');
   const [from, setFrom] = useState<string>(toLocalInput(new Date(Date.now() - 7 * 86_400_000)));
   const [to, setTo] = useState<string>(toLocalInput(new Date()));
-  const [generated, setGenerated] = useState<{ tplId: string; deviceId: string; from: string; to: string; tariff: string } | null>(null);
+  const [generated, setGenerated] = useState<{ tplId: string; deviceId: string; from: string; to: string; tariff: string; shiftId: string } | null>(null);
+
+  const shifts = useQuery({
+    queryKey: ['shifts'],
+    queryFn: () => api.get('/shifts').then((r) => r.data as Array<{ id: string; name: string; color: string | null }>),
+  });
 
   const tpl = TEMPLATES.find((t) => t.id === tplId) ?? TEMPLATES[0];
 
@@ -163,7 +169,7 @@ export function Reports() {
 
   const run = () => {
     if (!canRun) return;
-    setGenerated({ tplId: tpl.id, deviceId, from, to, tariff });
+    setGenerated({ tplId: tpl.id, deviceId, from, to, tariff, shiftId });
   };
 
   const download = (fmt: 'excel' | 'pdf') => {
@@ -175,7 +181,8 @@ export function Reports() {
       const url =
         `${API_BASE}/reports/idle-billing/excel` +
         `?from=${new Date(generated.from).toISOString()}&to=${new Date(generated.to).toISOString()}` +
-        `&tariff=${encodeURIComponent(generated.tariff)}`;
+        `&tariff=${encodeURIComponent(generated.tariff)}` +
+        (generated.shiftId ? `&shiftId=${encodeURIComponent(generated.shiftId)}` : '');
       fetch(url, { headers: { Authorization: `Bearer ${getToken()}` } })
         .then((r) => r.blob())
         .then((b) => {
@@ -298,19 +305,36 @@ export function Reports() {
           </div>
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
             {isIdleBilling ? (
-              <Field label="Тариф (₮/цаг)">
-                <input
-                  type="number"
-                  min="0"
-                  step="100"
-                  value={tariff}
-                  onChange={(e) => setTariff(e.target.value)}
-                  className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                />
-                <div className="mt-1 text-[11px] text-slate-500">
-                  Жнь: 50000. Тариф × нийт idle цаг = тус жолоочид нэхэмжлэх дүн.
-                </div>
-              </Field>
+              <>
+                <Field label="Тариф (₮/цаг)">
+                  <input
+                    type="number"
+                    min="0"
+                    step="100"
+                    value={tariff}
+                    onChange={(e) => setTariff(e.target.value)}
+                    className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                  <div className="mt-1 text-[11px] text-slate-500">
+                    Жнь: 50000. Тариф × нийт idle цаг = тус жолоочид нэхэмжлэх дүн.
+                  </div>
+                </Field>
+                <Field label="Ээлжээр шүүх (заавал биш)">
+                  <select
+                    value={shiftId}
+                    onChange={(e) => setShiftId(e.target.value)}
+                    className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  >
+                    <option value="">— Бүгд —</option>
+                    {(shifts.data ?? []).map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                  <div className="mt-1 text-[11px] text-slate-500">
+                    Сонгосон ээлжид харьяалагдах жолооч нарын тооцоог л харуулна.
+                  </div>
+                </Field>
+              </>
             ) : (
               <Field label="Машин">
                 <select
@@ -412,6 +436,7 @@ export function Reports() {
               from={generated.from}
               to={generated.to}
               tariff={Number(generated.tariff)}
+              shiftId={generated.shiftId}
             />
           ) : (
             <ReportResult
@@ -794,13 +819,14 @@ function eventLabel(t: string) {
 
 // (icon glyphs declared up top so TEMPLATES can reference them without TDZ)
 
-function IdleBillingResult({ from, to, tariff }: { from: string; to: string; tariff: number }) {
+function IdleBillingResult({ from, to, tariff, shiftId }: { from: string; to: string; tariff: number; shiftId: string }) {
   const q = useQuery({
-    queryKey: ['reports', 'idle-billing', from, to, tariff],
+    queryKey: ['reports', 'idle-billing', from, to, tariff, shiftId],
     queryFn: () =>
       api
         .get(
-          `/reports/idle-billing?from=${new Date(from).toISOString()}&to=${new Date(to).toISOString()}&tariff=${tariff}`,
+          `/reports/idle-billing?from=${new Date(from).toISOString()}&to=${new Date(to).toISOString()}&tariff=${tariff}` +
+            (shiftId ? `&shiftId=${encodeURIComponent(shiftId)}` : ''),
         )
         .then((r) => r.data as {
           tariffPerHour: number;
@@ -808,6 +834,7 @@ function IdleBillingResult({ from, to, tariff }: { from: string; to: string; tar
             driverId: string;
             driverName: string;
             employeeId: string | null;
+            shiftName: string | null;
             idleS: number;
             idleHours: number;
             amount: number;
@@ -847,17 +874,19 @@ function IdleBillingResult({ from, to, tariff }: { from: string; to: string; tar
               <tr>
                 <th className="px-3 py-2 text-left">Жолооч</th>
                 <th className="px-3 py-2 text-left">Ажилтны ID</th>
+                <th className="px-3 py-2 text-left">Ээлж</th>
                 <th className="px-3 py-2 text-right">Idle (цаг)</th>
                 <th className="px-3 py-2 text-right">Дүн (₮)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {q.data.rows.length === 0 ? (
-                <tr><td colSpan={4} className="px-3 py-6 text-center text-xs text-slate-400">Энэ хугацаанд бүртгэгдсэн idle мэдээ алга.</td></tr>
+                <tr><td colSpan={5} className="px-3 py-6 text-center text-xs text-slate-400">Энэ хугацаанд бүртгэгдсэн idle мэдээ алга.</td></tr>
               ) : q.data.rows.map((r) => (
                 <tr key={r.driverId}>
                   <td className="px-3 py-2">{r.driverName}</td>
                   <td className="px-3 py-2 text-slate-500">{r.employeeId ?? '—'}</td>
+                  <td className="px-3 py-2 text-slate-500">{r.shiftName ?? '—'}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmt.format(r.idleHours)}</td>
                   <td className="px-3 py-2 text-right tabular-nums font-medium">{fmt.format(r.amount)}</td>
                 </tr>
@@ -866,7 +895,7 @@ function IdleBillingResult({ from, to, tariff }: { from: string; to: string; tar
             {q.data.rows.length > 0 && (
               <tfoot className="bg-slate-50 font-semibold">
                 <tr>
-                  <td colSpan={2} className="px-3 py-2">НИЙТ</td>
+                  <td colSpan={3} className="px-3 py-2">НИЙТ</td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmt.format(q.data.totals.idleHours)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmt.format(q.data.totals.amount)} ₮</td>
                 </tr>

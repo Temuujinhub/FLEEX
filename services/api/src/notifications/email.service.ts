@@ -125,24 +125,54 @@ export class EmailService implements OnModuleInit {
   }
 
   async send(to: string[], subject: string, text: string): Promise<void> {
+    return this.sendWithAttachments(to, subject, text, []);
+  }
+
+  // Attachment-capable variant. Brevo's REST API accepts base64 in the
+  // `attachment` array; nodemailer accepts a `content: Buffer`. We keep
+  // a single public entry point so callers don't branch on transport.
+  async sendWithAttachments(
+    to: string[],
+    subject: string,
+    text: string,
+    attachments: Array<{ filename: string; content: Buffer; contentType?: string }>,
+  ): Promise<void> {
     if (to.length === 0) return;
     if (this.transport === 'disabled') {
       this.logger.warn(`Email disabled — skipping send to ${to.join(', ')}`);
       return;
     }
     if (this.transport === 'brevo-api') {
-      return this.sendViaApi(to, subject, text);
+      return this.sendViaApi(to, subject, text, attachments);
     }
-    return this.sendViaSmtp(to, subject, text);
+    return this.sendViaSmtp(to, subject, text, attachments);
   }
 
-  private async sendViaApi(to: string[], subject: string, text: string): Promise<void> {
+  private async sendViaApi(
+    to: string[],
+    subject: string,
+    text: string,
+    attachments: Array<{ filename: string; content: Buffer; contentType?: string }> = [],
+  ): Promise<void> {
     if (!this.brevoApiKey || !this.fromEmail) {
       throw new Error('Brevo API not initialised');
     }
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15_000);
+    const timer = setTimeout(() => controller.abort(), 30_000);
     try {
+      const payload: Record<string, unknown> = {
+        sender: { name: this.fromName ?? 'Fleex', email: this.fromEmail },
+        to: to.map((email) => ({ email })),
+        replyTo: this.replyTo ? { email: this.replyTo } : undefined,
+        subject,
+        textContent: text,
+      };
+      if (attachments.length > 0) {
+        payload.attachment = attachments.map((a) => ({
+          name: a.filename,
+          content: a.content.toString('base64'),
+        }));
+      }
       const res = await fetch('https://api.brevo.com/v3/smtp/email', {
         method: 'POST',
         headers: {
@@ -150,13 +180,7 @@ export class EmailService implements OnModuleInit {
           accept: 'application/json',
           'api-key': this.brevoApiKey,
         },
-        body: JSON.stringify({
-          sender: { name: this.fromName ?? 'Fleex', email: this.fromEmail },
-          to: to.map((email) => ({ email })),
-          replyTo: this.replyTo ? { email: this.replyTo } : undefined,
-          subject,
-          textContent: text,
-        }),
+        body: JSON.stringify(payload),
         signal: controller.signal,
       });
       const bodyText = await res.text();
@@ -218,7 +242,12 @@ export class EmailService implements OnModuleInit {
     }
   }
 
-  private async sendViaSmtp(to: string[], subject: string, text: string): Promise<void> {
+  private async sendViaSmtp(
+    to: string[],
+    subject: string,
+    text: string,
+    attachments: Array<{ filename: string; content: Buffer; contentType?: string }> = [],
+  ): Promise<void> {
     if (!this.transporter) {
       this.logger.warn(`SMTP disabled — skipping send to ${to.join(', ')}`);
       return;
@@ -230,6 +259,13 @@ export class EmailService implements OnModuleInit {
         replyTo: this.replyTo,
         subject,
         text,
+        attachments: attachments.length > 0
+          ? attachments.map((a) => ({
+              filename: a.filename,
+              content: a.content,
+              contentType: a.contentType,
+            }))
+          : undefined,
       });
       this.logger.log(
         `Sent via SMTP: to=${to.join(', ')} messageId=${info.messageId} response=${info.response ?? 'n/a'}`,

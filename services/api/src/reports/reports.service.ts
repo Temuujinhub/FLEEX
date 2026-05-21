@@ -94,6 +94,7 @@ export class ReportsService {
     from: Date,
     to: Date,
     weights: Record<string, number>,
+    shiftId?: string,
   ) {
     const where: any = { occurredAt: { gte: from, lte: to } };
     if (actor.role !== 'SUPER_ADMIN') where.companyId = actor.companyId ?? undefined;
@@ -109,11 +110,24 @@ export class ReportsService {
       counts.set(e.deviceId, m);
     }
 
+    // Shift filter applies at the device level via the device's
+    // current driver assignment. A device with no driver, or whose
+    // driver isn't on the requested shift, is excluded — same model
+    // the idle billing report uses, kept consistent so a manager who
+    // expects "this driver in this shift" sees the same row set.
+    const deviceWhere: any = actor.role === 'SUPER_ADMIN' ? {} : { companyId: actor.companyId ?? undefined };
+    if (shiftId) deviceWhere.driver = { shiftId };
+
     const devices = await this.prisma.device.findMany({
-      where: actor.role === 'SUPER_ADMIN' ? {} : { companyId: actor.companyId ?? undefined },
+      where: deviceWhere,
       select: {
         id: true, name: true, plateNumber: true, vehicleType: true,
-        driver: { select: { id: true, fullName: true, employeeId: true } },
+        driver: {
+          select: {
+            id: true, fullName: true, employeeId: true,
+            shift: { select: { id: true, name: true, color: true } },
+          },
+        },
       },
     });
 
@@ -405,14 +419,17 @@ export class ReportsService {
     from: Date,
     to: Date,
     tariffPerHour: number,
+    shiftId?: string,
   ): Promise<{
     from: string;
     to: string;
     tariffPerHour: number;
+    shiftId: string | null;
     rows: Array<{
       driverId: string;
       driverName: string;
       employeeId: string | null;
+      shiftName: string | null;
       idleS: number;
       idleHours: number;
       amount: number;
@@ -421,24 +438,35 @@ export class ReportsService {
   }> {
     const where: any = { date: { gte: from, lte: to } };
     if (actor.role !== 'SUPER_ADMIN') where.companyId = actor.companyId ?? undefined;
+    // Shift filter joins through Driver. We push the predicate into
+    // the relational filter so PG does the work and we don't ship
+    // unwanted rows over the wire.
+    if (shiftId) where.driver = { shiftId };
 
     const scores = await this.prisma.driverScore.findMany({
       where,
       select: {
         driverId: true,
         idleS: true,
-        driver: { select: { fullName: true, employeeId: true } },
+        driver: {
+          select: {
+            fullName: true,
+            employeeId: true,
+            shift: { select: { name: true } },
+          },
+        },
       },
     });
 
     const byDriver = new Map<
       string,
-      { driverName: string; employeeId: string | null; idleS: number }
+      { driverName: string; employeeId: string | null; shiftName: string | null; idleS: number }
     >();
     for (const s of scores) {
       const cur = byDriver.get(s.driverId) ?? {
         driverName: s.driver?.fullName ?? '—',
         employeeId: s.driver?.employeeId ?? null,
+        shiftName: s.driver?.shift?.name ?? null,
         idleS: 0,
       };
       cur.idleS += s.idleS;
@@ -452,6 +480,7 @@ export class ReportsService {
           driverId,
           driverName: v.driverName,
           employeeId: v.employeeId,
+          shiftName: v.shiftName,
           idleS: v.idleS,
           idleHours: Math.round(idleHours * 100) / 100,
           amount: Math.round(idleHours * tariffPerHour),
@@ -474,6 +503,7 @@ export class ReportsService {
       from: from.toISOString(),
       to: to.toISOString(),
       tariffPerHour,
+      shiftId: shiftId ?? null,
       rows,
       totals,
     };
@@ -615,13 +645,15 @@ export class ReportsService {
     from: Date,
     to: Date,
     tariffPerHour: number,
+    shiftId?: string,
   ): Promise<Buffer> {
-    const data = await this.idleBilling(actor, from, to, tariffPerHour);
+    const data = await this.idleBilling(actor, from, to, tariffPerHour, shiftId);
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Idle billing');
     ws.columns = [
       { header: 'Жолооч', key: 'driverName', width: 30 },
       { header: 'Ажилтны ID', key: 'employeeId', width: 14 },
+      { header: 'Ээлж', key: 'shiftName', width: 18 },
       { header: 'Idle (цаг)', key: 'idleHours', width: 12 },
       { header: 'Тариф (₮/цаг)', key: 'tariff', width: 14 },
       { header: 'Дүн (₮)', key: 'amount', width: 16 },
@@ -630,6 +662,7 @@ export class ReportsService {
       ws.addRow({
         driverName: r.driverName,
         employeeId: r.employeeId ?? '',
+        shiftName: r.shiftName ?? '—',
         idleHours: r.idleHours,
         tariff: tariffPerHour,
         amount: r.amount,

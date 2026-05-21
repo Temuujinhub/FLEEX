@@ -358,8 +358,15 @@ class ServiceTasksController {
   }
 }
 
+// Imported at module scope (rather than via `import` at the top of
+// the file) to avoid creating a circular reference between this
+// module and NotificationsModule via the cron service.
+import { ServiceReminderCronService } from './service-reminder-cron.service';
+import { NotificationsModule } from '../notifications/notifications.module';
+
 @Module({
+  imports: [NotificationsModule],
   controllers: [ServiceTasksController],
-  providers: [ServiceTasksService],
+  providers: [ServiceTasksService, ServiceReminderCronService],
 })
 export class ServiceTasksModule {}

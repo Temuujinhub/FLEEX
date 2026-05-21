@@ -33,7 +33,12 @@ interface DeviceRow {
   lastSpeed: number | null;
   lastSeenAt: string | null;
   driverId: string | null;
-  driver?: { id: string; fullName: string; phone: string | null } | null;
+  driver?: {
+    id: string;
+    fullName: string;
+    phone: string | null;
+    shift?: { id: string; name: string; color: string | null; startTime: string; endTime: string } | null;
+  } | null;
   group?: { id: string; name: string } | null;
 }
 
@@ -254,9 +259,23 @@ function DispatchCard({ row }: { row: Row }) {
         </div>
         <span className="text-[11px] text-slate-500 whitespace-nowrap">{elapsed}</span>
       </div>
-      <div className="mt-1 flex items-center gap-3 text-[11px] text-slate-600">
+      <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-600 flex-wrap">
         {row.status === 'MOVING' && (
           <span className="text-emerald-700 font-medium">{speed} km/h</span>
+        )}
+        {row.driver?.shift && (
+          <span
+            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium border"
+            style={{
+              background: row.driver.shift.color ? row.driver.shift.color + '20' : '#f1f5f9',
+              borderColor: row.driver.shift.color || '#cbd5e1',
+              color: row.driver.shift.color || '#475569',
+            }}
+            title={`Ээлж: ${row.driver.shift.name} (${row.driver.shift.startTime}-${row.driver.shift.endTime})`}
+          >
+            <span className="inline-block h-2 w-2 rounded-full" style={{ background: row.driver.shift.color || '#94a3b8' }} />
+            {row.driver.shift.name}
+          </span>
         )}
         {row.driver?.fullName && (
           <span className="truncate" title={row.driver.fullName}>{row.driver.fullName}</span>

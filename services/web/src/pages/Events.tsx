@@ -35,6 +35,7 @@ const TYPE_LABELS: Record<string, string> = {
   DEVICE_OFFLINE: 'Холбоо тасарсан',
   DEVICE_ONLINE:  'Холбогдсон',
   TAMPER:         'Гэмтсэн / Эвдсэн',
+  LONE_WORKER_RISK: 'Lone-worker эрсдэл',
   CUSTOM:         'Бусад',
 };
 
@@ -63,6 +64,7 @@ type EventRow = {
 
 const FILTER_GROUPS: { id: string; label: string; types: string[] }[] = [
   { id: 'all',      label: 'Бүгд',          types: [] },
+  { id: 'safety',   label: 'Аюулгүй байдал', types: ['PANIC', 'LONE_WORKER_RISK'] },
   { id: 'geo',      label: 'Geofence',      types: ['GEOFENCE_ENTER', 'GEOFENCE_EXIT'] },
   { id: 'overspeed',label: 'Хурд',          types: ['OVERSPEED'] },
   { id: 'driving',  label: 'Жолоодлого',    types: ['HARSH_ACCEL', 'HARSH_BRAKE', 'HARSH_CORNER'] },

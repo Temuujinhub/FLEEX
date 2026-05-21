@@ -48,6 +48,7 @@ model Company {
   garages     Garage[]
   geofences   Geofence[]
   drivers     Driver[]
+  shifts      Shift[]
   places      Place[]
   serviceTasks ServiceTask[]
 
@@ -312,6 +313,34 @@ model DeviceGroup {
   @@map("device_groups")
 }
 
+// Working-hours definition. Each row is a contiguous time window in
+// HH:mm (start > end means the shift wraps midnight, e.g. night shift
+// 22:00 → 06:00). Shifts can be nested via parentShiftId — typically a
+// parent "Өглөөний ээлж" with bridade child rows underneath — so an OT
+// dispatcher can roll up reports by department or drill into a specific
+// crew. Hierarchy is one level deep in practice but the FK allows N.
+model Shift {
+  id            String   @id @default(uuid()) @db.Uuid
+  companyId     String   @db.Uuid
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name          String
+  description   String?
+  startTime     String   // HH:mm in company TZ
+  endTime       String   // HH:mm; wraps midnight when end < start
+  color         String?  // hex; UI tints driver chips so dispatchers can scan at a glance
+  parentShiftId String?  @db.Uuid
+  parentShift   Shift?   @relation("ShiftTree", fields: [parentShiftId], references: [id], onDelete: SetNull)
+  childShifts   Shift[]  @relation("ShiftTree")
+  drivers       Driver[]
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([companyId, name])
+  @@index([companyId])
+  @@map("shifts")
+}
+
 model Device {
   id           String        @id @default(uuid()) @db.Uuid
   companyId    String        @db.Uuid
@@ -479,6 +508,11 @@ model Driver {
   company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   groupId     String?  @db.Uuid                 // хэлтэс / department
   group       DeviceGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  // Working-hours assignment. Optional — drivers without a shift fall
+  // into the catch-all "Хуваариагүй" bucket in the Shifts UI and
+  // shift-filtered reports treat them as 24/7.
+  shiftId     String?  @db.Uuid
+  shift       Shift?   @relation(fields: [shiftId], references: [id], onDelete: SetNull)
 
   fullName    String                              // Backwards-compatible display
   firstName   String?                             // Нэр

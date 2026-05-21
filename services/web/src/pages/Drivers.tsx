@@ -41,6 +41,11 @@ export function Drivers() {
     queryFn: () => api.get('/groups').then((r) => r.data),
   });
 
+  const shifts = useQuery({
+    queryKey: ['shifts'],
+    queryFn: () => api.get('/shifts').then((r) => r.data),
+  });
+
   const stats = useMemo(() => {
     const list: any[] = drivers.data ?? [];
     const today = new Date();
@@ -248,6 +253,7 @@ export function Drivers() {
         <DriverModal
           mode="create"
           groups={groups.data ?? []}
+          shifts={shifts.data ?? []}
           onClose={() => setShowAdd(false)}
         />
       )}
@@ -256,6 +262,7 @@ export function Drivers() {
           mode="edit"
           driver={editing}
           groups={groups.data ?? []}
+          shifts={shifts.data ?? []}
           onClose={() => setEditing(null)}
         />
       )}
@@ -274,7 +281,7 @@ export function Drivers() {
 // ── Driver Modal (create + edit) ──────────────────────────────
 type DriverForm = {
   lastName: string; firstName: string; shortName: string; fullName: string;
-  employeeId: string; groupId: string;
+  employeeId: string; groupId: string; shiftId: string;
   phone: string; email: string; address: string;
   rfidCard: string; ssn: string; avatarKey: string;
   licenseNo: string; licenseCategory: string;
@@ -282,7 +289,7 @@ type DriverForm = {
 };
 const EMPTY_DRIVER: DriverForm = {
   lastName: '', firstName: '', shortName: '', fullName: '',
-  employeeId: '', groupId: '',
+  employeeId: '', groupId: '', shiftId: '',
   phone: '', email: '', address: '',
   rfidCard: '', ssn: '', avatarKey: 'A1',
   licenseNo: '', licenseCategory: '',
@@ -290,10 +297,10 @@ const EMPTY_DRIVER: DriverForm = {
 };
 
 type DriverModalProps =
-  | { mode: 'create'; groups: any[]; onClose: () => void; driver?: undefined }
-  | { mode: 'edit';   groups: any[]; onClose: () => void; driver: any };
+  | { mode: 'create'; groups: any[]; shifts: any[]; onClose: () => void; driver?: undefined }
+  | { mode: 'edit';   groups: any[]; shifts: any[]; onClose: () => void; driver: any };
 
-function DriverModal({ mode, driver, groups, onClose }: DriverModalProps) {
+function DriverModal({ mode, driver, groups, shifts, onClose }: DriverModalProps) {
   const isEdit = mode === 'edit';
   const [tab, setTab] = useState<'basic' | 'license'>('basic');
   const [form, setForm] = useState<DriverForm>(() => driver ? formFromDriver(driver) : EMPTY_DRIVER);
@@ -349,6 +356,7 @@ function DriverModal({ mode, driver, groups, onClose }: DriverModalProps) {
       if (v || isEdit) payload[k] = v || null;
     }
     payload.groupId = form.groupId || (isEdit ? null : undefined);
+    payload.shiftId = form.shiftId || (isEdit ? null : undefined);
     payload.licenseIssuedAt = form.licenseIssuedAt ? new Date(form.licenseIssuedAt).toISOString() : (isEdit ? null : undefined);
     payload.licenseUntil    = form.licenseUntil    ? new Date(form.licenseUntil).toISOString()    : (isEdit ? null : undefined);
     // Drop "undefined"s so the body is clean on create.
@@ -417,6 +425,16 @@ function DriverModal({ mode, driver, groups, onClose }: DriverModalProps) {
                 <select value={form.groupId} onChange={(e) => set('groupId', e.target.value)} className={input}>
                   <option value="">— Сонгох —</option>
                   {groups.map((g) => (<option key={g.id} value={g.id}>{g.name}</option>))}
+                </select>
+              </Field>
+              <Field label="Ээлж">
+                <select value={form.shiftId} onChange={(e) => set('shiftId', e.target.value)} className={input}>
+                  <option value="">— Хуваариагүй —</option>
+                  {shifts.map((s: any) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.startTime}-{s.endTime})
+                    </option>
+                  ))}
                 </select>
               </Field>
 
@@ -556,6 +574,7 @@ function formFromDriver(d: any): DriverForm {
     fullName:        d.fullName        ?? '',
     employeeId:      d.employeeId      ?? '',
     groupId:         d.groupId         ?? d.group?.id ?? '',
+    shiftId:         d.shiftId         ?? d.shift?.id ?? '',
     phone:           d.phone           ?? '',
     email:           d.email           ?? '',
     address:         d.address         ?? '',
