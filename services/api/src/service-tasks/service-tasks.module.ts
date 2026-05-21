@@ -212,6 +212,77 @@ class ServiceTasksService {
     if (isUpdate) delete out.companyId;
     return out;
   }
+
+  // ── Upcoming predictions ─────────────────────────────────────────
+  // For every open ServiceTask with a `scheduledOdometerKm` target,
+  // estimate when the device will hit that target based on its
+  // average daily km over the past 30 days (Trip rows). Linear
+  // extrapolation is intentional — anything more sophisticated needs
+  // training data we don't have yet; the goal here is to surface
+  // "this oil change lands in ~12 days" instead of leaving operators
+  // to do the math by hand.
+  async upcomingPredictions(actor: { role: Role; companyId: string | null }) {
+    const where: any = {
+      status: { in: ['PLANNED', 'IN_PROGRESS', 'OVERDUE'] },
+      scheduledOdometerKm: { not: null },
+    };
+    if (actor.role !== 'SUPER_ADMIN') where.companyId = actor.companyId;
+
+    const tasks = await this.prisma.serviceTask.findMany({
+      where,
+      include: {
+        device: { select: { id: true, name: true, plateNumber: true, odometerKm: true } },
+      },
+      orderBy: { scheduledOdometerKm: 'asc' },
+    });
+    if (tasks.length === 0) return [];
+
+    const deviceIds = Array.from(new Set(tasks.map((t) => t.deviceId)));
+    const since = new Date(Date.now() - 30 * 86_400_000);
+    const trips = await this.prisma.trip.groupBy({
+      by: ['deviceId'],
+      where: { deviceId: { in: deviceIds }, startedAt: { gte: since } },
+      _sum: { distanceKm: true },
+      _count: { _all: true },
+    });
+    const avgPerDay = new Map<string, number>();
+    for (const t of trips) {
+      const total = t._sum.distanceKm ?? 0;
+      avgPerDay.set(t.deviceId, total / 30);
+    }
+
+    const now = Date.now();
+    return tasks.map((t) => {
+      const odo = t.device.odometerKm ?? 0;
+      const target = t.scheduledOdometerKm ?? 0;
+      const remainingKm = Math.max(0, target - odo);
+      const perDay = avgPerDay.get(t.deviceId) ?? 0;
+      const daysUntil = perDay > 0 ? Math.ceil(remainingKm / perDay) : null;
+      const dueAt = daysUntil != null ? new Date(now + daysUntil * 86_400_000).toISOString() : null;
+      let urgency: 'OVERDUE' | 'SOON' | 'PLANNED' | 'UNKNOWN' = 'UNKNOWN';
+      if (remainingKm === 0) urgency = 'OVERDUE';
+      else if (daysUntil == null) urgency = 'UNKNOWN';
+      else if (daysUntil <= 14) urgency = 'SOON';
+      else urgency = 'PLANNED';
+      return {
+        taskId: t.id,
+        title: t.title,
+        kind: t.kind,
+        device: {
+          id: t.device.id,
+          name: t.device.name,
+          plateNumber: t.device.plateNumber,
+          odometerKm: t.device.odometerKm,
+        },
+        scheduledOdometerKm: target,
+        remainingKm,
+        avgKmPerDay: Math.round((perDay + Number.EPSILON) * 10) / 10,
+        daysUntil,
+        dueAt,
+        urgency,
+      };
+    });
+  }
 }
 
 @Controller('service-tasks')
@@ -228,6 +299,14 @@ class ServiceTasksController {
     @Query('upcoming') upcoming?: string,
   ) {
     return this.svc.list(req.user, { deviceId, status, upcoming: upcoming === 'true' });
+  }
+
+  // Listed before :id so 'upcoming-predictions' isn't captured as an
+  // id parameter by Nest's route matcher.
+  @Get('upcoming-predictions')
+  @Audit('service_task.predictions')
+  upcomingPredictions(@Req() req: any) {
+    return this.svc.upcomingPredictions(req.user);
   }
 
   @Get(':id')

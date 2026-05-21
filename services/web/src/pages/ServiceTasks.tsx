@@ -60,6 +60,12 @@ export function ServiceTasks() {
     return { ...m, total: list.length, cost };
   }, [tasks.data]);
 
+  const predictions = useQuery({
+    queryKey: ['service-tasks', 'predictions'],
+    queryFn: () => api.get('/service-tasks/upcoming-predictions').then((r) => r.data),
+    refetchInterval: 5 * 60_000,
+  });
+
   return (
     <div className="h-full flex flex-col bg-slate-100">
       <header className="px-6 md:px-8 py-5 bg-white border-b border-slate-200">
@@ -87,6 +93,10 @@ export function ServiceTasks() {
           <Stat label="Хугацаа хэтэрсэн" value={summary.OVERDUE} accent="rose" />
           <Stat label="Нийт зардал (₮)" value={summary.cost.toLocaleString('mn-MN')} accent="slate" />
         </div>
+
+        {Array.isArray(predictions.data) && predictions.data.length > 0 && (
+          <UpcomingPredictionsPanel rows={predictions.data} />
+        )}
       </header>
 
       <div className="px-6 md:px-8 py-3 bg-white border-b border-slate-200">
@@ -470,6 +480,73 @@ function ModalShell({ title, onClose, children }: { title: string; onClose: () =
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-2xl leading-none">×</button>
         </header>
         {children}
+      </div>
+    </div>
+  );
+}
+
+interface Prediction {
+  taskId: string;
+  title: string;
+  device: { id: string; name: string; plateNumber: string | null; odometerKm: number | null };
+  scheduledOdometerKm: number;
+  remainingKm: number;
+  avgKmPerDay: number;
+  daysUntil: number | null;
+  urgency: 'OVERDUE' | 'SOON' | 'PLANNED' | 'UNKNOWN';
+}
+
+function UpcomingPredictionsPanel({ rows }: { rows: Prediction[] }) {
+  // Show up to 6 most-urgent tasks (sorted by daysUntil, OVERDUE first).
+  const sorted = rows.slice().sort((a, b) => {
+    const rank = (u: Prediction['urgency']) => (u === 'OVERDUE' ? 0 : u === 'SOON' ? 1 : u === 'PLANNED' ? 2 : 3);
+    if (rank(a.urgency) !== rank(b.urgency)) return rank(a.urgency) - rank(b.urgency);
+    return (a.daysUntil ?? Infinity) - (b.daysUntil ?? Infinity);
+  });
+  const top = sorted.slice(0, 6);
+  return (
+    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs uppercase tracking-widest text-slate-500 font-semibold">
+          Удахгүй хийгдэх засвар (одометр трендээр)
+        </div>
+        <div className="text-[11px] text-slate-400">Сүүлийн 30 хоногийн дундаж км дээр үндэслэв</div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+        {top.map((p) => (
+          <PredictionCard key={p.taskId} p={p} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PredictionCard({ p }: { p: Prediction }) {
+  const tone =
+    p.urgency === 'OVERDUE' ? 'bg-rose-50 border-rose-200 text-rose-900'
+    : p.urgency === 'SOON' ? 'bg-amber-50 border-amber-200 text-amber-900'
+    : p.urgency === 'UNKNOWN' ? 'bg-slate-50 border-slate-200 text-slate-700'
+    : 'bg-emerald-50 border-emerald-200 text-emerald-900';
+  return (
+    <div className={`rounded-lg border px-3 py-2 ${tone}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="font-semibold text-sm truncate">{p.device.name}</div>
+          {p.device.plateNumber && <div className="text-[11px] opacity-75">{p.device.plateNumber}</div>}
+          <div className="text-xs mt-0.5 truncate">{p.title}</div>
+        </div>
+        <div className="text-right whitespace-nowrap">
+          {p.urgency === 'OVERDUE' ? (
+            <span className="text-xs font-bold">Хугацаа болсон</span>
+          ) : p.daysUntil != null ? (
+            <span className="text-xs font-semibold">~ {p.daysUntil} хон</span>
+          ) : (
+            <span className="text-[11px]">тренд алга</span>
+          )}
+          <div className="text-[11px] opacity-75">
+            {p.remainingKm.toLocaleString('mn-MN')} км үлдсэн
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -22,7 +22,7 @@
 | 7 | Idle billing тайлан | ✅ Хийгдсэн | `f3c53e6` |
 | 8 | Sensor calibration UI | ✅ Хийгдсэн | (энэ commit) |
 | 9 | Lone-worker alert | ✅ Хийгдсэн | (энэ commit) |
-| 10 | Service prediction | ⏳ Үлдсэн | — |
+| 10 | Service prediction (v1: linear) | ✅ Хийгдсэн | (энэ commit) |
 
 ---
 
