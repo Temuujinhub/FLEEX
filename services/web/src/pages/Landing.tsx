@@ -60,7 +60,7 @@ const WHY_FLEEX = [
     icon: '🆘',
     title: '"Lone worker" автомат хамгаалалт',
     body:
-      'Жолооч 2 цаг хариу алга, эсвэл хөдөлгөөнгүй зогссон бол менежерт автомат сэрэмжлүүлэг. Pit-ийн алслагдсан хэсэгт зүрхний түгшилт, гэнэтийн осолд орсон жолоочийг яаралтай олж тусална. OT-н HSE-S-001 policy-ийг гар бичигтгүй автоматжуулсан.',
+      'Жолооч 2 цаг хариу алга, эсвэл хөдөлгөөнгүй зогссон бол менежерт автомат сэрэмжлүүлэг. Pit-ийн алслагдсан хэсэгт зүрхний түгшилт, гэнэтийн осолд орсон жолоочийг яаралтай олж тусална. Уул уурхайн lone-worker HSE policy-ийг гар бичигтгүй автоматжуулсан.',
   },
   {
     icon: '🚨',
@@ -129,7 +129,7 @@ const USE_CASES = [
     title: 'Уул уурхай · Хүнд тоног төхөөрөмж',
     imgKey: 'use-case-mining' as const,
     body:
-      'БелАЗ, CAT 793 ангиллын самосвал, экскаватор, бульдозер, грейдер, дугуйт ачигч. Тоосжилт ихтэй, -40°C-ийн хүйтэн нөхцөлд ажиллахад зориулсан төхөөрөмжүүд хэрэглэдэг. OT-н HSE policy шаардлагуудтай (lone-worker, speed management, dispatch monitoring, emergency response) автомат нийцэлтэй.',
+      'БелАЗ, CAT 793 ангиллын самосвал, экскаватор, бульдозер, грейдер, дугуйт ачигч. Тоосжилт ихтэй, -40°C-ийн хүйтэн нөхцөлд ажиллахад зориулсан төхөөрөмжүүд хэрэглэдэг. Уул уурхайн HSE policy шаардлагуудтай (lone-worker, speed management, dispatch monitoring, emergency response) автомат нийцэлтэй.',
     bullets: [
       'Lone-worker автомат risk event (2ц+ хариу алга)',
       'PANIC дохио ⇒ ойролцоох жолоочдод 5km дотор SMS',
@@ -260,7 +260,7 @@ const HIGHLIGHTS_2026 = [
     badge: 'SAFETY',
     title: 'Lone-worker автомат хамгаалалт',
     body:
-      'OT-н HSE-S-001 policy-ийг гар бичигтгүй автоматжуулсан. 2 цаг хариу/хөдөлгөөнгүй ⇒ автомат risk event ⇒ менежерт SMS+email. Pit-ийн алслагдсан хэсэгт хэн ч хэдийнэ "хүн ажиллаж байна" гэдгийг харна.',
+      'Уул уурхайн lone-worker HSE policy-ийг гар бичигтгүй автоматжуулсан. 2 цаг хариу/хөдөлгөөнгүй ⇒ автомат risk event ⇒ менежерт SMS+email. Pit-ийн алслагдсан хэсэгт хэн ч хэдийнэ "хүн ажиллаж байна" гэдгийг харна.',
   },
   {
     badge: 'SAFETY',
@@ -284,7 +284,7 @@ const HIGHLIGHTS_2026 = [
     badge: 'FINANCE',
     title: 'Idle billing нэхэмжлэл',
     body:
-      'Идэвхгүй ажилласан цаг × тариф = нэхэмжлэх дүн. Shift-ээр шүүж, Excel-ийн товчоор шууд татах. OT-н contractor-уудын нэхэмжлэл нэг өдөр биш, 5 минут болсон.',
+      'Идэвхгүй ажилласан цаг × тариф = нэхэмжлэх дүн. Shift-ээр шүүж, Excel-ийн товчоор шууд татах. Уул уурхайн contractor-уудын нэхэмжлэл нэг өдөр биш, 5 минут болсон.',
   },
   {
     badge: 'PREDICTIVE',
@@ -554,12 +554,18 @@ export function Landing() {
           <div className="max-w-3xl">
             <p className="uppercase tracking-widest text-brand-300 text-sm font-semibold">2026 — Mining-grade шинэчлэлт</p>
             <h2 className="mt-2 text-3xl md:text-4xl lg:text-5xl font-extrabold leading-tight">
-              Уурхайн нэгэн жил <span className="text-brand-300">аюулгүй ажиллах</span> 10 шинэ боломж
+              Уурхайн <span className="text-brand-300">аюулгүй ажиллагааны</span> шинэ шат
             </h2>
             <p className="mt-5 text-lg text-brand-100/90 leading-relaxed">
-              Оюу Толгойн тендерийн дараах хөгжүүлэлтийн үр дүн —
-              HSE policy-уудыг код-гүй биелүүлж, диспетчерийн гар ажиллагааг автоматжуулсан.
-              Эдгээр бүгд production-д аль хэдийн ажиллаж байна.
+              10 шинэ боломж — Монголын томоохон уул уурхайн компанитай хамтын хөгжүүлэлтийн үр дүн.
+            </p>
+            <ul className="mt-5 space-y-2 text-base text-brand-50">
+              <li className="flex gap-2"><span className="text-emerald-400">✅</span> HSE бодлогыг кодгүй хэрэгжүүлсэн</li>
+              <li className="flex gap-2"><span className="text-emerald-400">✅</span> Диспетчерийн гар ажиллагааг бүрэн автоматжуулсан</li>
+              <li className="flex gap-2"><span className="text-emerald-400">✅</span> Бүх шийдэл аль хэдийн production-д ажиллаж байна</li>
+            </ul>
+            <p className="mt-5 text-brand-200 font-medium italic">
+              Аюулгүй ажиллагаа, үр ашиг, найдвартай байдал — нэг дор.
             </p>
           </div>
 
