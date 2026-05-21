@@ -14,7 +14,7 @@
 | Эрэмбэ | Нэр | Төлөв | Commit |
 |---|---|---|---|
 | 1 | Place ↔ Geofence sync | ✅ Хийгдсэн | `7494dc1` + `d0f382a` |
-| 2 | Driver scorecard PDF (on-demand v1) | ✅ Хийгдсэн | (энэ commit). Cron v2 хойшлогдсон |
+| 2 | Driver scorecard PDF (cron v2) | ✅ Хийгдсэн | сар бүрийн 1-ний 02:00 UTC, дедуплекс Redis |
 | 3 | PANIC ойролцоо машин зарлуулах | ✅ Хийгдсэн | `7494dc1` |
 | 4 | Geofence өдөр/шөнө хурд | ✅ Хийгдсэн | `7494dc1` + `d0f382a` |
 | 5 | Driver shift hierarchy (v1) | ✅ Хийгдсэн | (энэ commit). Shift-aware reports v2 |

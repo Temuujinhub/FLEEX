@@ -1,14 +1,30 @@
-import { BadRequestException, Controller, Get, Param, Query, Req, Res } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Param, Post, Query, Req, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { Role } from '@prisma/client';
 import { Roles } from '../auth/roles.decorator';
 import { Audit } from '../audit/audit.decorator';
 import { ReportsService } from './reports.service';
+import { ScorecardCronService } from './scorecard-cron.service';
 
 @Controller('reports')
 @Roles(Role.VIEWER)
 export class ReportsController {
-  constructor(private readonly svc: ReportsService) {}
+  constructor(
+    private readonly svc: ReportsService,
+    private readonly scorecardCron: ScorecardCronService,
+  ) {}
+
+  // Manual trigger for the monthly scorecard mailer. SUPER_ADMIN only,
+  // used to backfill ("send last month again") and to smoke-test the
+  // mailing path without waiting until the 1st of the month at 02:00.
+  // Idempotent: the cron uses a per-(company, year-month) Redis key
+  // and re-running this endpoint will skip companies already sent.
+  @Post('driver-scorecard/run-monthly')
+  @Roles(Role.SUPER_ADMIN)
+  @Audit('report.driver_scorecard.run_monthly')
+  async runMonthlyScorecards() {
+    return this.scorecardCron.runMonth();
+  }
 
   private range(from: string, to: string): { from: Date; to: Date } {
     const f = new Date(from);
