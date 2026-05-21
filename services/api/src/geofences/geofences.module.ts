@@ -1,9 +1,13 @@
 import { Module, Controller, Get, Post, Patch, Delete, Body, Param, Req, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { IsBoolean, IsEnum, IsNumber, IsObject, IsOptional, IsString, Length } from 'class-validator';
+import { IsBoolean, IsEnum, IsNumber, IsObject, IsOptional, IsString, Length, Matches } from 'class-validator';
 import { GeofenceShape, Prisma, Role } from '@prisma/client';
 import { Roles } from '../auth/roles.decorator';
 import { Audit } from '../audit/audit.decorator';
 import { PrismaService } from '../prisma/prisma.service';
+
+// HH:mm window times for the optional night speed schedule. If
+// nightStart > nightEnd the window crosses midnight (e.g. 22:00 → 06:00).
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 class CreateGeofenceDto {
   @IsString() @Length(2, 80) name!: string;
@@ -12,6 +16,9 @@ class CreateGeofenceDto {
   // For CIRCLE: { lat, lng, radiusM }. For POLYGON: { points: [[lng,lat],...] }.
   @IsObject() geometry!: Record<string, unknown>;
   @IsOptional() @IsNumber() speedLimit?: number;
+  @IsOptional() @IsNumber() speedLimitNight?: number;
+  @IsOptional() @Matches(HHMM, { message: 'nightStart must be HH:mm' }) nightStart?: string;
+  @IsOptional() @Matches(HHMM, { message: 'nightEnd must be HH:mm' }) nightEnd?: string;
   @IsOptional() @IsBoolean() alertOnEnter?: boolean;
   @IsOptional() @IsBoolean() alertOnExit?: boolean;
 }
@@ -21,6 +28,9 @@ class UpdateGeofenceDto {
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsObject() geometry?: Record<string, unknown>;
   @IsOptional() @IsNumber() speedLimit?: number;
+  @IsOptional() @IsNumber() speedLimitNight?: number;
+  @IsOptional() @Matches(HHMM, { message: 'nightStart must be HH:mm' }) nightStart?: string;
+  @IsOptional() @Matches(HHMM, { message: 'nightEnd must be HH:mm' }) nightEnd?: string;
   @IsOptional() @IsBoolean() active?: boolean;
   @IsOptional() @IsBoolean() alertOnEnter?: boolean;
   @IsOptional() @IsBoolean() alertOnExit?: boolean;
@@ -47,6 +57,9 @@ class GeofencesService {
       shape: dto.shape,
       geometry: dto.geometry as Prisma.InputJsonValue,
       speedLimit: dto.speedLimit,
+      speedLimitNight: dto.speedLimitNight,
+      nightStart: dto.nightStart,
+      nightEnd: dto.nightEnd,
       alertOnEnter: dto.alertOnEnter ?? true,
       alertOnExit: dto.alertOnExit ?? true,
       companyId: actor.companyId,
@@ -65,6 +78,9 @@ class GeofencesService {
       description: dto.description,
       geometry: dto.geometry ? (dto.geometry as Prisma.InputJsonValue) : undefined,
       speedLimit: dto.speedLimit,
+      speedLimitNight: dto.speedLimitNight,
+      nightStart: dto.nightStart,
+      nightEnd: dto.nightEnd,
       active: dto.active,
       alertOnEnter: dto.alertOnEnter,
       alertOnExit: dto.alertOnExit,

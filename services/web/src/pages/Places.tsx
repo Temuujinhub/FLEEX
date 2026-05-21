@@ -32,6 +32,26 @@ export function Places() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [picking, setPicking] = useState<{ lat: number; lng: number } | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  // Persist the help-panel state in localStorage so an operator who closed
+  // it doesn't have it pop back open every time they revisit Places.
+  const [showHelp, setShowHelp] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('fleex.placesHelp.collapsed') !== '1';
+    } catch {
+      return true;
+    }
+  });
+  const toggleHelp = () => {
+    setShowHelp((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('fleex.placesHelp.collapsed', next ? '0' : '1');
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
 
   const places = useQuery({
     queryKey: ['places', typeFilter, search],
@@ -64,6 +84,13 @@ export function Places() {
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={toggleHelp}
+              className="rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium px-3 py-2"
+              title="Байршил feature-ийг хэрхэн ашиглах вэ"
+            >
+              {showHelp ? 'Зөвлөмж нуух' : 'Хэрэглээний зөвлөмж'}
+            </button>
+            <button
               onClick={() => { setShowAdd(true); setPicking(null); }}
               className="rounded-md bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold px-4 py-2 shadow"
             >
@@ -71,6 +98,7 @@ export function Places() {
             </button>
           </div>
         </div>
+        {showHelp && <PlacesHelpPanel onClose={toggleHelp} />}
       </header>
 
       <div className="flex-1 overflow-hidden grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4 p-4">
@@ -347,5 +375,128 @@ function PinIcon() {
     <svg viewBox="0 0 24 24" fill="currentColor" className="h-full w-full">
       <path d="M12 2C7.6 2 4 5.6 4 10c0 6 8 12 8 12s8-6 8-12c0-4.4-3.6-8-8-8zm0 11a3 3 0 110-6 3 3 0 010 6z" />
     </svg>
+  );
+}
+
+// Eight real-world use cases for the Places feature, surfaced here so an
+// operator landing on /app/places sees worked examples instead of an
+// empty map. Collapsible — state lives in localStorage so it stays
+// closed across visits once dismissed.
+const PLACE_USE_CASES: Array<{
+  scenario: string;
+  type: string;
+  measures: string;
+  needs: string;
+}> = [
+  {
+    scenario: 'Ачаалах цэгийн dwell time',
+    type: 'LOADING',
+    measures: 'BD-205-ийн pit-ээс гарах хүртэлх дундаж хугацаа',
+    needs: 'Proximity Report (одоо боломжтой)',
+  },
+  {
+    scenario: 'Жинлүүрийн тонн-км нэхэмжлэл',
+    type: 'WEIGHBRIDGE',
+    measures: 'Машин жинлүүр дамжсан тоо / өдөр',
+    needs: 'Proximity Report + Excel экспорт',
+  },
+  {
+    scenario: 'Шатхуун дахин дүүргэх аудит',
+    type: 'REFUEL',
+    measures: 'REFUEL-аас 2km дотор зогссон ч түлш нэмэгдээгүй машин',
+    needs: 'REFUEL place + түлшний сенсорын delta (ирээдүй)',
+  },
+  {
+    scenario: 'Засварын pit ачаалал',
+    type: 'WORKSHOP',
+    measures: 'Workshop дотор зэрэгцэн зогсож буй машины тоо',
+    needs: 'LiveMap (одоо), metric export нэмэх боломжтой',
+  },
+  {
+    scenario: 'Хяналтын цэг бүрд бүртгүүлэх',
+    type: 'CHECKPOINT',
+    measures: 'Routing-ийн 4 CHECKPOINT-ийг 24ц-т дараалан давсан эсэх',
+    needs: 'Route compliance report (шинэ feature)',
+  },
+  {
+    scenario: 'Алба орох-гарах хяналт',
+    type: 'OFFICE',
+    measures: 'Жолооч 7-9 цагт OFFICE дотор орсон эсэх',
+    needs: 'Driver attendance тайлан (шинэ)',
+  },
+  {
+    scenario: 'Асгах талбайн өдрийн ачаалал',
+    type: 'UNLOADING',
+    measures: 'Зүүн dump-ийн нийт цикл = N машин × M удаа',
+    needs: 'Proximity Report-ийг Place + period groupBy-аар өргөтгөх',
+  },
+  {
+    scenario: 'Гранжийн шөнийн орон тоо',
+    type: 'DEPOT',
+    measures: '6:00 цагт DEPOT-д буцаж ирээгүй машинууд',
+    needs: 'Geofence "absent" alert (Place-тэй холбоход илүү тохиромжтой)',
+  },
+];
+
+function PlacesHelpPanel({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 md:p-5">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <h2 className="font-semibold text-slate-800">Байршил-ийг хэрхэн ашиглах вэ</h2>
+          <p className="text-xs text-slate-500 mt-1 max-w-3xl">
+            Байршил нь зөвхөн зураг дээрх тэмдэг биш — тайлан, хяналтын дүрэм, alert-уудын суурь анкер юм.
+            Доорх 8 бодит хэрэглээний жишээ нь танай үйл ажиллагаанд хэрхэн тохирохыг харуулна.
+            Хэрэглэхгүй бол баруун дээрх "Зөвлөмж нуух" товч дарж хаа.
+          </p>
+        </div>
+        <button
+          onClick={onClose}
+          className="shrink-0 rounded-md p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200"
+          title="Хаах"
+          aria-label="Хаах"
+        >
+          <svg viewBox="0 0 20 20" className="w-5 h-5" fill="currentColor">
+            <path fillRule="evenodd" d="M4.3 4.3a1 1 0 011.4 0L10 8.6l4.3-4.3a1 1 0 111.4 1.4L11.4 10l4.3 4.3a1 1 0 11-1.4 1.4L10 11.4l-4.3 4.3a1 1 0 11-1.4-1.4L8.6 10 4.3 5.7a1 1 0 010-1.4z" clipRule="evenodd" />
+          </svg>
+        </button>
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-100 text-slate-700">
+            <tr>
+              <th className="text-left font-medium px-3 py-2">Хэрэглээ</th>
+              <th className="text-left font-medium px-3 py-2 whitespace-nowrap">Place төрөл</th>
+              <th className="text-left font-medium px-3 py-2">Юу хэмждэг</th>
+              <th className="text-left font-medium px-3 py-2">Юу шаардлагатай</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {PLACE_USE_CASES.map((row, idx) => {
+              const typeMeta = TYPES.find((t) => t.value === row.type);
+              return (
+                <tr key={idx} className="hover:bg-slate-50">
+                  <td className="px-3 py-2 align-top font-medium text-slate-800">{row.scenario}</td>
+                  <td className="px-3 py-2 align-top whitespace-nowrap">
+                    {typeMeta && (
+                      <span className="inline-flex items-center gap-1.5 text-xs">
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ background: typeMeta.color }} />
+                        {typeMeta.label}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 align-top text-slate-700">{row.measures}</td>
+                  <td className="px-3 py-2 align-top text-slate-500">{row.needs}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-3 text-xs text-slate-500">
+        Зөвлөмж: үндсэн анкерийг (DEPOT, WEIGHBRIDGE, REFUEL) эхэлж байршуулаад
+        дараа нь Тайлан → "Ойролцоо машин"-аас ашиглаж эхлэхэд хамгийн их үр дүнтэй.
+      </p>
+    </div>
   );
 }

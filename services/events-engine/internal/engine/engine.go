@@ -106,17 +106,27 @@ func (e *Engine) process(ctx context.Context, p *LivePayload) error {
 
 	fences := e.store.GeofencesFor(p.CompanyID)
 	device := e.store.Device(p.DeviceID)
+	// Position timestamp drives the day/night speed schedule below;
+	// computed up-front so the same value is reused for OVERSPEED
+	// events that get persisted later in the function.
+	occurred := time.UnixMilli(p.Time)
 
 	// Compute current "inside" set + overspeed candidates in one pass.
+	// Use EffectiveSpeedLimit so the day/night schedule is honoured —
+	// the engine's clock is UTC; once we wire per-company timezones
+	// through, swap occurred.In(loc) below.
 	insideNow := make(map[string]bool, len(fences))
 	overspeedFences := make([]*store.Geofence, 0)
+	overspeedLimits := make(map[string]float64, 0)
 	for _, g := range fences {
 		if !g.Inside(p.Lat, p.Lng) {
 			continue
 		}
 		insideNow[g.ID] = true
-		if g.SpeedLimit != nil && *g.SpeedLimit > 0 && p.Speed > *g.SpeedLimit {
+		limit := g.EffectiveSpeedLimit(occurred)
+		if limit != nil && *limit > 0 && p.Speed > *limit {
 			overspeedFences = append(overspeedFences, g)
+			overspeedLimits[g.ID] = *limit
 		}
 	}
 
@@ -130,7 +140,6 @@ func (e *Engine) process(ctx context.Context, p *LivePayload) error {
 
 	// Position-event timestamps come from the device clock. Falling back to
 	// "now" on bogus zero-timestamps keeps the row valid.
-	occurred := time.UnixMilli(p.Time)
 	if occurred.IsZero() || occurred.Year() < 2000 {
 		occurred = time.Now().UTC()
 	}
@@ -207,6 +216,7 @@ func (e *Engine) process(ctx context.Context, p *LivePayload) error {
 			continue
 		}
 		gid := g.ID
+		limit := overspeedLimits[g.ID]
 		if err := e.store.PersistAndPublish(ctx, store.EventInsert{
 			CompanyID:  p.CompanyID,
 			DeviceID:   p.DeviceID,
@@ -215,7 +225,7 @@ func (e *Engine) process(ctx context.Context, p *LivePayload) error {
 			Severity:   "WARNING",
 			Lat:        p.Lat, Lng: p.Lng, Speed: p.Speed,
 			Message: fmt.Sprintf("%s бүсэд хурд хэтэрсэн: %.0f км/ц (хязгаар %.0f)",
-				g.Name, p.Speed, *g.SpeedLimit),
+				g.Name, p.Speed, limit),
 			OccurredAt: occurred,
 		}); err != nil {
 			log.Warn().Err(err).Msg("persist OVERSPEED (fence)")

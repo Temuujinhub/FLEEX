@@ -29,6 +29,9 @@ type Geofence = {
   shape: Shape;
   geometry: any;
   speedLimit: number | null;
+  speedLimitNight: number | null;
+  nightStart: string | null;
+  nightEnd: string | null;
   active: boolean;
   alertOnEnter: boolean;
   alertOnExit: boolean;
@@ -276,6 +279,9 @@ function DraftForm({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [speedLimit, setSpeedLimit] = useState<string>('');
+  const [speedLimitNight, setSpeedLimitNight] = useState<string>('');
+  const [nightStart, setNightStart] = useState<string>('22:00');
+  const [nightEnd, setNightEnd] = useState<string>('06:00');
   const [alertOnEnter, setAlertOnEnter] = useState(true);
   const [alertOnExit, setAlertOnExit] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -293,6 +299,11 @@ function DraftForm({
       };
       if (description.trim()) body.description = description.trim();
       if (speedLimit) body.speedLimit = Number(speedLimit);
+      if (speedLimitNight) {
+        body.speedLimitNight = Number(speedLimitNight);
+        body.nightStart = nightStart;
+        body.nightEnd = nightEnd;
+      }
       return api.post('/geofences', body);
     },
     onSuccess: () => {
@@ -348,6 +359,26 @@ function DraftForm({
         <input type="number" min="0" value={speedLimit} onChange={(e) => setSpeedLimit(e.target.value)} placeholder="40" className={input} />
       </Field>
 
+      <details className="rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2">
+        <summary className="cursor-pointer text-sm font-medium text-slate-700">
+          Шөнийн хурд (заавал биш)
+        </summary>
+        <p className="mt-2 text-xs text-slate-500">
+          Зөвхөн "Шөнийн хурд" талбар бөглөгдсөн үед идэвхэжнэ. Цаг талбарууд "ЦЦ:ММ" — эхлэх цаг төгсгөл цагаас их бол шөнө дундуур дамждаг гэж тооцно.
+        </p>
+        <div className="mt-2 grid grid-cols-3 gap-2">
+          <Field label="Шөнийн хурд km/h">
+            <input type="number" min="0" value={speedLimitNight} onChange={(e) => setSpeedLimitNight(e.target.value)} placeholder="30" className={input} />
+          </Field>
+          <Field label="Эхлэх">
+            <input type="time" value={nightStart} onChange={(e) => setNightStart(e.target.value)} className={input} />
+          </Field>
+          <Field label="Дуусах">
+            <input type="time" value={nightEnd} onChange={(e) => setNightEnd(e.target.value)} className={input} />
+          </Field>
+        </div>
+      </details>
+
       <div className="space-y-2">
         <label className="flex items-center gap-2 text-sm text-slate-700">
           <input type="checkbox" checked={alertOnEnter} onChange={(e) => setAlertOnEnter(e.target.checked)} />
@@ -400,6 +431,14 @@ function SelectedPanel({
 
       <div className="grid grid-cols-2 gap-3 text-xs">
         <Stat label="Хурдны хязгаар" value={g.speedLimit ? `${g.speedLimit} km/h` : '—'} />
+        <Stat
+          label="Шөнийн хурд"
+          value={
+            g.speedLimitNight
+              ? `${g.speedLimitNight} km/h (${g.nightStart ?? '22:00'}-${g.nightEnd ?? '06:00'})`
+              : '—'
+          }
+        />
         <Stat label="Үүсгэсэн" value={new Date(g.createdAt).toLocaleDateString()} />
         <Stat label="Орох дохиолол" value={g.alertOnEnter ? 'Тийм' : 'Үгүй'} />
         <Stat label="Гарах дохиолол" value={g.alertOnExit ? 'Тийм' : 'Үгүй'} />

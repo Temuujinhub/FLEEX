@@ -15,6 +15,7 @@ const SECTIONS: {
     items: [
       { to: '/app',           label: 'Хяналтын самбар', min: 'VIEWER',        icon: <IconDashboard /> },
       { to: '/app/map',       label: 'Шууд газрын зураг', min: 'VIEWER',      icon: <IconMap /> },
+      { to: '/app/dispatch',  label: 'Дамжуулагч самбар', min: 'DISPATCHER',   icon: <IconLayers /> },
       { to: '/app/devices',   label: 'Машин · Төхөөрөмж', min: 'VIEWER',      icon: <IconTruck /> },
       { to: '/app/drivers',   label: 'Жолооч · Ажилчид', min: 'VIEWER',       icon: <IconDriver /> },
       { to: '/app/groups',    label: 'Алба нэгж', min: 'FLEET_MANAGER',       icon: <IconLayers /> },

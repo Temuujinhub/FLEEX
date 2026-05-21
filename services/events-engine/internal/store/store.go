@@ -28,18 +28,68 @@ import (
 
 // Geofence is the cached form of a geofence row. `Polygon` is populated only
 // for POLYGON shape; CenterLat/CenterLng/RadiusM only for CIRCLE.
+// SpeedLimitNight + NightStart/NightEnd implement the day/night
+// schedule: when SpeedLimitNight is set and the current local time
+// (UTC for now; company TZ later) falls in [NightStart, NightEnd),
+// SpeedLimitNight is used instead of SpeedLimit. NightStart > NightEnd
+// means the window wraps midnight (e.g. 22:00 → 06:00). Strings are
+// "HH:mm".
 type Geofence struct {
-	ID           string
-	CompanyID    string
-	Name         string
-	Shape        string
-	CenterLat    float64
-	CenterLng    float64
-	RadiusM      float64
-	Polygon      [][2]float64
-	SpeedLimit   *float64
-	AlertOnEnter bool
-	AlertOnExit  bool
+	ID              string
+	CompanyID       string
+	Name            string
+	Shape           string
+	CenterLat       float64
+	CenterLng       float64
+	RadiusM         float64
+	Polygon         [][2]float64
+	SpeedLimit      *float64
+	SpeedLimitNight *float64
+	NightStart      *string
+	NightEnd        *string
+	AlertOnEnter    bool
+	AlertOnExit     bool
+}
+
+// EffectiveSpeedLimit returns the applicable cap at the given instant,
+// honouring the optional night override. Returns nil when no limit
+// applies. `now` is expected in UTC; callers can shift to a company
+// timezone before calling.
+func (g *Geofence) EffectiveSpeedLimit(now time.Time) *float64 {
+	if g.SpeedLimitNight == nil || g.NightStart == nil || g.NightEnd == nil {
+		return g.SpeedLimit
+	}
+	startMin, ok1 := parseHHMM(*g.NightStart)
+	endMin, ok2 := parseHHMM(*g.NightEnd)
+	if !ok1 || !ok2 {
+		return g.SpeedLimit
+	}
+	nowMin := now.Hour()*60 + now.Minute()
+	var inNight bool
+	if startMin == endMin {
+		inNight = false
+	} else if startMin < endMin {
+		inNight = nowMin >= startMin && nowMin < endMin
+	} else {
+		// Wraps midnight: e.g. 22:00 → 06:00.
+		inNight = nowMin >= startMin || nowMin < endMin
+	}
+	if inNight {
+		return g.SpeedLimitNight
+	}
+	return g.SpeedLimit
+}
+
+func parseHHMM(s string) (int, bool) {
+	if len(s) != 5 || s[2] != ':' {
+		return 0, false
+	}
+	h := (int(s[0]-'0'))*10 + int(s[1]-'0')
+	m := (int(s[3]-'0'))*10 + int(s[4]-'0')
+	if h < 0 || h > 23 || m < 0 || m > 59 {
+		return 0, false
+	}
+	return h*60 + m, true
 }
 
 // Inside checks whether the given (lat,lng) is inside this geofence.
@@ -181,7 +231,9 @@ func (s *Store) Refresh(ctx context.Context) error {
 	// ── Geofences ────────────────────────────────────────────
 	gRows, err := tx.Query(ctx, `
 		SELECT id::text, "companyId"::text, name, shape::text,
-		       geometry, "speedLimit", "alertOnEnter", "alertOnExit"
+		       geometry, "speedLimit", "speedLimitNight",
+		       "nightStart", "nightEnd",
+		       "alertOnEnter", "alertOnExit"
 		FROM geofences
 		WHERE active = true
 	`)
@@ -191,18 +243,23 @@ func (s *Store) Refresh(ctx context.Context) error {
 	byCo := map[string][]*Geofence{}
 	for gRows.Next() {
 		var (
-			id, companyID, name, shape string
-			geom                       []byte
-			speedLimit                 *float64
-			alertOnEnter, alertOnExit  bool
+			id, companyID, name, shape  string
+			geom                        []byte
+			speedLimit, speedLimitNight *float64
+			nightStart, nightEnd        *string
+			alertOnEnter, alertOnExit   bool
 		)
-		if err := gRows.Scan(&id, &companyID, &name, &shape, &geom, &speedLimit, &alertOnEnter, &alertOnExit); err != nil {
+		if err := gRows.Scan(&id, &companyID, &name, &shape, &geom,
+			&speedLimit, &speedLimitNight, &nightStart, &nightEnd,
+			&alertOnEnter, &alertOnExit); err != nil {
 			gRows.Close()
 			return fmt.Errorf("scan geofence: %w", err)
 		}
 		gf := &Geofence{
 			ID: id, CompanyID: companyID, Name: name, Shape: shape,
-			SpeedLimit: speedLimit, AlertOnEnter: alertOnEnter, AlertOnExit: alertOnExit,
+			SpeedLimit: speedLimit, SpeedLimitNight: speedLimitNight,
+			NightStart: nightStart, NightEnd: nightEnd,
+			AlertOnEnter: alertOnEnter, AlertOnExit: alertOnExit,
 		}
 		if err := parseGeometry(geom, gf); err != nil {
 			log.Warn().Err(err).Str("geofence", id).Msg("invalid geometry, skipping")

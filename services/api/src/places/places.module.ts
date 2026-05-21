@@ -80,22 +80,75 @@ class PlacesService {
   async create(actor: { role: Role; companyId: string | null }, dto: CreatePlaceDto) {
     if (!actor.companyId && actor.role !== 'SUPER_ADMIN') throw new ForbiddenException();
     const companyId = actor.companyId!;
-    return this.prisma.place.create({ data: { ...dto, companyId } });
+    const place = await this.prisma.place.create({ data: { ...dto, companyId } });
+    await this.syncGeofence(place);
+    return this.prisma.place.findUnique({ where: { id: place.id } });
   }
 
   async update(id: string, actor: { role: Role; companyId: string | null }, dto: UpdatePlaceDto) {
     const p = await this.prisma.place.findUnique({ where: { id } });
     if (!p) throw new NotFoundException();
     if (actor.role !== 'SUPER_ADMIN' && p.companyId !== actor.companyId) throw new ForbiddenException();
-    return this.prisma.place.update({ where: { id }, data: dto });
+    const updated = await this.prisma.place.update({ where: { id }, data: dto });
+    await this.syncGeofence(updated);
+    return this.prisma.place.findUnique({ where: { id } });
   }
 
   async remove(id: string, actor: { role: Role; companyId: string | null }) {
     const p = await this.prisma.place.findUnique({ where: { id } });
     if (!p) throw new NotFoundException();
     if (actor.role !== 'SUPER_ADMIN' && p.companyId !== actor.companyId) throw new ForbiddenException();
+    if (p.geofenceId) {
+      await this.prisma.geofence.delete({ where: { id: p.geofenceId } }).catch(() => undefined);
+    }
     await this.prisma.place.delete({ where: { id } });
     return { ok: true };
+  }
+
+  // Mirror the place into a CIRCLE geofence so the existing events
+  // engine fires GEOFENCE_ENTER/EXIT against it without any extra
+  // plumbing. Lifecycle:
+  //   radiusM set & no geofence yet  -> create + back-link
+  //   radiusM set & geofence exists  -> update geometry + name
+  //   radiusM cleared & geofence    -> delete the geofence + clear link
+  //   radiusM never set              -> no-op
+  private async syncGeofence(place: {
+    id: string;
+    companyId: string;
+    name: string;
+    latitude: number;
+    longitude: number;
+    radiusM: number | null;
+    geofenceId: string | null;
+    active: boolean;
+  }) {
+    if (place.radiusM && place.radiusM > 0) {
+      const geometry = { lat: place.latitude, lng: place.longitude, radiusM: place.radiusM };
+      if (place.geofenceId) {
+        await this.prisma.geofence.update({
+          where: { id: place.geofenceId },
+          data: { name: place.name, geometry, active: place.active },
+        });
+      } else {
+        const gf = await this.prisma.geofence.create({
+          data: {
+            companyId: place.companyId,
+            name: place.name,
+            shape: 'CIRCLE',
+            geometry,
+            active: place.active,
+          },
+        });
+        await this.prisma.place.update({
+          where: { id: place.id },
+          data: { geofenceId: gf.id },
+        });
+      }
+    } else if (place.geofenceId) {
+      const gfId = place.geofenceId;
+      await this.prisma.place.update({ where: { id: place.id }, data: { geofenceId: null } });
+      await this.prisma.geofence.delete({ where: { id: gfId } }).catch(() => undefined);
+    }
   }
 }
 
