@@ -151,12 +151,13 @@ export class ReportsController {
     @Query('from') from: string,
     @Query('to') to: string,
     @Query('tariff') tariff: string,
+    @Query('shiftId') shiftId: string | undefined,
     @Req() req: any,
   ) {
     const r = this.range(from, to);
     const t = Number(tariff);
     if (!Number.isFinite(t) || t < 0) throw new BadRequestException('tariff must be a non-negative number');
-    return this.svc.idleBilling(req.user, r.from, r.to, t);
+    return this.svc.idleBilling(req.user, r.from, r.to, t, shiftId || undefined);
   }
 
   @Get('idle-billing/excel')
@@ -165,13 +166,14 @@ export class ReportsController {
     @Query('from') from: string,
     @Query('to') to: string,
     @Query('tariff') tariff: string,
+    @Query('shiftId') shiftId: string | undefined,
     @Req() req: any,
     @Res() res: Response,
   ) {
     const r = this.range(from, to);
     const t = Number(tariff);
     if (!Number.isFinite(t) || t < 0) throw new BadRequestException('tariff must be a non-negative number');
-    const buf = await this.svc.idleBillingExcel(req.user, r.from, r.to, t);
+    const buf = await this.svc.idleBillingExcel(req.user, r.from, r.to, t, shiftId || undefined);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="idle-billing-${from}_${to}.xlsx"`);
     res.send(buf);
