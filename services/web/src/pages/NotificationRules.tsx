@@ -25,6 +25,7 @@ const EVENT_TYPES = [
   { value: 'DEVICE_OFFLINE', label: 'Холболт салсан' },
   { value: 'DEVICE_ONLINE',  label: 'Холболт сэргэсэн' },
   { value: 'TAMPER',         label: 'Хөдөлгөөн / халдлага' },
+  { value: 'LONE_WORKER_RISK', label: 'Lone-worker эрсдэл (2ц+ хариу алга)' },
   { value: 'CUSTOM',         label: 'Тусгай' },
 ];
 

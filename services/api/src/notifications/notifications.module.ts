@@ -4,6 +4,7 @@ import { SmsService } from './sms.service';
 import { WebhookService } from './webhook.service';
 import { NotificationDispatcherService } from './notification-dispatcher.service';
 import { IntegrationSettingsService } from './integration-settings.service';
+import { LoneWorkerService } from './lone-worker.service';
 
 // Wires the channel adapters (email/SMS/webhook) to the dispatcher that
 // subscribes to `fleex.events` and routes events through the matching
@@ -16,6 +17,7 @@ import { IntegrationSettingsService } from './integration-settings.service';
     SmsService,
     WebhookService,
     NotificationDispatcherService,
+    LoneWorkerService,
   ],
   exports: [EmailService, SmsService, IntegrationSettingsService],
 })

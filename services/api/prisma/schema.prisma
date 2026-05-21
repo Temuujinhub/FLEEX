@@ -575,6 +575,10 @@ enum EventType {
   DEVICE_OFFLINE
   DEVICE_ONLINE
   TAMPER
+  // Driver was last seen 2h+ ago, or last position was stationary for
+  // 2h+ during a working shift. Fired by the LoneWorker safety service
+  // so a manager can escalate manually.
+  LONE_WORKER_RISK
   CUSTOM
 }
 
