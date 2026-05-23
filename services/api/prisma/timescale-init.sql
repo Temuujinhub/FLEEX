@@ -35,16 +35,26 @@ CREATE TABLE IF NOT EXISTS positions (
 SELECT create_hypertable(
     'positions',
     'time',
-    chunk_time_interval => INTERVAL '1 month',
+    chunk_time_interval => INTERVAL '1 day',
     if_not_exists       => TRUE
 );
+
+-- For hypertables that already exist (production was created with 1-month
+-- chunks), create_hypertable above is a no-op, so explicitly retune the
+-- interval. This only affects chunks created from here on — existing chunks
+-- keep their size. 8.6M rows/day ⇒ ~1 chunk/day, which keeps each chunk and
+-- its indexes inside shared_buffers for fast inserts and tight chunk pruning.
+SELECT set_chunk_time_interval('positions', INTERVAL '1 day');
 
 CREATE INDEX IF NOT EXISTS positions_device_time_desc
     ON positions (device_id, time DESC);
 CREATE INDEX IF NOT EXISTS positions_company_time_desc
     ON positions (company_id, time DESC);
-CREATE INDEX IF NOT EXISTS positions_attributes_gin
-    ON positions USING GIN (attributes jsonb_path_ops);
+-- The attributes GIN index was maintained on every insert but no query path
+-- ever used JSON containment/path search against it, so it was pure
+-- write-amplification on the hot ingest path. Drop it (reversible: recreate
+-- the GIN index if attribute search becomes a product requirement).
+DROP INDEX IF EXISTS positions_attributes_gin;
 
 -- Compression: idempotent guard so re-running doesn't double-apply.
 DO $$

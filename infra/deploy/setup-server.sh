@@ -75,9 +75,13 @@ if ! id deploy >/dev/null 2>&1; then
   usermod -aG docker deploy
 fi
 
-# Allow `deploy` to run the deploy script with sudo without password.
+# Allow `deploy` to run ONLY the two deploy scripts as root without a
+# password. Docker access comes from the `docker` group membership above, so
+# `docker`/`docker-compose` are deliberately NOT in this allowlist —
+# passwordless `sudo docker` is root-equivalent (e.g. `docker run -v /:/host`)
+# and would make the whole allowlist moot.
 cat >/etc/sudoers.d/fleex-deploy <<'EOF'
-deploy ALL=(root) NOPASSWD: /opt/fleex/infra/deploy/deploy.sh, /opt/fleex/infra/deploy/enable-tls.sh, /usr/bin/docker, /usr/bin/docker-compose, /usr/bin/systemctl restart docker
+deploy ALL=(root) NOPASSWD: /opt/fleex/infra/deploy/deploy.sh, /opt/fleex/infra/deploy/enable-tls.sh
 EOF
 chmod 0440 /etc/sudoers.d/fleex-deploy
 

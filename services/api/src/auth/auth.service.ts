@@ -57,18 +57,23 @@ export class AuthService {
 
     const ok = await argon2.verify(user.passwordHash, password).catch(() => false);
     if (!ok) {
-      const failed = user.failedLogins + 1;
-      const lock = failed >= FAIL_THRESHOLD
-        ? new Date(Date.now() + LOCK_MINUTES * 60_000)
-        : null;
-      await this.prisma.user.update({
+      // Atomic DB-side increment so concurrent failed attempts can't race and
+      // under-count past the threshold.
+      const { failedLogins } = await this.prisma.user.update({
         where: { id: user.id },
-        data: {
-          failedLogins: failed,
-          lockedUntil: lock ?? undefined,
-          status: lock ? 'LOCKED' : user.status,
-        },
+        data: { failedLogins: { increment: 1 } },
+        select: { failedLogins: true },
       });
+      if (failedLogins >= FAIL_THRESHOLD) {
+        // Time-based lock only — never flip status to LOCKED here. The status
+        // check runs before the lockedUntil check, so a status flip would
+        // outlive lockedUntil and soft-lock the account permanently until an
+        // admin reset. LOCKED status is reserved for deliberate admin disable.
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: { lockedUntil: new Date(Date.now() + LOCK_MINUTES * 60_000) },
+        });
+      }
       await auditFail('wrong_password');
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -111,8 +116,28 @@ export class AuthService {
       where: { tokenHash },
       include: { user: true },
     });
-    if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
+    if (!stored || stored.expiresAt < new Date()) {
       throw new UnauthorizedException('Invalid refresh token');
+    }
+    if (stored.revokedAt) {
+      // Replay of an already-rotated token signals theft: the legitimate
+      // client already exchanged this token, so whoever is presenting it now
+      // shouldn't be trusted. Revoke the whole family to force every session
+      // for this user to re-authenticate.
+      await this.prisma.refreshToken.updateMany({
+        where: { userId: stored.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      await this.audit.record({
+        actorId: stored.userId,
+        actorEmail: stored.user.email,
+        companyId: stored.user.companyId,
+        action: 'user.refresh_reuse',
+        outcome: 'denied',
+        ipAddress: ip,
+        userAgent,
+      });
+      throw new UnauthorizedException('Refresh token reuse detected');
     }
     // Rotate: revoke the old one and issue a new pair.
     await this.prisma.refreshToken.update({

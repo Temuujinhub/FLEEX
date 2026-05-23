@@ -38,8 +38,9 @@ export class AuthController {
   }
 }
 
+// With `trust proxy` set in main.ts, Express resolves req.ip from the
+// nginx-set X-Forwarded-For to the real client. Never parse the raw header
+// here — its leftmost value is client-controlled and spoofable.
 function ipOf(req: any): string | undefined {
-  const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.length) return fwd.split(',')[0].trim();
   return req.ip;
 }
