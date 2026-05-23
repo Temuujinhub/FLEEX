@@ -6,8 +6,13 @@ import { Audit } from '../audit/audit.decorator';
 import { ReportsService } from './reports.service';
 import { ScorecardCronService } from './scorecard-cron.service';
 
+// Reports expose fleet-wide analytics, personal driver performance and
+// historical location/surveillance data — none of which is "read-only
+// dashboard" content. Floor is DISPATCHER ("reads everything" per the RBAC
+// design); VIEWER and DRIVER no longer reach reports. Financial idle-billing
+// is raised further to FLEET_MANAGER on its own handlers below.
 @Controller('reports')
-@Roles(Role.VIEWER)
+@Roles(Role.DISPATCHER)
 export class ReportsController {
   constructor(
     private readonly svc: ReportsService,
@@ -163,6 +168,7 @@ export class ReportsController {
   }
 
   @Get('idle-billing')
+  @Roles(Role.FLEET_MANAGER)
   @Audit('report.idle_billing')
   idleBilling(
     @Query('from') from: string,
@@ -178,6 +184,7 @@ export class ReportsController {
   }
 
   @Get('idle-billing/excel')
+  @Roles(Role.FLEET_MANAGER)
   @Audit('report.idle_billing.excel')
   async idleBillingExcel(
     @Query('from') from: string,
