@@ -8,7 +8,8 @@
 #   DEPLOY_USER          deploy (or root)
 #   DEPLOY_SSH_KEY       OpenSSH private key with access to the host
 #   DEPLOY_SSH_PORT      (optional, default 22)
-#   DEPLOY_KNOWN_HOSTS   `ssh-keyscan -H 178.128.27.70` output (recommended)
+#   DEPLOY_KNOWN_HOSTS   `ssh-keyscan -H 178.128.27.70` output (REQUIRED — the
+#                        job fails without it; pins the host key against MITM)
 #
 # Branch policy:
 #   - main                 → production deploy
@@ -87,11 +88,15 @@ jobs:
           chmod 700 ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          if [ -n "$DEPLOY_KNOWN_HOSTS" ]; then
-            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          else
-            ssh-keyscan -H -p "${DEPLOY_SSH_PORT:-22}" "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          # Pin the host key. Never fall back to ssh-keyscan/accept-new: a
+          # MITM between the runner and the host could otherwise present its
+          # own key and capture the deploy SSH session.
+          if [ -z "$DEPLOY_KNOWN_HOSTS" ]; then
+            echo "::error::DEPLOY_KNOWN_HOSTS secret is not set. Refusing to connect without a pinned host key." >&2
+            echo "Generate it from a trusted network: ssh-keyscan -H -p <port> <host>" >&2
+            exit 1
           fi
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
       - name: Trigger remote deploy
@@ -113,7 +118,7 @@ jobs:
           # API cold-start healthchecks; without these the workflow died
           # with "client_loop: send disconnect: Broken pipe" after ~3 min.
           ssh -p "$PORT" \
-              -o StrictHostKeyChecking=accept-new \
+              -o StrictHostKeyChecking=yes \
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=40 \
               "$DEPLOY_USER@$DEPLOY_HOST" \
