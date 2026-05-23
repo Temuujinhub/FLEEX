@@ -71,12 +71,18 @@ services:
     restart: unless-stopped
     # maxmemory defaults to 512MB for a 4 GB droplet; override REDIS_MAXMEMORY
     # in .env (e.g. `REDIS_MAXMEMORY=2gb`) on larger production hosts.
+    # volatile-lru (not allkeys-lru): only keys with a TTL are eligible for
+    # eviction under memory pressure. The device-resolve / presence caches all
+    # carry TTLs, while the command queues (fleex.commands:*) and events-engine
+    # geofence transition state are TTL-less and must never be evicted —
+    # allkeys-lru could silently drop a queued device command or a geofence
+    # "inside" set, causing lost commands and phantom enter/exit events.
     command: >
       redis-server
       --requirepass ${REDIS_PASSWORD}
       --appendonly yes
       --maxmemory ${REDIS_MAXMEMORY:-512mb}
-      --maxmemory-policy allkeys-lru
+      --maxmemory-policy volatile-lru
       --tcp-keepalive 60
     volumes:
       - redis-data:/data
@@ -96,7 +102,12 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      # connection_limit caps Prisma's pool. Without it Prisma defaults to
+      # num_cpus*2+1, which on an 8-vCPU host is ~17 per API instance and,
+      # multiplied across replicas, races the ingestor (16) + events-engine (8)
+      # toward Postgres max_connections=100. A fixed 10 leaves headroom; front
+      # Postgres with PgBouncer before scaling the API horizontally.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public&connection_limit=10
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
     depends_on:
       postgres:

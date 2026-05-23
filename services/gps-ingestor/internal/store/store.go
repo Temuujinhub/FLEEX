@@ -80,6 +80,7 @@ type Store struct {
 	rowsDropped  atomic.Uint64
 	flushErrors  atomic.Uint64
 	queueDepth   atomic.Int64
+	rawCounter   atomic.Uint64 // drives 1-in-N raw_messages sampling
 }
 
 type deviceBatch struct {
@@ -118,11 +119,15 @@ func New(ctx context.Context, cfg *config.Config) (*Store, error) {
 		}
 	}
 
+	queueSize := cfg.QueueSize
+	if queueSize < 1 {
+		queueSize = 4096
+	}
 	s := &Store{
 		cfg:   cfg,
 		pg:    pool,
 		rdb:   rdb,
-		queue: make(chan deviceBatch, 4096),
+		queue: make(chan deviceBatch, queueSize),
 	}
 	s.healthy.Store(true)
 	return s, nil
@@ -267,18 +272,23 @@ func (s *Store) Run(ctx context.Context) {
 				attrs := buildAttributes(rec)
 
 				// Raw debug capture — keeps the same JSON as `attributes`
-				// plus the position essentials for cheap row-scanning.
-				rawMsgs = append(rawMsgs, rawMessageRow{
-					DeviceID:   dev.ID,
-					ReceivedAt: rec.Timestamp,
-					Protocol:   "teltonika",
-					Lat:        rec.Lat,
-					Lng:        rec.Lng,
-					Speed:      teltonika.PickSpeedKmh(rec),
-					Ignition:   ig,
-					Payload:    attrs,
-					ByteSize:   batch.frameLen / max(len(batch.records), 1),
-				})
+				// plus the position essentials for cheap row-scanning. Sampled
+				// 1-in-N via INGESTOR_RAW_SAMPLE_N (default 1 = every record)
+				// so this debug table doesn't dominate write throughput at
+				// scale. The counter is only touched when sampling is enabled.
+				if n := s.cfg.RawSampleN; n <= 1 || s.rawCounter.Add(1)%uint64(n) == 0 {
+					rawMsgs = append(rawMsgs, rawMessageRow{
+						DeviceID:   dev.ID,
+						ReceivedAt: rec.Timestamp,
+						Protocol:   "teltonika",
+						Lat:        rec.Lat,
+						Lng:        rec.Lng,
+						Speed:      teltonika.PickSpeedKmh(rec),
+						Ignition:   ig,
+						Payload:    attrs,
+						ByteSize:   batch.frameLen / max(len(batch.records), 1),
+					})
+				}
 
 				// VIN auto-detect: Teltonika OBD adapter delivers the
 				// VIN as a printable-ASCII variable IO (id 256). We pass
