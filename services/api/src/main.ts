@@ -17,6 +17,12 @@ async function bootstrap() {
   const host = config.get<string>('API_HOST') ?? '0.0.0.0';
   const corsOrigin = config.get<string>('CORS_ORIGIN') ?? '*';
 
+  // Trust exactly one proxy hop (nginx). With nginx overwriting
+  // X-Forwarded-For with the real client IP, this makes Express `req.ip`
+  // the genuine client address — so the throttler's per-IP keys and the
+  // audit log can't be fooled by a client-supplied X-Forwarded-For header.
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
+
   app.setGlobalPrefix('api', { exclude: ['health', '/'] });
   app.useGlobalPipes(
     new ValidationPipe({

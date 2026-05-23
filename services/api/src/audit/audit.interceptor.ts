@@ -39,7 +39,7 @@ export class AuditInterceptor implements NestInterceptor {
       action: meta.action,
       resourceType: meta.resourceType ?? null,
       resourceId: resourceId ?? null,
-      ipAddress: req.ip ?? req.headers['x-forwarded-for'] ?? null,
+      ipAddress: req.ip ?? null,
       userAgent: req.headers['user-agent'] ?? null,
       metadata: { method: req.method, path: req.originalUrl ?? req.url } as Record<string, unknown>,
     };

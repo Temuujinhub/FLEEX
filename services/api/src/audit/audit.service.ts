@@ -23,51 +23,90 @@ export interface AuditEntry {
 
 const GENESIS = '0'.repeat(64);
 
+// Postgres advisory lock key that serializes all audit appends so concurrent
+// writers can't read the same tail hash and fork the chain. Arbitrary fixed
+// constant ("AUDI"); must be stable across instances.
+const AUDIT_ADVISORY_LOCK = 0x41554449;
+
+// Canonical fields a chained row hashes over. Used by BOTH record() and
+// verifyChain() so the two can never drift — the values stored must be the
+// exact values hashed, including a JS-fixed occurredAt (never the DB default).
+interface AuditCanonicalFields {
+  actorId: string | null;
+  actorEmail: string | null;
+  companyId: string | null;
+  action: string;
+  resourceType: string | null;
+  resourceId: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  before: unknown;
+  after: unknown;
+  metadata: unknown;
+  outcome: string;
+  occurredAt: string;
+}
+
 @Injectable()
 export class AuditService {
   private readonly logger = new Logger(AuditService.name);
-  private lastHash: string | null = null;
 
   constructor(private readonly prisma: PrismaService) {}
 
-  private async tail(): Promise<string> {
-    if (this.lastHash) return this.lastHash;
-    const last = await this.prisma.auditLog.findFirst({
-      orderBy: { id: 'desc' },
-      select: { hash: true },
-    });
-    this.lastHash = last?.hash ?? GENESIS;
-    return this.lastHash;
-  }
-
   async record(entry: AuditEntry): Promise<void> {
-    const prevHash = await this.tail();
-    const canonical = canonicalize({
-      ...entry,
-      occurredAt: new Date().toISOString(),
-    });
-    const hash = sha256(prevHash + canonical);
+    // occurredAt is fixed here and written explicitly so the stored value is
+    // byte-for-byte the value folded into the hash (the DB default now() would
+    // differ and break verification).
+    const occurredAt = new Date();
+    const fields: AuditCanonicalFields = {
+      actorId: entry.actorId ?? null,
+      actorEmail: entry.actorEmail ?? null,
+      companyId: entry.companyId ?? null,
+      action: entry.action,
+      resourceType: entry.resourceType ?? null,
+      resourceId: entry.resourceId ?? null,
+      ipAddress: entry.ipAddress ?? null,
+      userAgent: entry.userAgent ?? null,
+      before: entry.before ?? null,
+      after: entry.after ?? null,
+      metadata: entry.metadata ?? null,
+      outcome: entry.outcome ?? 'success',
+      occurredAt: occurredAt.toISOString(),
+    };
+    const canonical = canonicalize(fields);
 
     try {
-      await this.prisma.auditLog.create({
-        data: {
-          actorId: entry.actorId ?? null,
-          actorEmail: entry.actorEmail ?? null,
-          companyId: entry.companyId ?? null,
-          action: entry.action,
-          resourceType: entry.resourceType ?? null,
-          resourceId: entry.resourceId ?? null,
-          ipAddress: entry.ipAddress ?? null,
-          userAgent: entry.userAgent ?? null,
-          before: entry.before as any,
-          after: entry.after as any,
-          metadata: entry.metadata as any,
-          outcome: entry.outcome ?? 'success',
-          prevHash,
-          hash,
-        },
+      await this.prisma.$transaction(async (tx) => {
+        // Serialize appends. The lock is transaction-scoped and released on
+        // commit/rollback, and the tail is read from the DB inside the lock so
+        // this is correct even across multiple API instances.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${AUDIT_ADVISORY_LOCK}::bigint)`;
+        const last = await tx.auditLog.findFirst({
+          orderBy: { id: 'desc' },
+          select: { hash: true },
+        });
+        const prevHash = last?.hash ?? GENESIS;
+        const hash = sha256(prevHash + canonical);
+        await tx.auditLog.create({
+          data: {
+            occurredAt,
+            actorId: fields.actorId,
+            actorEmail: fields.actorEmail,
+            companyId: fields.companyId,
+            action: fields.action,
+            resourceType: fields.resourceType,
+            resourceId: fields.resourceId,
+            ipAddress: fields.ipAddress,
+            userAgent: fields.userAgent,
+            before: fields.before as any,
+            after: fields.after as any,
+            metadata: fields.metadata as any,
+            outcome: fields.outcome,
+            prevHash,
+            hash,
+          },
+        });
       });
-      this.lastHash = hash;
     } catch (err) {
       // Audit failures must be loud. We don't fail the request, but operators
       // need to know about it immediately.
@@ -77,7 +116,6 @@ export class AuditService {
 
   // Walk the chain and return the first id (if any) where hashes don't match.
   async verifyChain(limit = 10_000): Promise<{ ok: boolean; brokenAtId?: bigint }> {
-    let cursor: bigint | undefined;
     let prev = GENESIS;
     let scanned = 0;
 
@@ -111,13 +149,12 @@ export class AuditService {
             metadata: row.metadata,
             outcome: row.outcome,
             occurredAt: row.occurredAt.toISOString(),
-          }),
+          } satisfies AuditCanonicalFields),
       );
       if (recomputed !== row.hash || row.prevHash !== prev) {
         return { ok: false, brokenAtId: row.id };
       }
       prev = row.hash;
-      cursor = row.id;
       scanned++;
     }
     return { ok: true };
