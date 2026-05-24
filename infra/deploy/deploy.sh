@@ -26,9 +26,33 @@ log() { echo -e "\033[1;32m[deploy]\033[0m $*"; }
 warn() { echo -e "\033[1;33m[deploy]\033[0m $*"; }
 fail() { echo -e "\033[1;31m[deploy]\033[0m $*"; exit 1; }
 
+# Preflight: refuse to deploy if JWT_SECRET is missing/weak. The API fails
+# fast at boot on a weak secret (services/api/src/auth/jwt-secret.util.ts), so
+# without this gate a bad .env would crash-loop the freshly built container
+# and 502 the whole site. Validated BEFORE git checkout / container changes so
+# the currently-running deploy is left untouched when it fails.
+require_strong_jwt_secret() {
+  local secret
+  secret="$(grep -E '^JWT_SECRET=' .env | tail -n1 | cut -d= -f2-)"
+  secret="${secret%$'\r'}"               # tolerate CRLF .env files
+  secret="${secret%\"}"; secret="${secret#\"}"
+  secret="${secret%\'}"; secret="${secret#\'}"
+  case "$secret" in
+    "")
+      fail "JWT_SECRET is not set in .env — the API will refuse to start. Generate one: openssl rand -hex 32" ;;
+    dev-secret-do-not-use|change-me-to-a-long-random-string-min-64-chars)
+      fail "JWT_SECRET is still a known placeholder — the API will refuse to start. Generate one: openssl rand -hex 32" ;;
+  esac
+  if (( ${#secret} < 32 )); then
+    fail "JWT_SECRET is shorter than 32 characters — the API will refuse to start. Generate one: openssl rand -hex 32"
+  fi
+  log "Preflight OK: JWT_SECRET present (${#secret} chars)"
+}
+
 if [[ ! -f .env ]]; then
   fail ".env missing. Copy .env.example and set production secrets first."
 fi
+require_strong_jwt_secret
 
 PREV_COMMIT="$(git rev-parse HEAD)"
 log "Current commit: $PREV_COMMIT"
