@@ -22,6 +22,7 @@ const SECTIONS: {
       { to: '/app/shifts',    label: 'Ээлж', min: 'FLEET_MANAGER',            icon: <IconLayers /> },
       { to: '/app/service-tasks', label: 'Засвар үйлчилгээ', min: 'VIEWER',   icon: <IconWrench /> },
       { to: '/app/history',   label: 'Маршрут · Түүх', min: 'VIEWER',         icon: <IconRoute /> },
+      { to: '/app/camera',    label: 'Камер · DualCam', min: 'VIEWER',        icon: <IconCamera /> },
     ],
   },
   {
@@ -234,6 +235,14 @@ function IconRoute() {
       <circle cx="6" cy="6" r="2.5" />
       <circle cx="18" cy="18" r="2.5" />
       <path d="M6 8.5v4a3 3 0 003 3h6a3 3 0 013 3" />
+    </IconBase>
+  );
+}
+function IconCamera() {
+  return (
+    <IconBase>
+      <path d="M3 7h3l2-2h8l2 2h3v12H3z" />
+      <circle cx="12" cy="13" r="3.5" />
     </IconBase>
   );
 }

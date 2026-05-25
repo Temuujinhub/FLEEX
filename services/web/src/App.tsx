@@ -12,6 +12,7 @@ import { LiveMap } from './pages/LiveMap';
 import { Dispatch } from './pages/Dispatch';
 import { Shifts } from './pages/Shifts';
 import { History } from './pages/History';
+import { Camera } from './pages/Camera';
 import { Events } from './pages/Events';
 import { Geofences } from './pages/Geofences';
 import { Reports } from './pages/Reports';
@@ -52,6 +53,7 @@ export function App() {
         <Route path="/app/service-tasks" element={<ServiceTasks />} />
         <Route path="/app/landing-settings" element={<LandingSettings />} />
         <Route path="/app/history/:deviceId?" element={<History />} />
+        <Route path="/app/camera" element={<Camera />} />
         <Route path="/app/events" element={<Events />} />
         <Route path="/app/notification-rules" element={<NotificationRules />} />
         <Route path="/app/health-rules" element={<DeviceHealthRules />} />
