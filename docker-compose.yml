@@ -207,6 +207,10 @@ services:
     image: nginx:1.27-alpine
     container_name: fleex-nginx
     restart: unless-stopped
+    # Lets the `/camtest/` location reach the separate camera-test rig (which
+    # publishes :8090 on the host) via http://host.docker.internal:8090.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - api
       - web

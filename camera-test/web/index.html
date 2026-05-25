@@ -75,17 +75,26 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-const map = L.map('map').setView([47.918, 106.917], 12); // Ulaanbaatar
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 19, attribution: '&copy; OpenStreetMap'
-}).addTo(map);
-
-let marker = null, track = null, fitted = false;
+let map = null, marker = null, track = null, fitted = false;
+try {
+  if (window.L) {
+    map = L.map('map').setView([47.918, 106.917], 12); // Ulaanbaatar
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+  }
+} catch (e) { map = null; }
+if (!map) {
+  // Embedded under the main app's strict CSP (external Leaflet blocked) —
+  // hide the map and let the gallery take the full width.
+  const mEl = document.getElementById('map'); if (mEl) mEl.style.display = 'none';
+  const sEl = document.querySelector('.side'); if (sEl) { sEl.style.width = '100%'; sEl.style.maxWidth = '100%'; }
+}
 const fmtTime = ms => ms ? new Date(ms).toLocaleString('mn-MN') : '—';
 
 async function refreshState() {
   try {
-    const devices = await (await fetch('/api/state')).json();
+    const devices = await (await fetch('api/state')).json();
     const dot = document.getElementById('dot'), status = document.getElementById('status');
     if (!devices.length) { status.textContent = 'Төхөөрөмж холбогдоогүй'; dot.className = 'dot'; return; }
     const d = devices.sort((a,b)=>b.online-a.online)[0];
@@ -101,7 +110,7 @@ async function refreshState() {
       ? (camOn ? 'Холбогдсон' : 'Тасарсан') + ' · ' + Math.round((d.camBytes || 0) / 1024) + ' KB ирсэн'
       : 'Холболт алга';
 
-    if (d.last && (d.last.lat || d.last.lng)) {
+    if (map && d.last && (d.last.lat || d.last.lng)) {
       const ll = [d.last.lat, d.last.lng];
       if (!marker) marker = L.marker(ll).addTo(map); else marker.setLatLng(ll);
       marker.bindPopup('IMEI ' + d.imei + '<br>' + d.last.speed + ' км/ц<br>' + fmtTime(d.last.time));
@@ -115,12 +124,12 @@ async function refreshState() {
 
 async function refreshImages() {
   try {
-    const imgs = await (await fetch('/api/images')).json();
+    const imgs = await (await fetch('api/images')).json();
     document.getElementById('m-images').textContent = imgs.length;
     const g = document.getElementById('gallery');
     if (!imgs.length) { g.innerHTML = '<div class="empty">Зураг ирээгүй байна.<br>(тохиргоо: интервал эсвэл trigger-ээр)</div>'; return; }
     g.innerHTML = imgs.map(im => {
-      const url = '/api/img/' + im.file;
+      const url = 'api/img/' + im.file;
       const cap = fmtTime(im.time) + ' · ' + Math.round(im.size/1024) + 'KB';
       if (im.kind === 'video') {
         return '<div class="card vid"><a href="'+url+'" download>📹 Видео<br>татах<div class="cap">'+cap+'</div></a></div>';
@@ -148,8 +157,8 @@ function arm(url, label) {
     } catch (e) { m.textContent = 'Алдаа гарлаа'; }
   };
 }
-document.getElementById('reqPhoto').onclick = arm('/api/request-photo', 'Зураг');
-document.getElementById('reqVideo').onclick = arm('/api/request-video', 'Видео');
+document.getElementById('reqPhoto').onclick = arm('api/request-photo', 'Зураг');
+document.getElementById('reqVideo').onclick = arm('api/request-video', 'Видео');
 
 refreshState(); refreshImages();
 setInterval(refreshState, 4000);
