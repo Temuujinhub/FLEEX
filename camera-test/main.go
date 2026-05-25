@@ -12,8 +12,8 @@
 package main
 
 import (
-	"bytes"
 	"embed"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -232,6 +232,18 @@ func handleAVL(conn net.Conn, st *Store) {
 // of the surrounding framing. Refine into a proper parser once a raw capture
 // is in hand.
 
+// handleCamera implements the Teltonika DualCam server protocol
+// (wiki: DualCam_Communication_Protocol). On connect the device sends a 16-byte
+// initialization packet [header 0x0000][protocol ID][IMEI 8B][settings 4B]; the
+// server then drives file transfer with the command structure
+// [CMD_ID 2B][data length 2B][data]:
+//
+//	0x0008 FILE REQ  ("%photof"/"%photor"/...)  server -> device
+//	0x0001 START     (file packet count)        device -> server
+//	0x0002 RESUME    (packet offset, 1-based)    server -> device
+//	0x0003 SYNC      (file offset)               device -> server
+//	0x0004 DATA      (<=1024B file data + CRC16) device -> server
+//	0x0005 COMPLETED (status 0)                  server -> device
 func handleCamera(conn net.Conn, st *Store) {
 	defer conn.Close()
 	remote := conn.RemoteAddr().String()
@@ -240,105 +252,130 @@ func handleCamera(conn net.Conn, st *Store) {
 	if raw != nil {
 		defer raw.Close()
 	}
+	var r io.Reader = conn
+	if raw != nil {
+		r = io.TeeReader(conn, raw) // mirror everything we read for diagnostics
+	}
 	log.Printf("[cam] connection from %s raw=%s", remote, filepath.Base(rawPath))
 
-	var buf []byte
-	tmp := make([]byte, 32*1024)
-	imei := ""
-	handshaked := false
-
-	for {
-		_ = conn.SetReadDeadline(time.Now().Add(900 * time.Second))
-		n, err := conn.Read(tmp)
-		if n > 0 {
-			chunk := tmp[:n]
-			if raw != nil {
-				_, _ = raw.Write(chunk) // capture from the very first byte for analysis
-			}
-			buf = append(buf, chunk...)
-
-			// Lenient IMEI handshake (2-byte length + ASCII digits). ACK as soon
-			// as it's recognised so the device proceeds to send media. If the
-			// stream doesn't start with a handshake we still capture raw and try
-			// to recover JPEGs below.
-			if !handshaked && len(buf) >= 2 {
-				ln := int(buf[0])<<8 | int(buf[1])
-				if ln >= 8 && ln <= 20 && len(buf) >= 2+ln && allDigits(buf[2:2+ln]) {
-					imei = string(buf[2 : 2+ln])
-					_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-					_, _ = conn.Write([]byte{0x01})
-					handshaked = true
-					buf = buf[2+ln:]
-					log.Printf("[cam] handshake ok imei=%s remote=%s", imei, remote)
-				}
-			}
-			if handshaked {
-				st.camData(imei, n)
-			}
-
-			imgs, rest := extractJPEGs(buf)
-			buf = rest
-			for _, img := range imgs {
-				key := imei
-				if key == "" {
-					key = "unknown"
-				}
-				name, e := st.addImage(key, img)
-				if e != nil {
-					log.Printf("[cam] save image: %v", e)
-				} else {
-					log.Printf("[cam] image saved imei=%s file=%s bytes=%d", key, name, len(img))
-				}
-			}
-			if len(buf) > 16*1024*1024 { // runaway guard
-				buf = buf[len(buf)-1024:]
+	readCmd := func() (uint16, []byte, error) {
+		_ = conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+		var hdr [4]byte
+		if _, err := io.ReadFull(r, hdr[:]); err != nil {
+			return 0, nil, err
+		}
+		cmd := binary.BigEndian.Uint16(hdr[0:2])
+		ln := binary.BigEndian.Uint16(hdr[2:4])
+		data := make([]byte, ln)
+		if ln > 0 {
+			if _, err := io.ReadFull(r, data); err != nil {
+				return cmd, nil, err
 			}
 		}
+		return cmd, data, nil
+	}
+	sendCmd := func(cmd uint16, data []byte) error {
+		_ = conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
+		hdr := []byte{byte(cmd >> 8), byte(cmd), byte(len(data) >> 8), byte(len(data))}
+		if _, err := conn.Write(hdr); err != nil {
+			return err
+		}
+		if len(data) > 0 {
+			if _, err := conn.Write(data); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	// Initialization packet (16 bytes).
+	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	var ini [16]byte
+	if _, err := io.ReadFull(r, ini[:]); err != nil {
+		log.Printf("[cam] read init %s: %v", remote, err)
+		return
+	}
+	if binary.BigEndian.Uint16(ini[0:2]) != 0x0000 {
+		log.Printf("[cam] unexpected init header from %s: % x (see %s)", remote, ini[:4], filepath.Base(rawPath))
+		return
+	}
+	protoID := binary.BigEndian.Uint16(ini[2:4])
+	imei := fmt.Sprintf("%d", binary.BigEndian.Uint64(ini[4:12]))
+	log.Printf("[cam] init imei=%s protoID=%d settings=% x remote=%s", imei, protoID, ini[12:16], remote)
+	st.camData(imei, 16)
+
+	// Drain available front-camera photos.
+	saved := 0
+	for {
+		if err := sendCmd(0x0008, []byte("%photof")); err != nil { // FILE REQ
+			break
+		}
+		cmd, data, err := readCmd()
 		if err != nil {
-			if err != io.EOF {
-				log.Printf("[cam] read %s imei=%s: %v", remote, imei, err)
+			break
+		}
+		st.camData(imei, len(data)+4)
+		if cmd != 0x0001 || len(data) < 4 { // not START → no more files / error
+			log.Printf("[cam] imei=%s no further photo (cmd=0x%04x)", imei, cmd)
+			break
+		}
+		packets := binary.BigEndian.Uint32(data[0:4])
+		if packets == 0 {
+			break
+		}
+		log.Printf("[cam] imei=%s START packets=%d", imei, packets)
+		if err := sendCmd(0x0002, []byte{0, 0, 0, 1}); err != nil { // RESUME from packet 1
+			break
+		}
+		if cmd, _, err = readCmd(); err != nil || cmd != 0x0003 { // SYNC
+			log.Printf("[cam] imei=%s expected SYNC (got 0x%04x err=%v)", imei, cmd, err)
+			break
+		}
+		fileBuf := make([]byte, 0, int(packets)*1024)
+		var prevCRC uint16
+		ok := true
+		for i := uint32(0); i < packets; i++ {
+			cmd, data, err = readCmd()
+			if err != nil || cmd != 0x0004 || len(data) < 2 {
+				log.Printf("[cam] imei=%s DATA read fail at pkt %d (cmd=0x%04x err=%v)", imei, i+1, cmd, err)
+				ok = false
+				break
 			}
-			log.Printf("[cam] closed %s imei=%s", remote, imei)
-			return
+			st.camData(imei, len(data)+4)
+			fileData := data[:len(data)-2]
+			pktCRC := binary.BigEndian.Uint16(data[len(data)-2:])
+			if calc := crc16(fileData, prevCRC); calc != pktCRC {
+				log.Printf("[cam] imei=%s pkt %d CRC calc=0x%04x got=0x%04x", imei, i+1, calc, pktCRC)
+			}
+			prevCRC = pktCRC // chain: next packet's init is this packet's CRC
+			fileBuf = append(fileBuf, fileData...)
+		}
+		if !ok {
+			break
+		}
+		if name, e := st.addImage(imei, fileBuf); e == nil {
+			saved++
+			log.Printf("[cam] imei=%s photo saved file=%s bytes=%d", imei, name, len(fileBuf))
 		}
 	}
+	_ = sendCmd(0x0005, []byte{0, 0, 0, 0}) // COMPLETED → device disconnects
+	log.Printf("[cam] imei=%s session done, saved=%d photo(s)", imei, saved)
 }
 
-func allDigits(b []byte) bool {
-	if len(b) == 0 {
-		return false
-	}
-	for _, c := range b {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-// extractJPEGs pulls every complete JPEG (SOI FF D8 FF .. EOI FF D9) out of
-// the buffer, returning them plus the unconsumed tail to carry into the next
-// read.
-func extractJPEGs(buf []byte) ([][]byte, []byte) {
-	var imgs [][]byte
-	for {
-		soi := bytes.Index(buf, []byte{0xFF, 0xD8, 0xFF})
-		if soi < 0 {
-			if len(buf) > 2 {
-				return imgs, buf[len(buf)-2:] // keep tail; SOI may straddle reads
+// crc16 is Teltonika's CRC-16/IBM (poly 0x8408), init = previous packet's CRC.
+func crc16(data []byte, init uint16) uint16 {
+	crc := init
+	for _, b := range data {
+		crc ^= uint16(b)
+		for i := 0; i < 8; i++ {
+			carry := crc & 1
+			crc >>= 1
+			if carry != 0 {
+				crc ^= 0x8408
 			}
-			return imgs, buf
 		}
-		eoi := bytes.Index(buf[soi+3:], []byte{0xFF, 0xD9})
-		if eoi < 0 {
-			return imgs, buf[soi:] // image not complete yet
-		}
-		end := soi + 3 + eoi + 2
-		img := make([]byte, end-soi)
-		copy(img, buf[soi:end])
-		imgs = append(imgs, img)
-		buf = buf[end:]
 	}
+	return crc
 }
 
 // --- HTTP (:8090) ----------------------------------------------------------
