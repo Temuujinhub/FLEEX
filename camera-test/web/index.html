@@ -63,6 +63,7 @@
     </div>
     <h2>Камерын зураг (DualCam)</h2>
     <div class="actions">
+      <button id="reqPhoto">📸 Snapshot</button>
       <button id="reqVideo">📹 Видео татах</button>
       <span id="vidmsg"></span>
     </div>
@@ -137,14 +138,18 @@ function openLightbox(url, cap) {
 }
 document.getElementById('lightbox').onclick = () => document.getElementById('lightbox').style.display = 'none';
 
-document.getElementById('reqVideo').onclick = async () => {
-  const m = document.getElementById('vidmsg');
-  try {
-    await fetch('/api/request-video', { method: 'POST' });
-    m.textContent = 'Хүсэлт илгээгдлээ — дараагийн холболтод татна';
-    setTimeout(() => { m.textContent = ''; }, 6000);
-  } catch (e) { m.textContent = 'Алдаа гарлаа'; }
-};
+function arm(url, label) {
+  return async () => {
+    const m = document.getElementById('vidmsg');
+    try {
+      await fetch(url, { method: 'POST' });
+      m.textContent = label + ' хүсэлт илгээгдлээ — дараагийн холболтод (≤60с)';
+      setTimeout(() => { m.textContent = ''; }, 8000);
+    } catch (e) { m.textContent = 'Алдаа гарлаа'; }
+  };
+}
+document.getElementById('reqPhoto').onclick = arm('/api/request-photo', 'Зураг');
+document.getElementById('reqVideo').onclick = arm('/api/request-video', 'Видео');
 
 refreshState(); refreshImages();
 setInterval(refreshState, 4000);

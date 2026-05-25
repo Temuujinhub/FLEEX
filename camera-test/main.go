@@ -78,6 +78,7 @@ type Store struct {
 	rawDir     string
 	maxFiles   int  // retention cap; oldest media pruned beyond this
 	videoReq   bool // one-shot: pull a video on the next camera connection
+	photoReq   bool // one-shot: pull a photo (snapshot) on the next connection
 	rawEnabled bool // capture raw camera streams to disk (diagnostics only)
 }
 
@@ -85,7 +86,8 @@ func NewStore(imageDir, rawDir string, maxFiles int) *Store {
 	return &Store{devices: map[string]*Device{}, imageDir: imageDir, rawDir: rawDir, maxFiles: maxFiles}
 }
 
-// requestVideo arms a one-shot video pull, honoured on the next camera link.
+// requestVideo / requestPhoto arm a one-shot pull, honoured on the camera's
+// next connection. Nothing is downloaded otherwise — no continuous saving.
 func (s *Store) requestVideo() {
 	s.mu.Lock()
 	s.videoReq = true
@@ -97,6 +99,22 @@ func (s *Store) takeVideoRequest() bool {
 	defer s.mu.Unlock()
 	if s.videoReq {
 		s.videoReq = false
+		return true
+	}
+	return false
+}
+
+func (s *Store) requestPhoto() {
+	s.mu.Lock()
+	s.photoReq = true
+	s.mu.Unlock()
+}
+
+func (s *Store) takePhotoRequest() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.photoReq {
+		s.photoReq = false
 		return true
 	}
 	return false
@@ -198,7 +216,8 @@ func (s *Store) snapshotDevices() []Device {
 func (s *Store) snapshotImages() []Image {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := append([]Image(nil), s.images...)
+	out := make([]Image, 0, len(s.images))
+	out = append(out, s.images...)
 	sort.Slice(out, func(i, j int) bool { return out[i].Time > out[j].Time })
 	return out
 }
@@ -426,9 +445,14 @@ func handleCamera(conn net.Conn, st *Store) {
 		}
 	}
 
-	photos := pull("%photof", "photo")
-	videos := 0
-	if st.takeVideoRequest() { // on-demand: armed by the "request video" button
+	// Nothing is pulled unless a snapshot/video was explicitly requested — the
+	// rig no longer downloads photos on every connection.
+	photos, videos := 0, 0
+	if st.takePhotoRequest() {
+		log.Printf("[cam] imei=%s on-demand snapshot", imei)
+		photos = pull("%photof", "photo")
+	}
+	if st.takeVideoRequest() {
 		log.Printf("[cam] imei=%s on-demand video pull", imei)
 		videos = pull("%videof", "video")
 	}
@@ -478,6 +502,11 @@ func serveHTTP(port string, st *Store) {
 			w.Header().Set("Content-Disposition", "attachment; filename=\""+name+"\"")
 		}
 		http.ServeFile(w, r, filepath.Join(st.imageDir, name))
+	})
+	mux.HandleFunc("/api/request-photo", func(w http.ResponseWriter, r *http.Request) {
+		st.requestPhoto()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
 	mux.HandleFunc("/api/request-video", func(w http.ResponseWriter, r *http.Request) {
 		st.requestVideo()
