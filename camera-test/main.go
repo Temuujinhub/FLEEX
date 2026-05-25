@@ -54,10 +54,12 @@ type Point struct {
 }
 
 type Device struct {
-	IMEI   string  `json:"imei"`
-	Last   Point   `json:"last"`
-	Track  []Point `json:"track"`
-	Online int64   `json:"online"` // unix ms (server last-seen)
+	IMEI      string  `json:"imei"`
+	Last      Point   `json:"last"`
+	Track     []Point `json:"track"`
+	Online    int64   `json:"online"`    // unix ms (server last-seen, AVL)
+	CamOnline int64   `json:"camOnline"` // unix ms (last camera-server contact)
+	CamBytes  int64   `json:"camBytes"`  // total bytes received on the camera port
 }
 
 type Image struct {
@@ -92,6 +94,14 @@ func (s *Store) markOnline(imei string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.device(imei).Online = time.Now().UnixMilli()
+}
+
+func (s *Store) camData(imei string, delta int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d := s.device(imei)
+	d.CamOnline = time.Now().UnixMilli()
+	d.CamBytes += int64(delta)
 }
 
 func (s *Store) updatePositions(imei string, recs []teltonika.Record) {
@@ -224,40 +234,60 @@ func handleAVL(conn net.Conn, st *Store) {
 
 func handleCamera(conn net.Conn, st *Store) {
 	defer conn.Close()
-	imei, err := camHandshake(conn)
-	if err != nil {
-		log.Printf("[cam] handshake %s: %v", conn.RemoteAddr(), err)
-		return
-	}
-	log.Printf("[cam] connected imei=%s remote=%s", imei, conn.RemoteAddr())
-	defer log.Printf("[cam] disconnected imei=%s", imei)
-	st.markOnline(imei)
-
-	rawPath := filepath.Join(st.rawDir, fmt.Sprintf("%s_%d.bin", sanitize(imei), time.Now().UnixMilli()))
+	remote := conn.RemoteAddr().String()
+	rawPath := filepath.Join(st.rawDir, fmt.Sprintf("cam_%d.bin", time.Now().UnixMilli()))
 	raw, _ := os.Create(rawPath)
 	if raw != nil {
 		defer raw.Close()
 	}
+	log.Printf("[cam] connection from %s raw=%s", remote, filepath.Base(rawPath))
 
 	var buf []byte
 	tmp := make([]byte, 32*1024)
+	imei := ""
+	handshaked := false
+
 	for {
 		_ = conn.SetReadDeadline(time.Now().Add(900 * time.Second))
 		n, err := conn.Read(tmp)
 		if n > 0 {
 			chunk := tmp[:n]
 			if raw != nil {
-				_, _ = raw.Write(chunk)
+				_, _ = raw.Write(chunk) // capture from the very first byte for analysis
 			}
 			buf = append(buf, chunk...)
+
+			// Lenient IMEI handshake (2-byte length + ASCII digits). ACK as soon
+			// as it's recognised so the device proceeds to send media. If the
+			// stream doesn't start with a handshake we still capture raw and try
+			// to recover JPEGs below.
+			if !handshaked && len(buf) >= 2 {
+				ln := int(buf[0])<<8 | int(buf[1])
+				if ln >= 8 && ln <= 20 && len(buf) >= 2+ln && allDigits(buf[2:2+ln]) {
+					imei = string(buf[2 : 2+ln])
+					_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+					_, _ = conn.Write([]byte{0x01})
+					handshaked = true
+					buf = buf[2+ln:]
+					log.Printf("[cam] handshake ok imei=%s remote=%s", imei, remote)
+				}
+			}
+			if handshaked {
+				st.camData(imei, n)
+			}
+
 			imgs, rest := extractJPEGs(buf)
 			buf = rest
 			for _, img := range imgs {
-				name, e := st.addImage(imei, img)
+				key := imei
+				if key == "" {
+					key = "unknown"
+				}
+				name, e := st.addImage(key, img)
 				if e != nil {
-					log.Printf("[cam] save image imei=%s: %v", imei, e)
+					log.Printf("[cam] save image: %v", e)
 				} else {
-					log.Printf("[cam] image saved imei=%s file=%s bytes=%d", imei, name, len(img))
+					log.Printf("[cam] image saved imei=%s file=%s bytes=%d", key, name, len(img))
 				}
 			}
 			if len(buf) > 16*1024*1024 { // runaway guard
@@ -266,34 +296,24 @@ func handleCamera(conn net.Conn, st *Store) {
 		}
 		if err != nil {
 			if err != io.EOF {
-				log.Printf("[cam] read imei=%s: %v", imei, err)
+				log.Printf("[cam] read %s imei=%s: %v", remote, imei, err)
 			}
+			log.Printf("[cam] closed %s imei=%s", remote, imei)
 			return
 		}
 	}
 }
 
-// camHandshake performs the Teltonika IMEI handshake leniently (accepts the
-// connection so the device proceeds to send media) and returns the IMEI.
-func camHandshake(conn net.Conn) (string, error) {
-	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-	var lenBuf [2]byte
-	if _, err := io.ReadFull(conn, lenBuf[:]); err != nil {
-		return "", fmt.Errorf("read imei len: %w", err)
+func allDigits(b []byte) bool {
+	if len(b) == 0 {
+		return false
 	}
-	n := int(lenBuf[0])<<8 | int(lenBuf[1])
-	if n <= 0 || n > 64 {
-		return "", fmt.Errorf("bogus imei length %d", n)
+	for _, c := range b {
+		if c < '0' || c > '9' {
+			return false
+		}
 	}
-	imei := make([]byte, n)
-	if _, err := io.ReadFull(conn, imei); err != nil {
-		return "", fmt.Errorf("read imei: %w", err)
-	}
-	_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	if _, err := conn.Write([]byte{0x01}); err != nil {
-		return "", fmt.Errorf("ack: %w", err)
-	}
-	return string(imei), nil
+	return true
 }
 
 // extractJPEGs pulls every complete JPEG (SOI FF D8 FF .. EOI FF D9) out of

@@ -52,6 +52,7 @@
       <div><span class="k">Хурд</span><span id="m-speed">—</span></div>
       <div><span class="k">Сүүлийн байршил</span><span id="m-time">—</span></div>
       <div><span class="k">Цэгийн тоо</span><span id="m-points">—</span></div>
+      <div><span class="k">Камер холболт</span><span id="m-cam">—</span></div>
       <div><span class="k">Зураг</span><span id="m-images">—</span></div>
     </div>
     <h2>Камерын зураг (DualCam)</h2>
@@ -84,6 +85,10 @@ async function refreshState() {
     document.getElementById('m-speed').textContent = (d.last ? d.last.speed : 0) + ' км/ц';
     document.getElementById('m-time').textContent = d.last ? fmtTime(d.last.time) : '—';
     document.getElementById('m-points').textContent = (d.track || []).length;
+    const camOn = d.camOnline && (Date.now() - d.camOnline < 180000);
+    document.getElementById('m-cam').textContent = d.camOnline
+      ? (camOn ? 'Холбогдсон' : 'Тасарсан') + ' · ' + Math.round((d.camBytes || 0) / 1024) + ' KB ирсэн'
+      : 'Холболт алга';
 
     if (d.last && (d.last.lat || d.last.lng)) {
       const ll = [d.last.lat, d.last.lng];
