@@ -78,23 +78,28 @@ ufw delete allow 5028/tcp && ufw delete allow 5029/tcp && ufw delete allow 8090/
 
 ---
 
-## 3. Viewing test images
+## 3. Photos, on-demand video & retention
 
-- Images arrive **on their own** per the device config (periodic Front every
-  600 s, or on a trigger). No server request needed.
-- They appear in the **gallery** on the page (newest first); click to enlarge.
-- On disk inside the container: `/app/data/images/<imei>_<ms>.jpg`
-  (`docker compose -f docker-compose.cam.yml exec camtest ls /app/data/images`).
+The rig speaks the real DualCam file-transfer protocol
+(`FILE REQ → START → RESUME → SYNC → DATA → reassembled file`):
 
-### How image capture works here
-The rig ACKs the camera handshake, dumps the **raw stream** to
-`/app/data/raw/<imei>_<ms>.bin`, and recovers any complete **JPEG**
-(`FF D8 FF … FF D9`) from the stream. That's enough to show pictures for the
-demo regardless of the exact DualCam metadata framing.
+- **Photos** are pulled automatically on every camera connection
+  (identifier `%photof`) and shown in the **gallery** (newest first; click to
+  enlarge). On disk: `/app/data/images/<imei>_<ms>.jpg`.
+- **Video on-demand:** click **📹 Видео татах** on the page; on the camera's
+  next connection the rig requests `%videof` and stores it. The DualCam only
+  has a video to give if one was captured by a trigger (Video sending trigger
+  = DIN1/DIN2/Crash in the device config), so trigger a clip first. Video is
+  saved raw (`.h264`) and offered as a **download** — in-browser playback
+  (mp4 via ffmpeg) is a follow-up that needs the wiki's video-conversion bytes.
+- **Retention:** only the newest `CAMTEST_MAX_FILES` media files are kept
+  (default 200); older are auto-deleted so the box never fills up. Raw stream
+  capture is **off** by default. Expand to object storage at fleet rollout.
 
-If images don't appear but `[cam] connected` shows in the logs, grab a raw
-capture (`/app/data/raw/*.bin`) — the DualCam metadata-v3 framing /
-per-chunk ACK can then be implemented precisely from real bytes.
+### Env knobs
+`CAMTEST_MAX_FILES` (default 200) · `CAMTEST_RAW` (0/1, default 0 — raw stream
+dump for protocol diagnostics) · `CAMTEST_AVL_PORT` 5028 · `CAMTEST_CAM_PORT`
+5029 · `CAMTEST_HTTP_PORT` 8090.
 
 ---
 

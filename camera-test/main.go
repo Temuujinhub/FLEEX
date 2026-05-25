@@ -67,18 +67,39 @@ type Image struct {
 	Time int64  `json:"time"` // unix ms (server received)
 	File string `json:"file"`
 	Size int64  `json:"size"`
+	Kind string `json:"kind"` // "photo" | "video"
 }
 
 type Store struct {
-	mu       sync.RWMutex
-	devices  map[string]*Device
-	images   []Image
-	imageDir string
-	rawDir   string
+	mu         sync.RWMutex
+	devices    map[string]*Device
+	images     []Image
+	imageDir   string
+	rawDir     string
+	maxFiles   int  // retention cap; oldest media pruned beyond this
+	videoReq   bool // one-shot: pull a video on the next camera connection
+	rawEnabled bool // capture raw camera streams to disk (diagnostics only)
 }
 
-func NewStore(imageDir, rawDir string) *Store {
-	return &Store{devices: map[string]*Device{}, imageDir: imageDir, rawDir: rawDir}
+func NewStore(imageDir, rawDir string, maxFiles int) *Store {
+	return &Store{devices: map[string]*Device{}, imageDir: imageDir, rawDir: rawDir, maxFiles: maxFiles}
+}
+
+// requestVideo arms a one-shot video pull, honoured on the next camera link.
+func (s *Store) requestVideo() {
+	s.mu.Lock()
+	s.videoReq = true
+	s.mu.Unlock()
+}
+
+func (s *Store) takeVideoRequest() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.videoReq {
+		s.videoReq = false
+		return true
+	}
+	return false
 }
 
 func (s *Store) device(imei string) *Device {
@@ -122,16 +143,44 @@ func (s *Store) updatePositions(imei string, recs []teltonika.Record) {
 	}
 }
 
-func (s *Store) addImage(imei string, data []byte) (string, error) {
-	now := time.Now()
-	name := fmt.Sprintf("%s_%d.jpg", sanitize(imei), now.UnixMilli())
+func (s *Store) addMedia(imei string, data []byte, kind string) (string, error) {
+	ext := "jpg"
+	if kind == "video" {
+		ext = "h264" // raw stream; browser playback needs conversion (follow-up)
+	}
+	id := sanitize(imei)
+	ms := time.Now().UnixMilli()
+	var name string
+	for { // ensure a unique filename even for same-millisecond bursts
+		name = fmt.Sprintf("%s_%d.%s", id, ms, ext)
+		if _, err := os.Stat(filepath.Join(s.imageDir, name)); os.IsNotExist(err) {
+			break
+		}
+		ms++
+	}
 	if err := os.WriteFile(filepath.Join(s.imageDir, name), data, 0o644); err != nil {
 		return "", err
 	}
 	s.mu.Lock()
-	s.images = append(s.images, Image{IMEI: imei, Time: now.UnixMilli(), File: name, Size: int64(len(data))})
+	s.images = append(s.images, Image{IMEI: imei, Time: ms, File: name, Size: int64(len(data)), Kind: kind})
+	s.pruneLocked()
 	s.mu.Unlock()
 	return name, nil
+}
+
+// pruneLocked enforces the retention cap by deleting the oldest media files so
+// the test rig never accumulates much data (storage is expanded properly only
+// once the fleet rollout / contract happens). Caller must hold s.mu.
+func (s *Store) pruneLocked() {
+	if s.maxFiles <= 0 || len(s.images) <= s.maxFiles {
+		return
+	}
+	sort.Slice(s.images, func(i, j int) bool { return s.images[i].Time < s.images[j].Time }) // oldest first
+	excess := len(s.images) - s.maxFiles
+	for _, im := range s.images[:excess] {
+		_ = os.Remove(filepath.Join(s.imageDir, im.File))
+	}
+	s.images = append([]Image(nil), s.images[excess:]...)
 }
 
 func (s *Store) snapshotDevices() []Device {
@@ -159,7 +208,15 @@ func (s *Store) snapshotImages() []Image {
 func (s *Store) loadExisting() {
 	entries, _ := os.ReadDir(s.imageDir)
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jpg") {
+		if e.IsDir() {
+			continue
+		}
+		kind := ""
+		if strings.HasSuffix(e.Name(), ".jpg") {
+			kind = "photo"
+		} else if strings.HasSuffix(e.Name(), ".h264") {
+			kind = "video"
+		} else {
 			continue
 		}
 		info, err := e.Info()
@@ -167,13 +224,19 @@ func (s *Store) loadExisting() {
 			continue
 		}
 		imei, ms := parseName(e.Name())
-		s.images = append(s.images, Image{IMEI: imei, Time: ms, File: e.Name(), Size: info.Size()})
+		s.images = append(s.images, Image{IMEI: imei, Time: ms, File: e.Name(), Size: info.Size(), Kind: kind})
 	}
-	log.Printf("loaded %d existing image(s) from %s", len(s.images), s.imageDir)
+	s.mu.Lock()
+	s.pruneLocked()
+	s.mu.Unlock()
+	log.Printf("loaded %d existing media file(s) from %s", len(s.images), s.imageDir)
 }
 
 func parseName(name string) (string, int64) {
-	base := strings.TrimSuffix(name, ".jpg")
+	base := name
+	if i := strings.LastIndex(base, "."); i >= 0 {
+		base = base[:i]
+	}
 	i := strings.LastIndex(base, "_")
 	if i < 0 {
 		return base, 0
@@ -247,16 +310,17 @@ func handleAVL(conn net.Conn, st *Store) {
 func handleCamera(conn net.Conn, st *Store) {
 	defer conn.Close()
 	remote := conn.RemoteAddr().String()
-	rawPath := filepath.Join(st.rawDir, fmt.Sprintf("cam_%d.bin", time.Now().UnixMilli()))
-	raw, _ := os.Create(rawPath)
-	if raw != nil {
-		defer raw.Close()
-	}
 	var r io.Reader = conn
-	if raw != nil {
-		r = io.TeeReader(conn, raw) // mirror everything we read for diagnostics
+	if st.rawEnabled { // off by default — raw mirrors full transfers and would defeat retention
+		rawPath := filepath.Join(st.rawDir, fmt.Sprintf("cam_%d.bin", time.Now().UnixMilli()))
+		if raw, err := os.Create(rawPath); err == nil {
+			defer raw.Close()
+			r = io.TeeReader(conn, raw)
+			log.Printf("[cam] connection from %s raw=%s", remote, filepath.Base(rawPath))
+		}
+	} else {
+		log.Printf("[cam] connection from %s", remote)
 	}
-	log.Printf("[cam] connection from %s raw=%s", remote, filepath.Base(rawPath))
 
 	readCmd := func() (uint16, []byte, error) {
 		_ = conn.SetReadDeadline(time.Now().Add(120 * time.Second))
@@ -296,7 +360,7 @@ func handleCamera(conn net.Conn, st *Store) {
 		return
 	}
 	if binary.BigEndian.Uint16(ini[0:2]) != 0x0000 {
-		log.Printf("[cam] unexpected init header from %s: % x (see %s)", remote, ini[:4], filepath.Base(rawPath))
+		log.Printf("[cam] unexpected init header from %s: % x", remote, ini[:4])
 		return
 	}
 	protoID := binary.BigEndian.Uint16(ini[2:4])
@@ -304,62 +368,72 @@ func handleCamera(conn net.Conn, st *Store) {
 	log.Printf("[cam] init imei=%s protoID=%d settings=% x remote=%s", imei, protoID, ini[12:16], remote)
 	st.camData(imei, 16)
 
-	// Drain available front-camera photos.
-	saved := 0
-	for {
-		if err := sendCmd(0x0008, []byte("%photof")); err != nil { // FILE REQ
-			break
-		}
-		cmd, data, err := readCmd()
-		if err != nil {
-			break
-		}
-		st.camData(imei, len(data)+4)
-		if cmd != 0x0001 || len(data) < 4 { // not START → no more files / error
-			log.Printf("[cam] imei=%s no further photo (cmd=0x%04x)", imei, cmd)
-			break
-		}
-		packets := binary.BigEndian.Uint32(data[0:4])
-		if packets == 0 {
-			break
-		}
-		log.Printf("[cam] imei=%s START packets=%d", imei, packets)
-		if err := sendCmd(0x0002, []byte{0, 0, 0, 1}); err != nil { // RESUME from packet 1
-			break
-		}
-		if cmd, _, err = readCmd(); err != nil || cmd != 0x0003 { // SYNC
-			log.Printf("[cam] imei=%s expected SYNC (got 0x%04x err=%v)", imei, cmd, err)
-			break
-		}
-		fileBuf := make([]byte, 0, int(packets)*1024)
-		var prevCRC uint16
-		ok := true
-		for i := uint32(0); i < packets; i++ {
-			cmd, data, err = readCmd()
-			if err != nil || cmd != 0x0004 || len(data) < 2 {
-				log.Printf("[cam] imei=%s DATA read fail at pkt %d (cmd=0x%04x err=%v)", imei, i+1, cmd, err)
-				ok = false
-				break
+	// pull drains every available file of one type ("%photof" / "%videof")
+	// via the START→RESUME→SYNC→DATA sequence, saving each one.
+	pull := func(identifier, kind string) int {
+		saved := 0
+		for {
+			if err := sendCmd(0x0008, []byte(identifier)); err != nil { // FILE REQ
+				return saved
+			}
+			cmd, data, err := readCmd()
+			if err != nil {
+				return saved
 			}
 			st.camData(imei, len(data)+4)
-			fileData := data[:len(data)-2]
-			pktCRC := binary.BigEndian.Uint16(data[len(data)-2:])
-			if calc := crc16(fileData, prevCRC); calc != pktCRC {
-				log.Printf("[cam] imei=%s pkt %d CRC calc=0x%04x got=0x%04x", imei, i+1, calc, pktCRC)
+			if cmd != 0x0001 || len(data) < 4 { // not START → none left / error
+				log.Printf("[cam] imei=%s no more %s (cmd=0x%04x)", imei, identifier, cmd)
+				return saved
 			}
-			prevCRC = pktCRC // chain: next packet's init is this packet's CRC
-			fileBuf = append(fileBuf, fileData...)
-		}
-		if !ok {
-			break
-		}
-		if name, e := st.addImage(imei, fileBuf); e == nil {
-			saved++
-			log.Printf("[cam] imei=%s photo saved file=%s bytes=%d", imei, name, len(fileBuf))
+			packets := binary.BigEndian.Uint32(data[0:4])
+			if packets == 0 {
+				return saved
+			}
+			log.Printf("[cam] imei=%s %s START packets=%d", imei, identifier, packets)
+			if err := sendCmd(0x0002, []byte{0, 0, 0, 1}); err != nil { // RESUME from packet 1
+				return saved
+			}
+			if sc, _, se := readCmd(); se != nil || sc != 0x0003 { // SYNC
+				log.Printf("[cam] imei=%s expected SYNC (got 0x%04x err=%v)", imei, sc, se)
+				return saved
+			}
+			fileBuf := make([]byte, 0, int(packets)*1024)
+			var prevCRC uint16
+			ok := true
+			for i := uint32(0); i < packets; i++ {
+				dc, dd, de := readCmd()
+				if de != nil || dc != 0x0004 || len(dd) < 2 {
+					log.Printf("[cam] imei=%s %s DATA fail at pkt %d (cmd=0x%04x err=%v)", imei, identifier, i+1, dc, de)
+					ok = false
+					break
+				}
+				st.camData(imei, len(dd)+4)
+				fileData := dd[:len(dd)-2]
+				pktCRC := binary.BigEndian.Uint16(dd[len(dd)-2:])
+				if calc := crc16(fileData, prevCRC); calc != pktCRC {
+					log.Printf("[cam] imei=%s pkt %d CRC calc=0x%04x got=0x%04x", imei, i+1, calc, pktCRC)
+				}
+				prevCRC = pktCRC // chain: next packet's init is this packet's CRC
+				fileBuf = append(fileBuf, fileData...)
+			}
+			if !ok {
+				return saved
+			}
+			if name, e := st.addMedia(imei, fileBuf, kind); e == nil {
+				saved++
+				log.Printf("[cam] imei=%s %s saved file=%s bytes=%d", imei, kind, name, len(fileBuf))
+			}
 		}
 	}
+
+	photos := pull("%photof", "photo")
+	videos := 0
+	if st.takeVideoRequest() { // on-demand: armed by the "request video" button
+		log.Printf("[cam] imei=%s on-demand video pull", imei)
+		videos = pull("%videof", "video")
+	}
 	_ = sendCmd(0x0005, []byte{0, 0, 0, 0}) // COMPLETED → device disconnects
-	log.Printf("[cam] imei=%s session done, saved=%d photo(s)", imei, saved)
+	log.Printf("[cam] imei=%s session done, photos=%d videos=%d", imei, photos, videos)
 }
 
 // crc16 is Teltonika's CRC-16/IBM (poly 0x8408), init = previous packet's CRC.
@@ -393,12 +467,22 @@ func serveHTTP(port string, st *Store) {
 	})
 	mux.HandleFunc("/api/img/", func(w http.ResponseWriter, r *http.Request) {
 		name := sanitize(strings.TrimPrefix(r.URL.Path, "/api/img/"))
-		if name == "" || !strings.HasSuffix(name, ".jpg") {
+		if name == "" || (!strings.HasSuffix(name, ".jpg") && !strings.HasSuffix(name, ".h264")) {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", "image/jpeg")
+		if strings.HasSuffix(name, ".jpg") {
+			w.Header().Set("Content-Type", "image/jpeg")
+		} else { // raw video → download
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Disposition", "attachment; filename=\""+name+"\"")
+		}
 		http.ServeFile(w, r, filepath.Join(st.imageDir, name))
+	})
+	mux.HandleFunc("/api/request-video", func(w http.ResponseWriter, r *http.Request) {
+		st.requestVideo()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -451,14 +535,16 @@ func main() {
 		log.Fatalf("mkdir raw: %v", err)
 	}
 
-	st := NewStore(imageDir, rawDir)
+	maxFiles, _ := strconv.Atoi(env("CAMTEST_MAX_FILES", "200"))
+	st := NewStore(imageDir, rawDir, maxFiles)
+	st.rawEnabled = env("CAMTEST_RAW", "0") == "1" // diagnostics only; off by default
 	st.loadExisting()
 
 	go listen("avl", avlPort, func(c net.Conn) { handleAVL(c, st) })
 	go listen("cam", camPort, func(c net.Conn) { handleCamera(c, st) })
 	go serveHTTP(httpPort, st)
 
-	log.Printf("camtest up — AVL :%s  CAM :%s  HTTP :%s  data=%s", avlPort, camPort, httpPort, dataDir)
+	log.Printf("camtest up — AVL :%s  CAM :%s  HTTP :%s  data=%s  retain=%d files", avlPort, camPort, httpPort, dataDir, maxFiles)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
