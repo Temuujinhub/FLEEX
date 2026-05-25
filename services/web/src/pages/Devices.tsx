@@ -9,6 +9,7 @@ import { CommandsTab } from './devices/CommandsTab';
 import { MessagesTab } from './devices/MessagesTab';
 import { HealthTab } from './devices/HealthTab';
 import { CountersTab } from './devices/CountersTab';
+import { CapabilitiesTab } from './devices/CapabilitiesTab';
 import { CustomFieldsTab } from './devices/CustomFieldsTab';
 import { TripsTab } from './devices/TripsTab';
 
@@ -445,7 +446,7 @@ function AddVehicleModal({
   // messages, counters, health) live as sub-tabs under "gps" so the modal
   // header stays compact even for a saved device.
   type Tab = 'basic' | 'gps' | 'specs' | 'fuel' | 'trips' | 'insurance' | 'custom';
-  type GpsSub = 'config' | 'sensors' | 'commands' | 'messages' | 'counters' | 'health';
+  type GpsSub = 'config' | 'capabilities' | 'sensors' | 'commands' | 'messages' | 'counters' | 'health';
   const [tab, setTab] = useState<Tab>('basic');
   const [gpsSub, setGpsSub] = useState<GpsSub>('config');
   // The runtime / view-only tabs persist their own state — they don't
@@ -669,12 +670,13 @@ function AddVehicleModal({
                 saved — they all depend on a real Device id. */}
             <div className="flex flex-wrap gap-1 bg-slate-100 rounded-lg p-1">
               {([
-                { id: 'config',   label: 'Тохиргоо', always: true },
-                { id: 'sensors',  label: 'Мэдрэгч',  always: false },
-                { id: 'commands', label: 'Команд',   always: false },
-                { id: 'messages', label: 'Мессеж',   always: false },
-                { id: 'counters', label: 'Тоолуур',  always: false },
-                { id: 'health',   label: 'Эрүүл',    always: false },
+                { id: 'config',       label: 'Тохиргоо', always: true },
+                { id: 'capabilities', label: 'Боломж',   always: true },
+                { id: 'sensors',      label: 'Мэдрэгч',  always: false },
+                { id: 'commands',     label: 'Команд',   always: false },
+                { id: 'messages',     label: 'Мессеж',   always: false },
+                { id: 'counters',     label: 'Тоолуур',  always: false },
+                { id: 'health',       label: 'Эрүүл',    always: false },
               ] as { id: GpsSub; label: string; always: boolean }[])
                 .filter((s) => s.always || isEdit)
                 .map((s) => (
@@ -716,6 +718,10 @@ function AddVehicleModal({
                   <b> "📡 GPS холболтын заавар" </b> товчоор үзнэ үү.
                 </div>
               </div>
+            )}
+
+            {gpsSub === 'capabilities' && (
+              <CapabilitiesTab model={form.model} deviceId={isEdit ? device.id : undefined} />
             )}
 
             {isEdit && gpsSub === 'sensors'  && <SensorsTab deviceId={device.id} />}
