@@ -51,10 +51,10 @@ export function ServiceTasks() {
 
   const summary = useMemo(() => {
     const list: any[] = tasks.data ?? [];
-    const m = { PLANNED: 0, IN_PROGRESS: 0, COMPLETED: 0, OVERDUE: 0, CANCELLED: 0 } as Record<string, number>;
+    const m = { PLANNED: 0, IN_PROGRESS: 0, COMPLETED: 0, OVERDUE: 0, CANCELLED: 0 };
     let cost = 0;
     for (const t of list) {
-      m[t.status] = (m[t.status] ?? 0) + 1;
+      if (t.status in m) m[t.status as keyof typeof m] += 1;
       if (t.cost) cost += t.cost;
     }
     return { ...m, total: list.length, cost };

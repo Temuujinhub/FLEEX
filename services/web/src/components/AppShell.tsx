@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
-import { ReactNode } from 'react';
+import { ReactNode, Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../store/auth';
 import { clearTokens } from '../lib/api';
@@ -163,7 +163,15 @@ export function AppShell() {
       </aside>
 
       <main className="flex-1 overflow-y-auto">
-        <Outlet />
+        {/* Inner boundary so navigating between lazy /app pages only swaps the
+            content area — the sidebar stays mounted (no flicker). */}
+        <Suspense
+          fallback={
+            <div className="flex min-h-[50vh] items-center justify-center text-sm text-slate-400">…</div>
+          }
+        >
+          <Outlet />
+        </Suspense>
       </main>
     </div>
   );
