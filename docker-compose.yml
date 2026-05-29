@@ -101,6 +101,10 @@ services:
     container_name: fleex-api
     restart: unless-stopped
     env_file: .env
+    volumes:
+      # Read-only access to the DualCam media blobs the media-service writes,
+      # so the API can stream them after auth + tenant checks.
+      - media-data:/data/media:ro
     environment:
       # connection_limit caps Prisma's pool. Without it Prisma defaults to
       # num_cpus*2+1, which on an 8-vCPU host is ~17 per API instance and,
@@ -109,6 +113,7 @@ services:
       # Postgres with PgBouncer before scaling the API horizontally.
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public&connection_limit=10
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      MEDIA_DATA_DIR: /data/media
     depends_on:
       postgres:
         condition: service_healthy
@@ -192,6 +197,43 @@ services:
       start_period: 30s
     networks: [fleex]
 
+  # DualCam media service. Speaks the Teltonika DualCam file-transfer protocol
+  # on :5029, persists captured photos/videos to the shared media-data volume
+  # (+ metadata to Postgres), and consumes on-demand capture requests from
+  # Redis (set by the API). Telemetry is unaffected — it still flows to the
+  # gps-ingestor on :5027.
+  media-service:
+    build:
+      context: ./services/media-service
+      dockerfile: Dockerfile
+    image: fleex/media-service:latest
+    container_name: fleex-media-service
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      MEDIA_DATA_DIR: /data/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        # Wait for `prisma db push` to materialise the device_images table.
+        condition: service_healthy
+    ports:
+      - "5029:5029"   # Teltonika DualCam camera server
+    volumes:
+      - media-data:/data/media
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9092/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [fleex]
+
   web:
     build:
       context: ./services/web
@@ -211,10 +253,6 @@ services:
     image: nginx:1.27-alpine
     container_name: fleex-nginx
     restart: unless-stopped
-    # Lets the `/camtest/` location reach the separate camera-test rig (which
-    # publishes :8090 on the host) via http://host.docker.internal:8090.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
       - api
       - web
@@ -242,6 +280,7 @@ volumes:
   postgres-data:
   redis-data:
   nginx-cache:
+  media-data:
 
 networks:
   fleex:

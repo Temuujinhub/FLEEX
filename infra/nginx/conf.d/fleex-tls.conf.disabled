@@ -67,15 +67,6 @@ server {
         proxy_send_timeout 3600s;
     }
 
-    # Camera-test rig (separate compose project `fleex-camtest`), publishing
-    # :8090 on the host. Reached via host.docker.internal (see the nginx
-    # `extra_hosts: host-gateway` entry in docker-compose.yml).
-    location /camtest/ {
-        proxy_pass http://host.docker.internal:8090/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-    }
-
     location / {
         proxy_pass http://fleex_web;
     }
