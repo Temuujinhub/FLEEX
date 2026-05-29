@@ -7,9 +7,20 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../common/redis.service';
 
 class IssueCommandDto {
-  @IsString() type!: string; // "reset" | "engine_block" | "engine_unblock" | "setodometer" | ...
+  @IsString() type!: string; // "reset" | "engine_block" | "engine_unblock" | ...
   @IsOptional() @IsObject() payload?: Record<string, unknown>;
 }
+
+// Vetted preset commands any FLEET_MANAGER+ may issue. A raw `payload.text`
+// command or a non-preset type is a SUPER_ADMIN-only escape hatch, so a
+// regular manager can't arbitrarily reconfigure or brick a device.
+const SAFE_COMMAND_TYPES = new Set([
+  'engine_block',
+  'engine_unblock',
+  'request_info',
+  'request_status',
+  'reset',
+]);
 
 // Commands are queued in Postgres and pushed onto a Redis list that the
 // ingestor's command-fanout worker pops and delivers over the device's open
@@ -27,6 +38,18 @@ class CommandsService {
     const dev = await this.prisma.device.findUnique({ where: { id: deviceId } });
     if (!dev) throw new NotFoundException('Device not found');
     if (actor.role !== 'SUPER_ADMIN' && dev.companyId !== actor.companyId) throw new ForbiddenException();
+
+    // Command allowlist (raw text / arbitrary types are SUPER_ADMIN-only).
+    const rawText = (dto.payload as { text?: unknown } | undefined)?.text;
+    const hasRawText = typeof rawText === 'string' && rawText.trim() !== '';
+    if (actor.role !== 'SUPER_ADMIN') {
+      if (hasRawText) {
+        throw new ForbiddenException('Захиалгат (raw) команд зөвхөн системийн админд зөвшөөрөгдөнө');
+      }
+      if (!SAFE_COMMAND_TYPES.has(dto.type)) {
+        throw new ForbiddenException(`"${dto.type}" төрлийн команд зөвшөөрөгдөөгүй`);
+      }
+    }
 
     const cmd = await this.prisma.command.create({
       data: { deviceId, issuedById: actor.id, type: dto.type, payload: dto.payload as any },
