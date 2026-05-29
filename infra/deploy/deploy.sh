@@ -94,8 +94,22 @@ sync_csp_into_tls_conf() {
   fi
 }
 
+# The DualCam camera capability is now a first-class service (media-service on
+# :5029). It used to run as a separate, throwaway `fleex-camtest` compose
+# project (container `camtest`) that also published :5029. If that orphaned rig
+# is still running on the host it holds the port and media-service can't bind
+# it ("port is already allocated"). Tear it down. Idempotent: a no-op when the
+# rig isn't present.
+stop_legacy_camtest() {
+  if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx camtest; then
+    warn "Removing legacy camtest rig (freeing :5029 for media-service)"
+    docker rm -f camtest >/dev/null 2>&1 || true
+  fi
+}
+
 build_and_up() {
   sync_csp_into_tls_conf
+  stop_legacy_camtest
 
   log "docker compose build"
   docker compose -f "$COMPOSE_FILE" build --pull
@@ -157,7 +171,7 @@ trap 'rollback' ERR
 build_and_up
 
 OK=true
-for svc in postgres redis api ingestor events-engine web nginx; do
+for svc in postgres redis api ingestor events-engine media-service web nginx; do
   wait_healthy "$svc" || OK=false
 done
 
