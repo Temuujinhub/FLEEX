@@ -30,7 +30,7 @@ import (
 // for POLYGON shape; CenterLat/CenterLng/RadiusM only for CIRCLE.
 // SpeedLimitNight + NightStart/NightEnd implement the day/night
 // schedule: when SpeedLimitNight is set and the current local time
-// (UTC for now; company TZ later) falls in [NightStart, NightEnd),
+// (the company's timezone) falls in [NightStart, NightEnd),
 // SpeedLimitNight is used instead of SpeedLimit. NightStart > NightEnd
 // means the window wraps midnight (e.g. 22:00 → 06:00). Strings are
 // "HH:mm".
@@ -53,8 +53,8 @@ type Geofence struct {
 
 // EffectiveSpeedLimit returns the applicable cap at the given instant,
 // honouring the optional night override. Returns nil when no limit
-// applies. `now` is expected in UTC; callers can shift to a company
-// timezone before calling.
+// applies. `now` must already be in the company's local time — the engine
+// converts via Store.CompanyLocation before calling.
 func (g *Geofence) EffectiveSpeedLimit(now time.Time) *float64 {
 	if g.SpeedLimitNight == nil || g.NightStart == nil || g.NightEnd == nil {
 		return g.SpeedLimit
@@ -120,6 +120,7 @@ type Store struct {
 	mu              sync.RWMutex
 	geofencesByCo   map[string][]*Geofence
 	devicesByID     map[string]*Device
+	companyTZ       map[string]*time.Location
 	lastCacheReload time.Time
 
 	healthy        atomic.Bool
@@ -288,6 +289,26 @@ func (s *Store) Refresh(ctx context.Context) error {
 	}
 	dRows.Close()
 
+	// ── Company timezones (drive day/night speed schedules) ──
+	cRows, err := tx.Query(ctx, `SELECT id::text, timezone FROM companies`)
+	if err != nil {
+		return fmt.Errorf("query companies: %w", err)
+	}
+	tzByCo := map[string]*time.Location{}
+	for cRows.Next() {
+		var id, tz string
+		if err := cRows.Scan(&id, &tz); err != nil {
+			cRows.Close()
+			return fmt.Errorf("scan company: %w", err)
+		}
+		loc, lerr := time.LoadLocation(tz)
+		if lerr != nil || loc == nil {
+			loc = time.UTC // unknown/invalid zone → safe UTC fallback
+		}
+		tzByCo[id] = loc
+	}
+	cRows.Close()
+
 	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
@@ -295,6 +316,7 @@ func (s *Store) Refresh(ctx context.Context) error {
 	s.mu.Lock()
 	s.geofencesByCo = byCo
 	s.devicesByID = devs
+	s.companyTZ = tzByCo
 	s.lastCacheReload = time.Now()
 	s.mu.Unlock()
 	s.cacheRefreshes.Add(1)
@@ -323,6 +345,19 @@ func (s *Store) Device(deviceID string) *Device {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.devicesByID[deviceID]
+}
+
+// CompanyLocation returns the cached timezone for a company
+// (companies.timezone), or UTC when unknown. Day/night speed windows are
+// evaluated in this zone so a "22:00–06:00" night limit lines up with local
+// time rather than UTC.
+func (s *Store) CompanyLocation(companyID string) *time.Location {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if loc, ok := s.companyTZ[companyID]; ok && loc != nil {
+		return loc
+	}
+	return time.UTC
 }
 
 // EventInsert is the row we INSERT for each emitted event. Lat/Lng/Speed are

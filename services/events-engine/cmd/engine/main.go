@@ -20,6 +20,11 @@ import (
 	"syscall"
 	"time"
 
+	// Embed the IANA tz database so time.LoadLocation resolves company
+	// timezones (e.g. Asia/Ulaanbaatar) regardless of whether the runtime
+	// image ships tzdata — the day/night speed schedule depends on it.
+	_ "time/tzdata"
+
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
