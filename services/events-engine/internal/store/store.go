@@ -26,6 +26,12 @@ import (
 	"github.com/temuujinhub/fleex/services/events-engine/internal/geo"
 )
 
+// eventsStream is the durable Redis Stream every emitted event is appended to
+// (in addition to the live Pub/Sub channel). The notification dispatcher
+// consumes it via a consumer group so PANIC/alert notifications survive a
+// dispatcher restart, unlike fire-and-forget Pub/Sub.
+const eventsStream = "fleex.events.stream"
+
 // Geofence is the cached form of a geofence row. `Polygon` is populated only
 // for POLYGON shape; CenterLat/CenterLng/RadiusM only for CIRCLE.
 // SpeedLimitNight + NightStart/NightEnd implement the day/night
@@ -409,6 +415,18 @@ func (s *Store) PersistAndPublish(ctx context.Context, e EventInsert) error {
 	})
 	if err := s.rdb.Publish(ctx, s.cfg.EventsChannel, payload).Err(); err != nil {
 		log.Warn().Err(err).Msg("publish event")
+	}
+	// Durable append for the notification dispatcher. Pub/Sub above is
+	// fire-and-forget (fine for the live dashboard); the stream guarantees a
+	// PANIC/alert isn't lost if the dispatcher is momentarily down. MaxLen
+	// (approximate) bounds memory.
+	if err := s.rdb.XAdd(ctx, &redis.XAddArgs{
+		Stream: eventsStream,
+		MaxLen: 50000,
+		Approx: true,
+		Values: map[string]any{"data": string(payload)},
+	}).Err(); err != nil {
+		log.Warn().Err(err).Msg("xadd event stream")
 	}
 	s.eventsEmitted.Add(1)
 	return nil

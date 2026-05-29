@@ -9,6 +9,12 @@ import { WebhookService } from './webhook.service';
 import { renderTemplate } from './template';
 import type { EventEnvelope } from './types';
 
+// Durable event delivery: events-engine appends every event to this stream;
+// we consume it via a consumer group so a dispatcher restart never drops a
+// PANIC/alert (unlike the fire-and-forget Pub/Sub that feeds the live UI).
+const EVENTS_STREAM = 'fleex.events.stream';
+const CONSUMER_GROUP = 'notif-dispatcher';
+
 const SEVERITY_RANK: Record<string, number> = { INFO: 0, WARNING: 1, CRITICAL: 2 };
 const RULES_REFRESH_MS = 30_000;
 // 5 km is the operational radius for the "panic ⇒ tell neighbours"
@@ -29,7 +35,11 @@ const PANIC_ONLINE_WINDOW_MS = 10 * 60_000;
 @Injectable()
 export class NotificationDispatcherService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(NotificationDispatcherService.name);
-  private sub?: Redis;
+  private consumer?: Redis;
+  private running = false;
+  // Stable per-instance name so this consumer's unacked (crash-pending)
+  // entries are reclaimed on restart.
+  private readonly consumerName = process.env.HOSTNAME || 'dispatcher';
   private rulesByCompany = new Map<string, NotificationRule[]>();
   private deviceNames = new Map<string, string>();
   private refreshTimer?: NodeJS.Timeout;
@@ -48,24 +58,67 @@ export class NotificationDispatcherService implements OnModuleInit, OnModuleDest
       this.refreshRules().catch((err) => this.logger.warn(`refresh rules: ${err.message}`));
     }, RULES_REFRESH_MS);
 
-    this.sub = this.redis.duplicate();
-    await this.sub.subscribe('fleex.events');
-    this.sub.on('message', (channel, raw) => {
-      if (channel !== 'fleex.events') return;
-      let ev: EventEnvelope;
-      try {
-        ev = JSON.parse(raw);
-      } catch {
-        return;
-      }
-      this.handle(ev).catch((err) => this.logger.error(`dispatch: ${err.message}`));
-    });
-    this.logger.log('Notification dispatcher subscribed to fleex.events');
+    this.consumer = this.redis.duplicate();
+    await this.ensureGroup();
+    this.running = true;
+    void this.consumeLoop();
+    this.logger.log(`Notification dispatcher consuming ${EVENTS_STREAM} (group ${CONSUMER_GROUP})`);
   }
 
   async onModuleDestroy() {
+    this.running = false;
     if (this.refreshTimer) clearInterval(this.refreshTimer);
-    await this.sub?.quit().catch(() => undefined);
+    await this.consumer?.quit().catch(() => undefined);
+  }
+
+  // Create the consumer group (and the stream, via MKSTREAM) if absent. '$'
+  // means a brand-new group only sees events from now on; an existing group's
+  // pending list is preserved across restarts.
+  private async ensureGroup() {
+    try {
+      await this.consumer!.xgroup('CREATE', EVENTS_STREAM, CONSUMER_GROUP, '$', 'MKSTREAM');
+    } catch (err) {
+      if (!String((err as Error).message).includes('BUSYGROUP')) throw err;
+    }
+  }
+
+  // Consume loop: first drains this consumer's own pending (unacked-from-crash)
+  // entries with cursor '0', then blocks for new events with '>'. Each event is
+  // handled then XACK'd; an unacked event stays pending and is retried after a
+  // crash, so a PANIC/alert is never silently lost.
+  private async consumeLoop() {
+    let cursor = '0';
+    while (this.running) {
+      try {
+        const res = (await this.consumer!.xreadgroup(
+          'GROUP', CONSUMER_GROUP, this.consumerName,
+          'COUNT', 64,
+          'BLOCK', 5000,
+          'STREAMS', EVENTS_STREAM, cursor,
+        )) as [string, [string, string[]][]][] | null;
+
+        const entries = res && res.length > 0 ? res[0][1] : [];
+        if (entries.length === 0) {
+          if (cursor !== '>') cursor = '>'; // pending drained → switch to new
+          continue;
+        }
+        const ackIds: string[] = [];
+        for (const [id, fields] of entries) {
+          ackIds.push(id);
+          const ev = parseEntry(fields);
+          if (ev) {
+            await this.handle(ev).catch((err) => this.logger.error(`dispatch: ${err.message}`));
+          }
+        }
+        if (ackIds.length > 0) {
+          await this.consumer!.xack(EVENTS_STREAM, CONSUMER_GROUP, ...ackIds);
+        }
+      } catch (err) {
+        if (!this.running) break;
+        this.logger.warn(`events stream read: ${(err as Error).message}`);
+        await new Promise((r) => setTimeout(r, 1000)); // backoff on transient errors
+      }
+    }
   }
 
   private async refreshRules() {
@@ -218,6 +271,21 @@ export class NotificationDispatcherService implements OnModuleInit, OnModuleDest
     this.deviceNames.set(deviceId, name);
     return name;
   }
+}
+
+// Stream entries arrive as a flat [field, value, field, value, ...] array; the
+// events engine writes a single {data: <json>} pair per event.
+function parseEntry(fields: string[]): EventEnvelope | null {
+  for (let i = 0; i + 1 < fields.length; i += 2) {
+    if (fields[i] === 'data') {
+      try {
+        return JSON.parse(fields[i + 1]) as EventEnvelope;
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
 }
 
 // Great-circle distance in km between two lat/lng points. Inlined here
