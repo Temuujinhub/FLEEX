@@ -26,7 +26,11 @@ import (
 
 func main() {
 	zerolog.TimeFieldFormat = time.RFC3339Nano
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+	// JSON logs by default (aggregator-friendly: Loki/ELK). LOG_FORMAT=console
+	// gives the human-readable output for local dev.
+	if os.Getenv("LOG_FORMAT") == "console" {
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
