@@ -371,10 +371,12 @@ function DonutRing({ online, offline }: { online: number; offline: number }) {
   );
 }
 
-function Legend({ color, label, value }: { color: 'emerald' | 'slate'; label: string; value: number }) {
+function Legend({ color, label, value }: { color: 'emerald' | 'slate' | 'amber' | 'rose'; label: string; value: number }) {
   const dot: Record<string, string> = {
     emerald: 'bg-emerald-500',
     slate: 'bg-slate-400',
+    amber: 'bg-amber-500',
+    rose: 'bg-rose-500',
   };
   return (
     <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">

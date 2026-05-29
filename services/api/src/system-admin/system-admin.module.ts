@@ -112,7 +112,33 @@ class SystemAdminService {
       detail: this.sms.enabled() ? `${this.config.get('SMS_PROVIDER')} ${this.config.get('SMS_FROM')}` : 'not configured',
     };
 
+    // App services via their /healthz on the internal compose network — the
+    // same set the deploy health gate waits on (infra/deploy/deploy.sh), so
+    // this page mirrors deploy state. If this endpoint answered, the API is up.
+    out.api = { ok: true, detail: 'REST + WS' };
+    const [ingestor, eventsEngine, media, web] = await Promise.all([
+      this.pingHttp('http://ingestor:9090/healthz'),
+      this.pingHttp('http://events-engine:9091/healthz'),
+      this.pingHttp('http://media-service:9092/healthz'),
+      this.pingHttp('http://web:80/'),
+    ]);
+    out.ingestor = { ok: ingestor, detail: 'Teltonika :5027' };
+    out.eventsEngine = { ok: eventsEngine, detail: 'geofence · overspeed' };
+    out.mediaService = { ok: media, detail: 'DualCam :5029' };
+    out.web = { ok: web, detail: 'nginx SPA' };
+
     return out;
+  }
+
+  // Hits a service health endpoint on the internal network. Short timeout so a
+  // hung service can't stall the overall health response.
+  private async pingHttp(url: string): Promise<boolean> {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
 
   private async fleet() {

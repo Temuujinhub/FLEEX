@@ -251,9 +251,15 @@ function IntegrationField({ integration, onSaved }: { integration: Integration; 
 }
 
 function ServicesCard({ services, uptimeSeconds }: { services: Overview['services']; uptimeSeconds: number }) {
+  // Keys mirror the API health payload (incl. the deploy-gated app services).
   const labels: Record<string, string> = {
     postgres: 'PostgreSQL',
     redis: 'Redis',
+    api: 'API',
+    ingestor: 'GPS Ingestor',
+    eventsEngine: 'Events Engine',
+    mediaService: 'Media (DualCam)',
+    web: 'Web (SPA)',
     smtp: 'SMTP (имэйл)',
     sms: 'SMS gateway',
   };

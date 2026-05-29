@@ -144,11 +144,11 @@ function RuleForm({ existing, onDone }: { existing: any | null; onDone: () => vo
   });
 
   const emailIssues = recipientEmails
-    .split(',').map((s) => s.trim()).filter(Boolean)
-    .filter((e) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+    .split(',').map((s: string) => s.trim()).filter(Boolean)
+    .filter((e: string) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
   const phoneIssues = recipientPhones
-    .split(',').map((s) => s.trim()).filter(Boolean)
-    .filter((p) => !/^\+?\d{8,15}$/.test(p));
+    .split(',').map((s: string) => s.trim()).filter(Boolean)
+    .filter((p: string) => !/^\+?\d{8,15}$/.test(p));
   const webhookIssue = webhookUrl && !/^https?:\/\/\S+$/i.test(webhookUrl)
     ? 'Webhook URL http(s):// эхэлсэн бүрэн хаяг байх ёстой.'
     : null;
@@ -312,8 +312,8 @@ function RuleForm({ existing, onDone }: { existing: any | null; onDone: () => vo
               triggerType,
               minSeverity,
               channels,
-              recipientEmails: recipientEmails.split(',').map((s) => s.trim()).filter(Boolean),
-              recipientPhones: recipientPhones.split(',').map((s) => s.trim()).filter(Boolean),
+              recipientEmails: recipientEmails.split(',').map((s: string) => s.trim()).filter(Boolean),
+              recipientPhones: recipientPhones.split(',').map((s: string) => s.trim()).filter(Boolean),
               webhookUrl: webhookUrl || undefined,
               placeIds: placeFilterApplies ? placeIds : [],
               template,

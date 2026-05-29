@@ -84,6 +84,7 @@ jobs:
           VITE_WS_URL: /ws
         run: |
           npm install --no-audit --no-fund --legacy-peer-deps
+          npx tsc --noEmit -p tsconfig.json
           npm run build
 
   deploy:

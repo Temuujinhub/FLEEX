@@ -1,52 +1,54 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
-import { ReactNode } from 'react';
+import { ReactNode, Suspense } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../store/auth';
 import { clearTokens } from '../lib/api';
 
 // Sidebar nav. Grouped by purpose so the eye can scan it like Gaikham /
-// Navixy, but tailored for a mining ops vocabulary (флот, аналитик, админ).
+// Navixy, but tailored for a mining ops vocabulary. Labels/titles are i18n
+// keys resolved at render time (see src/i18n).
 const SECTIONS: {
-  title: string;
-  items: { to: string; label: string; min: AuthRole; icon: ReactNode }[];
+  titleKey: string;
+  items: { to: string; labelKey: string; min: AuthRole; icon: ReactNode }[];
 }[] = [
   {
-    title: 'Үйл ажиллагаа',
+    titleKey: 'section.operations',
     items: [
-      { to: '/app',           label: 'Хяналтын самбар', min: 'VIEWER',        icon: <IconDashboard /> },
-      { to: '/app/map',       label: 'Шууд газрын зураг', min: 'VIEWER',      icon: <IconMap /> },
-      { to: '/app/dispatch',  label: 'Dispatcher', min: 'DISPATCHER',   icon: <IconLayers /> },
-      { to: '/app/devices',   label: 'Машин · Төхөөрөмж', min: 'VIEWER',      icon: <IconTruck /> },
-      { to: '/app/drivers',   label: 'Жолооч · Ажилчид', min: 'VIEWER',       icon: <IconDriver /> },
-      { to: '/app/groups',    label: 'Алба нэгж', min: 'FLEET_MANAGER',       icon: <IconLayers /> },
-      { to: '/app/shifts',    label: 'Ээлж', min: 'FLEET_MANAGER',            icon: <IconLayers /> },
-      { to: '/app/service-tasks', label: 'Засвар үйлчилгээ', min: 'VIEWER',   icon: <IconWrench /> },
-      { to: '/app/history',   label: 'Маршрут · Түүх', min: 'VIEWER',         icon: <IconRoute /> },
-      { to: '/app/camera',    label: 'Камер · DualCam', min: 'VIEWER',        icon: <IconCamera /> },
+      { to: '/app',           labelKey: 'nav.dashboard',     min: 'VIEWER',        icon: <IconDashboard /> },
+      { to: '/app/map',       labelKey: 'nav.liveMap',       min: 'VIEWER',        icon: <IconMap /> },
+      { to: '/app/dispatch',  labelKey: 'nav.dispatch',      min: 'DISPATCHER',    icon: <IconLayers /> },
+      { to: '/app/devices',   labelKey: 'nav.devices',       min: 'VIEWER',        icon: <IconTruck /> },
+      { to: '/app/drivers',   labelKey: 'nav.drivers',       min: 'VIEWER',        icon: <IconDriver /> },
+      { to: '/app/groups',    labelKey: 'nav.groups',        min: 'FLEET_MANAGER', icon: <IconLayers /> },
+      { to: '/app/shifts',    labelKey: 'nav.shifts',        min: 'FLEET_MANAGER', icon: <IconLayers /> },
+      { to: '/app/service-tasks', labelKey: 'nav.serviceTasks', min: 'VIEWER',     icon: <IconWrench /> },
+      { to: '/app/history',   labelKey: 'nav.history',       min: 'VIEWER',        icon: <IconRoute /> },
+      { to: '/app/camera',    labelKey: 'nav.camera',        min: 'VIEWER',        icon: <IconCamera /> },
     ],
   },
   {
-    title: 'Аналитик',
+    titleKey: 'section.analytics',
     items: [
-      { to: '/app/events',             label: 'Дохиоллууд',          min: 'VIEWER',         icon: <IconBell /> },
-      { to: '/app/notification-rules', label: 'Дохиоллын дүрэм',     min: 'FLEET_MANAGER',  icon: <IconBell /> },
-      { to: '/app/health-rules',       label: 'Машин эрүүл мэнд',    min: 'FLEET_MANAGER',  icon: <IconShield /> },
-      { to: '/app/eco-driving',        label: 'Эко жолоодлого',      min: 'VIEWER',         icon: <IconEco /> },
-      { to: '/app/places',             label: 'Байршил · Цэгүүд',    min: 'VIEWER',         icon: <IconPin /> },
-      { to: '/app/geofences',          label: 'Geofence бүс',        min: 'FLEET_MANAGER',  icon: <IconShield /> },
-      { to: '/app/reports',            label: 'Тайлан',              min: 'VIEWER',         icon: <IconChart /> },
-      { to: '/app/proximity',          label: 'Орчмын тайлан',       min: 'VIEWER',         icon: <IconRadius /> },
+      { to: '/app/events',             labelKey: 'nav.events',            min: 'VIEWER',         icon: <IconBell /> },
+      { to: '/app/notification-rules', labelKey: 'nav.notificationRules', min: 'FLEET_MANAGER',  icon: <IconBell /> },
+      { to: '/app/health-rules',       labelKey: 'nav.healthRules',       min: 'FLEET_MANAGER',  icon: <IconShield /> },
+      { to: '/app/eco-driving',        labelKey: 'nav.ecoDriving',        min: 'VIEWER',         icon: <IconEco /> },
+      { to: '/app/places',             labelKey: 'nav.places',            min: 'VIEWER',         icon: <IconPin /> },
+      { to: '/app/geofences',          labelKey: 'nav.geofences',         min: 'FLEET_MANAGER',  icon: <IconShield /> },
+      { to: '/app/reports',            labelKey: 'nav.reports',           min: 'VIEWER',         icon: <IconChart /> },
+      { to: '/app/proximity',          labelKey: 'nav.proximity',         min: 'VIEWER',         icon: <IconRadius /> },
     ],
   },
   {
-    title: 'Удирдлага',
+    titleKey: 'section.administration',
     items: [
-      { to: '/app/users',     label: 'Хэрэглэгчид', min: 'COMPANY_ADMIN',     icon: <IconUsers /> },
-      { to: '/app/companies', label: 'Компаниуд',   min: 'SUPER_ADMIN',       icon: <IconBuilding /> },
-      { to: '/app/landing-settings', label: 'Сайтын тохиргоо', min: 'SUPER_ADMIN', icon: <IconCog /> },
-      { to: '/app/support',   label: 'Дэмжлэг',     min: 'COMPANY_ADMIN',     icon: <IconLifeRing /> },
-      { to: '/app/audit',     label: 'Аудит лог', min: 'COMPANY_ADMIN',       icon: <IconAudit /> },
-      { to: '/app/system-health', label: 'Системийн эрүүл мэнд', min: 'SUPER_ADMIN', icon: <IconPulse /> },
+      { to: '/app/users',     labelKey: 'nav.users',         min: 'COMPANY_ADMIN', icon: <IconUsers /> },
+      { to: '/app/companies', labelKey: 'nav.companies',     min: 'SUPER_ADMIN',   icon: <IconBuilding /> },
+      { to: '/app/landing-settings', labelKey: 'nav.landingSettings', min: 'SUPER_ADMIN', icon: <IconCog /> },
+      { to: '/app/support',   labelKey: 'nav.support',       min: 'COMPANY_ADMIN', icon: <IconLifeRing /> },
+      { to: '/app/audit',     labelKey: 'nav.audit',         min: 'COMPANY_ADMIN', icon: <IconAudit /> },
+      { to: '/app/system-health', labelKey: 'nav.systemHealth', min: 'SUPER_ADMIN', icon: <IconPulse /> },
     ],
   },
 ];
@@ -55,6 +57,7 @@ type AuthRole = 'SUPER_ADMIN' | 'COMPANY_ADMIN' | 'FLEET_MANAGER' | 'DISPATCHER'
 
 export function AppShell() {
   const { user, hasRole, setUser } = useAuth();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
 
   const logout = () => {
@@ -72,7 +75,7 @@ export function AppShell() {
           <div className="min-w-0">
             <div className="text-xl font-extrabold tracking-tight text-white truncate">Fleex</div>
             <div className="text-[10px] uppercase tracking-widest text-brand-300/80 -mt-0.5 truncate">
-              Mining Fleet Ops
+              {t('common.brandTagline')}
             </div>
           </div>
         </div>
@@ -83,9 +86,9 @@ export function AppShell() {
             const visible = sec.items.filter((i) => hasRole(i.min));
             if (visible.length === 0) return null;
             return (
-              <div key={sec.title}>
+              <div key={sec.titleKey}>
                 <div className="px-3 mb-1.5 text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
-                  {sec.title}
+                  {t(sec.titleKey)}
                 </div>
                 <div className="space-y-0.5">
                   {visible.map((n) => (
@@ -103,7 +106,7 @@ export function AppShell() {
                       }
                     >
                       <span className="h-4 w-4 shrink-0 opacity-90 group-hover:opacity-100">{n.icon}</span>
-                      <span className="truncate">{n.label}</span>
+                      <span className="truncate">{t(n.labelKey)}</span>
                     </NavLink>
                   ))}
                 </div>
@@ -118,7 +121,7 @@ export function AppShell() {
             <NavLink
               to="/app/profile"
               className="flex items-center gap-3 group"
-              title="Миний бүртгэл"
+              title={t('common.myProfile')}
             >
               <div className="h-9 w-9 rounded-full bg-brand-600/80 group-hover:bg-brand-500 flex items-center justify-center text-sm font-bold uppercase shadow transition">
                 {initials(user?.fullName || user?.email || '?')}
@@ -128,22 +131,47 @@ export function AppShell() {
                   {user?.fullName || user?.email}
                 </div>
                 <div className="text-[10px] uppercase tracking-widest text-brand-300/80">
-                  {roleLabel(user?.role)}
+                  {user?.role ? t(`role.${user.role}`) : ''}
                 </div>
               </div>
             </NavLink>
+            <div className="mt-2 flex gap-1" role="group" aria-label={t('common.language')}>
+              {(['mn', 'en'] as const).map((lng) => (
+                <button
+                  key={lng}
+                  type="button"
+                  onClick={() => i18n.changeLanguage(lng)}
+                  className={clsx(
+                    'flex-1 rounded-md text-xs py-1.5 font-semibold uppercase transition',
+                    i18n.resolvedLanguage === lng
+                      ? 'bg-brand-600 text-white'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700',
+                  )}
+                >
+                  {lng}
+                </button>
+              ))}
+            </div>
             <button
               onClick={logout}
               className="mt-2 w-full rounded-md bg-slate-800 hover:bg-slate-700 text-sm py-1.5 transition flex items-center justify-center gap-2"
             >
-              <IconLogout /> Гарах
+              <IconLogout /> {t('common.logout')}
             </button>
           </div>
         </div>
       </aside>
 
       <main className="flex-1 overflow-y-auto">
-        <Outlet />
+        {/* Inner boundary so navigating between lazy /app pages only swaps the
+            content area — the sidebar stays mounted (no flicker). */}
+        <Suspense
+          fallback={
+            <div className="flex min-h-[50vh] items-center justify-center text-sm text-slate-400">…</div>
+          }
+        >
+          <Outlet />
+        </Suspense>
       </main>
     </div>
   );
@@ -152,18 +180,6 @@ export function AppShell() {
 function initials(s: string) {
   const parts = s.replace(/@.*/, '').split(/[ ._-]+/).filter(Boolean);
   return (parts[0]?.[0] ?? '?').toUpperCase() + (parts[1]?.[0] ?? '').toUpperCase();
-}
-
-function roleLabel(r?: string) {
-  const m: Record<string, string> = {
-    SUPER_ADMIN: 'Гол админ',
-    COMPANY_ADMIN: 'Компанийн админ',
-    FLEET_MANAGER: 'Флот менежер',
-    DISPATCHER: 'Диспетчер',
-    DRIVER: 'Жолооч',
-    VIEWER: 'Үзэгч',
-  };
-  return r ? (m[r] ?? r) : '';
 }
 
 // ── Brand mark ─────────────────────────────────────────────
