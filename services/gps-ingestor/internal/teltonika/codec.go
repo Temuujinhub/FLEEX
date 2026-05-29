@@ -60,7 +60,8 @@ type Session struct {
 	readTimeout  time.Duration
 	writeTimeout time.Duration
 	imei         string
-	lastFrameLen int // total bytes of the most recent AVL frame (header + payload + crc)
+	lastFrameLen int  // total bytes of the most recent AVL frame (header + payload + crc)
+	lastCRCOK    bool // whether the most recent AVL frame's CRC-16/IBM matched
 }
 
 func NewSession(conn net.Conn, rTO, wTO time.Duration) *Session {
@@ -75,6 +76,12 @@ func NewSession(conn net.Conn, rTO, wTO time.Duration) *Session {
 // LastFrameLen returns the byte size of the most recently read AVL frame so
 // the store can credit it against the device's monthly GPRS counter.
 func (s *Session) LastFrameLen() int { return s.lastFrameLen }
+
+// LastCRCOK reports whether the CRC-16/IBM of the most recently read AVL
+// frame matched the value the device sent. The caller decides whether a
+// mismatch should drop the frame (INGESTOR_VERIFY_CRC) so enforcement is a
+// safe, observable opt-in on real hardware.
+func (s *Session) LastCRCOK() bool { return s.lastCRCOK }
 
 // Handshake performs the Teltonika IMEI handshake and returns the IMEI.
 func (s *Session) Handshake() (string, error) {
@@ -123,7 +130,11 @@ func (s *Session) ReadAVL() ([]Record, error) {
 		return nil, errors.New("invalid preamble")
 	}
 	dataLen := binary.BigEndian.Uint32(header[4:8])
-	if dataLen == 0 || dataLen > 1<<20 {
+	// Minimum valid payload is codecId(1) + numData1(1) + numData2(1) = 3
+	// bytes (a zero-record frame). Anything shorter cannot carry codec/count
+	// bytes — rejecting it here prevents the payload[0]/payload[1] indexing
+	// below from panicking on a 1- or 2-byte payload (remote DoS guard).
+	if dataLen < 3 || dataLen > 1<<20 {
 		return nil, fmt.Errorf("bad data len %d", dataLen)
 	}
 
@@ -136,9 +147,11 @@ func (s *Session) ReadAVL() ([]Record, error) {
 	if _, err := io.ReadFull(s.r, trailer[:]); err != nil {
 		return nil, err
 	}
-	// We accept the CRC the device sent; verifying CRC-16/IBM here is cheap
-	// but optional. Add when load-testing on real hardware.
-	_ = trailer
+	// CRC-16/IBM is computed over the payload (codecId..numData2). We always
+	// evaluate it so the ingestor can surface a mismatch counter; whether a
+	// mismatch *drops* the frame is the caller's decision via
+	// INGESTOR_VERIFY_CRC, keeping enforcement a safe opt-in on real hardware.
+	s.lastCRCOK = crc16IBM(payload) == uint16(binary.BigEndian.Uint32(trailer[:]))
 
 	// Header(8) + payload(dataLen) + trailer(4) — total bytes-on-wire for this
 	// AVL packet. Recorded so the store can charge the GPRS counter.

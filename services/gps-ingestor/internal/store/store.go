@@ -73,6 +73,9 @@ type Store struct {
 	pg    *pgxpool.Pool
 	rdb   *redis.Client
 	queue chan deviceBatch
+	// done is closed by Run when the batcher has drained and flushed on
+	// shutdown, so main can wait for it before closing the pool.
+	done chan struct{}
 
 	healthy atomic.Bool
 
@@ -128,12 +131,17 @@ func New(ctx context.Context, cfg *config.Config) (*Store, error) {
 		pg:    pool,
 		rdb:   rdb,
 		queue: make(chan deviceBatch, queueSize),
+		done:  make(chan struct{}),
 	}
 	s.healthy.Store(true)
 	return s, nil
 }
 
 func (s *Store) Healthy() bool { return s.healthy.Load() }
+
+// Wait blocks until the batcher goroutine (Run) has finished its shutdown
+// drain + final flush. Call it after the TCP server stops and before Close().
+func (s *Store) Wait() { <-s.done }
 func (s *Store) Close() {
 	if s.pg != nil {
 		s.pg.Close()
@@ -165,8 +173,13 @@ func (s *Store) Enqueue(ctx context.Context, imei string, records []teltonika.Re
 	}
 }
 
-// Run is the long-running batcher goroutine.
+// Run is the long-running batcher goroutine. On shutdown (ctx cancelled) it
+// drains whatever is still queued and flushes a final batch — using a
+// non-cancelled context — so a restart/deploy doesn't drop buffered
+// positions. `done` is closed once that completes (see Wait).
 func (s *Store) Run(ctx context.Context) {
+	defer close(s.done)
+
 	batchTimer := time.NewTicker(s.cfg.BatchFlushTimeout)
 	defer batchTimer.Stop()
 
@@ -181,6 +194,10 @@ func (s *Store) Run(ctx context.Context) {
 		if len(rows) == 0 {
 			return
 		}
+		// Derive the flush context from a non-cancelled base so an in-flight
+		// COPY (plus snapshot/publish/raw/gprs writes) always completes even
+		// when ctx is cancelled by SIGTERM. The 15s timeout still bounds it.
+		fctx := context.WithoutCancel(ctx)
 		copyRows := make([][]any, 0, len(rows))
 		for _, r := range rows {
 			copyRows = append(copyRows, []any{
@@ -191,7 +208,7 @@ func (s *Store) Run(ctx context.Context) {
 				r.BatteryVolt, nil, nullableString(r.RFID), r.Valid, r.Attributes,
 			})
 		}
-		ctxFlush, cancel := context.WithTimeout(ctx, 15*time.Second)
+		ctxFlush, cancel := context.WithTimeout(fctx, 15*time.Second)
 		copied, err := s.pg.CopyFrom(ctxFlush,
 			pgx.Identifier{"positions"},
 			[]string{
@@ -211,13 +228,13 @@ func (s *Store) Run(ctx context.Context) {
 		} else {
 			s.rowsInserted.Add(uint64(copied))
 			s.queueDepth.Add(-int64(len(rows)))
-			s.flushSnapshots(ctx, rows)
+			s.flushSnapshots(fctx, rows)
 		}
 
 		if s.rdb != nil {
 			for _, p := range live {
 				payload, _ := json.Marshal(p)
-				_ = s.rdb.Publish(ctx, livePubChannel, payload).Err()
+				_ = s.rdb.Publish(fctx, livePubChannel, payload).Err()
 			}
 		}
 
@@ -225,10 +242,10 @@ func (s *Store) Run(ctx context.Context) {
 		// debug / accounting tables so we tolerate failures silently to keep
 		// the hot path moving when the secondary writes are slow.
 		if len(rawMsgs) > 0 {
-			s.flushRawMessages(ctx, rawMsgs)
+			s.flushRawMessages(fctx, rawMsgs)
 		}
 		if len(gprsBytes) > 0 {
-			s.flushGprs(ctx, gprsBytes, gprsPkts)
+			s.flushGprs(fctx, gprsBytes, gprsPkts)
 		}
 
 		rows = rows[:0]
@@ -240,99 +257,122 @@ func (s *Store) Run(ctx context.Context) {
 		}
 	}
 
+	// consume turns one queued batch into staged rows/live envelopes. The
+	// context is passed explicitly so the shutdown drain can resolve devices
+	// with a non-cancelled context (the live ctx is already cancelled by then).
+	consume := func(cctx context.Context, batch deviceBatch) {
+		dev, ok := s.resolveDevice(cctx, batch.imei)
+		if !ok {
+			s.rowsDropped.Add(uint64(len(batch.records)))
+			return
+		}
+		// Credit the GPRS counter for this packet (one record-set = one
+		// AVL frame). Split the byte cost evenly across records would be
+		// noisier, so we charge the whole frame to this device once.
+		if batch.frameLen > 0 {
+			gprsBytes[dev.ID] += int64(batch.frameLen)
+			gprsPkts[dev.ID]++
+		}
+		for _, rec := range batch.records {
+			if !isPlausible(rec) {
+				continue
+			}
+			ig := teltonika.PickIgnition(rec)
+			odo := teltonika.PickOdometerKm(rec)
+			hrs := teltonika.PickEngineHours(rec)
+			bat := teltonika.PickBatteryVolt(rec)
+			rfid := teltonika.PickRFID(rec)
+			attrs := buildAttributes(rec)
+
+			// Raw debug capture — keeps the same JSON as `attributes`
+			// plus the position essentials for cheap row-scanning. Sampled
+			// 1-in-N via INGESTOR_RAW_SAMPLE_N (default 1 = every record)
+			// so this debug table doesn't dominate write throughput at
+			// scale. The counter is only touched when sampling is enabled.
+			if n := s.cfg.RawSampleN; n <= 1 || s.rawCounter.Add(1)%uint64(n) == 0 {
+				rawMsgs = append(rawMsgs, rawMessageRow{
+					DeviceID:   dev.ID,
+					ReceivedAt: rec.Timestamp,
+					Protocol:   "teltonika",
+					Lat:        rec.Lat,
+					Lng:        rec.Lng,
+					Speed:      teltonika.PickSpeedKmh(rec),
+					Ignition:   ig,
+					Payload:    attrs,
+					ByteSize:   batch.frameLen / max(len(batch.records), 1),
+				})
+			}
+
+			// VIN auto-detect: Teltonika OBD adapter delivers the
+			// VIN as a printable-ASCII variable IO (id 256). We pass
+			// it through the row so flushSnapshots can opportunistically
+			// persist it to devices.vin when the field is null.
+			vin := ""
+			if rec.IOStrings != nil {
+				if v, ok := rec.IOStrings[256]; ok {
+					vin = v
+				}
+			}
+
+			rows = append(rows, Row{
+				Time: rec.Timestamp, DeviceID: dev.ID, CompanyID: dev.CompanyID,
+				Latitude: rec.Lat, Longitude: rec.Lng,
+				Speed:      float32(teltonika.PickSpeedKmh(rec)),
+				Course:     float32(rec.Angle),
+				Altitude:   float32(rec.Altitude),
+				Satellites: int16(rec.Satellites),
+				Ignition:   ig, OdometerKm: odo, EngineHrs: hrs, BatteryVolt: bat,
+				RFID:       rfid,
+				VIN:        vin,
+				Valid:      rec.Satellites >= 3,
+				Attributes: attrs,
+			})
+			ioMap := make(map[string]int64, len(rec.IO))
+			for k, v := range rec.IO {
+				ioMap[fmt.Sprintf("%d", k)] = v
+			}
+			live = append(live, livePayload{
+				DeviceID: dev.ID, CompanyID: dev.CompanyID,
+				Imei:     batch.imei,
+				Lat:      rec.Lat, Lng: rec.Lng,
+				Speed:    float64(teltonika.PickSpeedKmh(rec)),
+				Course:   float64(rec.Angle), Altitude: float64(rec.Altitude),
+				Time:     rec.Timestamp.UnixMilli(),
+				Ignition: ig,
+				EventIO:  rec.EventIO,
+				IO:       ioMap,
+			})
+			if len(rows) >= s.cfg.BatchSize {
+				flush()
+			}
+		}
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
+			// Best-effort drain so a deploy/restart doesn't drop what's still
+			// queued. Bounded by a deadline so a sustained flood can't hang
+			// shutdown past the container's stop_grace_period.
+			drainCtx := context.WithoutCancel(ctx)
+			deadline := time.After(10 * time.Second)
+			draining := true
+			for draining {
+				select {
+				case batch := <-s.queue:
+					consume(drainCtx, batch)
+				case <-deadline:
+					draining = false
+				default:
+					draining = false
+				}
+			}
 			flush()
 			return
 		case <-batchTimer.C:
 			flush()
 		case batch := <-s.queue:
-			dev, ok := s.resolveDevice(ctx, batch.imei)
-			if !ok {
-				s.rowsDropped.Add(uint64(len(batch.records)))
-				continue
-			}
-			// Credit the GPRS counter for this packet (one record-set = one
-			// AVL frame). Split the byte cost evenly across records would be
-			// noisier, so we charge the whole frame to this device once.
-			if batch.frameLen > 0 {
-				gprsBytes[dev.ID] += int64(batch.frameLen)
-				gprsPkts[dev.ID]++
-			}
-			for _, rec := range batch.records {
-				if !isPlausible(rec) {
-					continue
-				}
-				ig := teltonika.PickIgnition(rec)
-				odo := teltonika.PickOdometerKm(rec)
-				hrs := teltonika.PickEngineHours(rec)
-				bat := teltonika.PickBatteryVolt(rec)
-				rfid := teltonika.PickRFID(rec)
-				attrs := buildAttributes(rec)
-
-				// Raw debug capture — keeps the same JSON as `attributes`
-				// plus the position essentials for cheap row-scanning. Sampled
-				// 1-in-N via INGESTOR_RAW_SAMPLE_N (default 1 = every record)
-				// so this debug table doesn't dominate write throughput at
-				// scale. The counter is only touched when sampling is enabled.
-				if n := s.cfg.RawSampleN; n <= 1 || s.rawCounter.Add(1)%uint64(n) == 0 {
-					rawMsgs = append(rawMsgs, rawMessageRow{
-						DeviceID:   dev.ID,
-						ReceivedAt: rec.Timestamp,
-						Protocol:   "teltonika",
-						Lat:        rec.Lat,
-						Lng:        rec.Lng,
-						Speed:      teltonika.PickSpeedKmh(rec),
-						Ignition:   ig,
-						Payload:    attrs,
-						ByteSize:   batch.frameLen / max(len(batch.records), 1),
-					})
-				}
-
-				// VIN auto-detect: Teltonika OBD adapter delivers the
-				// VIN as a printable-ASCII variable IO (id 256). We pass
-				// it through the row so flushSnapshots can opportunistically
-				// persist it to devices.vin when the field is null.
-				vin := ""
-				if rec.IOStrings != nil {
-					if v, ok := rec.IOStrings[256]; ok {
-						vin = v
-					}
-				}
-
-				rows = append(rows, Row{
-					Time: rec.Timestamp, DeviceID: dev.ID, CompanyID: dev.CompanyID,
-					Latitude: rec.Lat, Longitude: rec.Lng,
-					Speed:      float32(teltonika.PickSpeedKmh(rec)),
-					Course:     float32(rec.Angle),
-					Altitude:   float32(rec.Altitude),
-					Satellites: int16(rec.Satellites),
-					Ignition:   ig, OdometerKm: odo, EngineHrs: hrs, BatteryVolt: bat,
-					RFID:       rfid,
-					VIN:        vin,
-					Valid:      rec.Satellites >= 3,
-					Attributes: attrs,
-				})
-				ioMap := make(map[string]int64, len(rec.IO))
-				for k, v := range rec.IO {
-					ioMap[fmt.Sprintf("%d", k)] = v
-				}
-				live = append(live, livePayload{
-					DeviceID: dev.ID, CompanyID: dev.CompanyID,
-					Imei:     batch.imei,
-					Lat:      rec.Lat, Lng: rec.Lng,
-					Speed:    float64(teltonika.PickSpeedKmh(rec)),
-					Course:   float64(rec.Angle), Altitude: float64(rec.Altitude),
-					Time:     rec.Timestamp.UnixMilli(),
-					Ignition: ig,
-					EventIO:  rec.EventIO,
-					IO:       ioMap,
-				})
-				if len(rows) >= s.cfg.BatchSize {
-					flush()
-				}
-			}
+			consume(ctx, batch)
 		}
 	}
 }

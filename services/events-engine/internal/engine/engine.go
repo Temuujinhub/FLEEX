@@ -92,10 +92,23 @@ func (e *Engine) Run(ctx context.Context) error {
 				log.Debug().Err(err).Msg("decode position")
 				continue
 			}
-			if err := e.process(ctx, &p); err != nil {
-				log.Warn().Err(err).Str("device", p.DeviceID).Msg("process position")
-			}
+			e.safeProcess(ctx, &p)
 		}
+	}
+}
+
+// safeProcess runs process under a panic recover so one malformed position
+// (or a future logic bug) can't take the whole consumer goroutine — and thus
+// the process — down. The next position is processed normally.
+func (e *Engine) safeProcess(ctx context.Context, p *LivePayload) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error().Interface("panic", r).Str("device", p.DeviceID).
+				Msg("recovered panic while processing position")
+		}
+	}()
+	if err := e.process(ctx, p); err != nil {
+		log.Warn().Err(err).Str("device", p.DeviceID).Msg("process position")
 	}
 }
 

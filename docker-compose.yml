@@ -134,6 +134,10 @@ services:
     image: fleex/ingestor:latest
     container_name: fleex-ingestor
     restart: unless-stopped
+    # Give the batcher time to drain its queue + flush the final COPY on
+    # SIGTERM before Docker escalates to SIGKILL (default is only 10s). The
+    # batcher's shutdown drain is bounded to ~10s + a 15s flush timeout.
+    stop_grace_period: 30s
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
