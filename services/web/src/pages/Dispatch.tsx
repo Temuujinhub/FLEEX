@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { api, WS_URL, getToken } from '../lib/api';
+import { api } from '../lib/api';
+import { useLiveSocket } from '../lib/useLiveSocket';
 
 // Дамжуулагч / Dispatcher board v1. Three-column kanban: WAITING /
 // MOVING / OFFLINE, derived from each device's last-seen + last-speed
@@ -81,25 +82,9 @@ export function Dispatch() {
     return () => clearInterval(t);
   }, []);
 
-  useEffect(() => {
-    const token = getToken();
-    if (!token) return;
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = WS_URL.startsWith('ws')
-      ? `${WS_URL}?token=${encodeURIComponent(token)}`
-      : `${proto}://${window.location.host}${WS_URL}?token=${encodeURIComponent(token)}`;
-    const ws = new WebSocket(url);
-    ws.onmessage = (ev) => {
-      try {
-        const m = JSON.parse(ev.data);
-        if (m.type !== 'position') return;
-        setLivePos((prev) => ({ ...prev, [m.data.deviceId]: m.data }));
-      } catch {
-        /* ignore */
-      }
-    };
-    return () => ws.close();
-  }, []);
+  useLiveSocket((m) => {
+    if (m.type === 'position') setLivePos((prev) => ({ ...prev, [m.data.deviceId]: m.data }));
+  });
 
   const rows: Row[] = useMemo(() => {
     const list = devices.data ?? [];
