@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { api, getToken, WS_URL } from '../lib/api';
+import { api } from '../lib/api';
+import { useLiveSocket } from '../lib/useLiveSocket';
 
 // Дохиоллууд хуудас.
 //
@@ -101,26 +102,13 @@ export function Events() {
     id ? geofences.data?.find((g) => g.id === id)?.name ?? '—' : null;
 
   // ── WebSocket: prepend live events as they arrive ──────────
-  useEffect(() => {
-    const token = getToken();
-    if (!token) return;
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = WS_URL.startsWith('ws')
-      ? `${WS_URL}?token=${encodeURIComponent(token)}`
-      : `${proto}://${window.location.host}${WS_URL}?token=${encodeURIComponent(token)}`;
-    const ws = new WebSocket(url);
-    ws.onmessage = (ev) => {
-      try {
-        const m = JSON.parse(ev.data);
-        if (m.type !== 'event') return;
-        const row: EventRow = m.data;
-        if (liveIds.current.has(row.id)) return;
-        liveIds.current.add(row.id);
-        setLive((prev) => [row, ...prev].slice(0, 200));
-      } catch {}
-    };
-    return () => ws.close();
-  }, []);
+  useLiveSocket((m) => {
+    if (m.type !== 'event') return;
+    const row: EventRow = m.data;
+    if (liveIds.current.has(row.id)) return;
+    liveIds.current.add(row.id);
+    setLive((prev) => [row, ...prev].slice(0, 200));
+  });
 
   const ack = async (id: string) => {
     await api.patch(`/events/${id}/ack`, {});

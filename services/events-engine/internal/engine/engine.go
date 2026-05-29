@@ -92,10 +92,23 @@ func (e *Engine) Run(ctx context.Context) error {
 				log.Debug().Err(err).Msg("decode position")
 				continue
 			}
-			if err := e.process(ctx, &p); err != nil {
-				log.Warn().Err(err).Str("device", p.DeviceID).Msg("process position")
-			}
+			e.safeProcess(ctx, &p)
 		}
+	}
+}
+
+// safeProcess runs process under a panic recover so one malformed position
+// (or a future logic bug) can't take the whole consumer goroutine — and thus
+// the process — down. The next position is processed normally.
+func (e *Engine) safeProcess(ctx context.Context, p *LivePayload) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error().Interface("panic", r).Str("device", p.DeviceID).
+				Msg("recovered panic while processing position")
+		}
+	}()
+	if err := e.process(ctx, p); err != nil {
+		log.Warn().Err(err).Str("device", p.DeviceID).Msg("process position")
 	}
 }
 
@@ -112,9 +125,10 @@ func (e *Engine) process(ctx context.Context, p *LivePayload) error {
 	occurred := time.UnixMilli(p.Time)
 
 	// Compute current "inside" set + overspeed candidates in one pass.
-	// Use EffectiveSpeedLimit so the day/night schedule is honoured —
-	// the engine's clock is UTC; once we wire per-company timezones
-	// through, swap occurred.In(loc) below.
+	// Day/night speed schedules are evaluated in the company's local time
+	// (companies.timezone), not UTC — otherwise a "22:00–06:00" night window
+	// would fire 8h off for an Asia/Ulaanbaatar fleet.
+	localNow := occurred.In(e.store.CompanyLocation(p.CompanyID))
 	insideNow := make(map[string]bool, len(fences))
 	overspeedFences := make([]*store.Geofence, 0)
 	overspeedLimits := make(map[string]float64, 0)
@@ -123,7 +137,7 @@ func (e *Engine) process(ctx context.Context, p *LivePayload) error {
 			continue
 		}
 		insideNow[g.ID] = true
-		limit := g.EffectiveSpeedLimit(occurred)
+		limit := g.EffectiveSpeedLimit(localNow)
 		if limit != nil && *limit > 0 && p.Speed > *limit {
 			overspeedFences = append(overspeedFences, g)
 			overspeedLimits[g.ID] = *limit

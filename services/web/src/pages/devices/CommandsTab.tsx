@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { api } from '../../lib/api';
+import { useAuth } from '../../store/auth';
 import { Field, input, EmptyState, formatRelative } from './shared';
 
 const COMMAND_PRESETS = [
@@ -32,6 +33,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 export function CommandsTab({ deviceId, deviceOnline }: { deviceId: string; deviceOnline?: boolean }) {
   const qc = useQueryClient();
+  const auth = useAuth();
   const history = useQuery({
     queryKey: ['commands', deviceId],
     queryFn: () => api.get(`/devices/${deviceId}/commands?limit=50`).then((r) => r.data),
@@ -81,24 +83,28 @@ export function CommandsTab({ deviceId, deviceOnline }: { deviceId: string; devi
         ))}
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
-        <div className="text-xs font-semibold text-slate-600 uppercase tracking-widest">Захиалгат команд (Codec 12)</div>
-        <div className="flex gap-2">
-          <input
-            value={custom}
-            onChange={(e) => setCustom(e.target.value)}
-            placeholder='Жнь: setdigout 1?? 1 0 0   эсвэл   getinfo'
-            className={clsx(input, 'font-mono')}
-          />
-          <button
-            onClick={() => custom.trim() && send.mutate({ type: 'custom', payload: { text: custom.trim() } })}
-            disabled={!custom.trim() || send.isPending}
-            className="rounded-md bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold px-4 disabled:opacity-50"
-          >
-            Илгээх
-          </button>
+      {/* Raw Codec-12 commands are powerful (reconfigure/brick a device), so
+          the box is SUPER_ADMIN-only; the server enforces this too. */}
+      {auth.hasRole('SUPER_ADMIN') && (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
+          <div className="text-xs font-semibold text-slate-600 uppercase tracking-widest">Захиалгат команд (Codec 12)</div>
+          <div className="flex gap-2">
+            <input
+              value={custom}
+              onChange={(e) => setCustom(e.target.value)}
+              placeholder='Жнь: setdigout 1?? 1 0 0   эсвэл   getinfo'
+              className={clsx(input, 'font-mono')}
+            />
+            <button
+              onClick={() => custom.trim() && send.mutate({ type: 'custom', payload: { text: custom.trim() } })}
+              disabled={!custom.trim() || send.isPending}
+              className="rounded-md bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold px-4 disabled:opacity-50"
+            >
+              Илгээх
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* History */}
       <div>

@@ -29,7 +29,9 @@ export class PositionsController {
     if (isNaN(fromD.getTime()) || isNaN(toD.getTime())) {
       throw new BadRequestException('Invalid from/to');
     }
-    return this.svc.history(deviceId, req.user, fromD, toD, parseInt(limit, 10));
+    const n = Number.parseInt(limit, 10);
+    const safeLimit = Number.isFinite(n) && n > 0 ? n : 5000;
+    return this.svc.history(deviceId, req.user, fromD, toD, safeLimit);
   }
 
   @Get(':deviceId/daily')

@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import { request as httpsRequest } from 'node:https';
+import { request as httpRequest } from 'node:http';
 import type { EventEnvelope } from './types';
 
 // Returns true for any IP an outbound webhook must never reach: loopback,
@@ -49,6 +51,7 @@ export class WebhookService {
     // Resolve the host and reject if ANY address maps to a private/reserved
     // range. Literal IP hosts are validated directly.
     const host = target.hostname.replace(/^\[|\]$/g, '');
+    let pinnedIp: string;
     try {
       const addresses = isIP(host)
         ? [host]
@@ -57,30 +60,75 @@ export class WebhookService {
         this.logger.warn(`Webhook URL resolves to a private/reserved address; blocked: ${host}`);
         return;
       }
+      pinnedIp = addresses[0];
     } catch (err) {
       this.logger.warn(`Webhook host resolution failed for ${host}: ${(err as Error).message}`);
       return;
     }
+    const family = isIP(pinnedIp) === 6 ? 6 : 4;
 
+    const body = JSON.stringify({ event, message });
     try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ event, message }),
-        // Never follow redirects — a 3xx could bounce to an internal host
-        // that our pre-flight resolution never saw.
-        redirect: 'manual',
-        signal: AbortSignal.timeout(5000),
-      });
-      if (res.status >= 300 && res.status < 400) {
-        this.logger.warn(`Webhook ${url} returned a redirect (${res.status}); not following`);
+      const status = await this.post(target, host, pinnedIp, family, body);
+      // Redirects are not followed — a 3xx could bounce to an internal host
+      // our pre-flight resolution never saw.
+      if (status >= 300 && status < 400) {
+        this.logger.warn(`Webhook ${url} returned a redirect (${status}); not following`);
         return;
       }
-      if (!res.ok) {
-        this.logger.warn(`Webhook ${url} responded ${res.status}`);
+      if (status < 200 || status >= 300) {
+        this.logger.warn(`Webhook ${url} responded ${status}`);
       }
     } catch (err) {
       this.logger.error(`Webhook ${url} error: ${(err as Error).message}`);
     }
+  }
+
+  // POSTs the body to the webhook, pinning the TCP connection to the IP we
+  // already validated (a custom lookup that ignores re-resolution). This
+  // closes the DNS-rebinding/TOCTOU window: there is no second DNS lookup that
+  // could swing to a private/metadata address between the check and connect.
+  // Host header + TLS SNI stay the original hostname so cert validation works.
+  private post(
+    target: URL,
+    host: string,
+    pinnedIp: string,
+    family: number,
+    body: string,
+  ): Promise<number> {
+    const isHttps = target.protocol === 'https:';
+    const reqFn = isHttps ? httpsRequest : httpRequest;
+    const port = target.port ? Number(target.port) : isHttps ? 443 : 80;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pinnedLookup: any = (_hostname: string, opts: any, cb: any) => {
+      if (opts && opts.all) return cb(null, [{ address: pinnedIp, family }]);
+      return cb(null, pinnedIp, family);
+    };
+    return new Promise<number>((resolve, reject) => {
+      const req = reqFn(
+        {
+          protocol: target.protocol,
+          hostname: host,
+          port,
+          path: `${target.pathname}${target.search}`,
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'content-length': Buffer.byteLength(body),
+          },
+          servername: isHttps ? host : undefined,
+          lookup: pinnedLookup,
+          timeout: 5000,
+        },
+        (res) => {
+          res.resume(); // drain so the socket can close
+          resolve(res.statusCode ?? 0);
+        },
+      );
+      req.on('timeout', () => req.destroy(new Error('timeout')));
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
   }
 }

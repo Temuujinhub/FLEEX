@@ -57,6 +57,7 @@ model Company {
   notificationRules NotificationRule[]
   customFields      CustomField[]
   tickets           SupportTicket[]
+  deviceImages      DeviceImage[]
 
   @@map("companies")
 }
@@ -415,6 +416,7 @@ model Device {
   trips        Trip[]
   health       DeviceHealthStatus?
   gprsCounters GprsCounter[]
+  images       DeviceImage[]
 
   @@index([companyId])
   @@index([groupId])
@@ -423,6 +425,27 @@ model Device {
   @@index([vehicleType])
   @@index([lastSeenAt])
   @@map("devices")
+}
+
+// ── DualCam media (camera photos / on-demand video) ─────────
+// Blobs live on a shared volume (media-service writes, api streams);
+// only metadata is in Postgres. Move to object storage at fleet scale.
+model DeviceImage {
+  id         String   @id @default(uuid()) @db.Uuid
+  deviceId   String   @db.Uuid
+  device     Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  companyId  String   @db.Uuid
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  imei       String
+  kind       String   @default("photo") // "photo" | "video"
+  fileName   String   // file name on the media volume
+  size       Int      @default(0)
+  trigger    String?  // capture trigger, if known
+  capturedAt DateTime @default(now())
+
+  @@index([deviceId, capturedAt(sort: Desc)])
+  @@index([companyId, capturedAt(sort: Desc)])
+  @@map("device_images")
 }
 
 // ── Service tasks (засвар үйлчилгээ) ────────────────────────

@@ -56,6 +56,7 @@ Service ports (host):
 
 - `80` / `443` — Nginx (SPA + API + WS)
 - `5027/tcp` — Teltonika devices (ingestor)
+- `5029/tcp` — Teltonika DualCam cameras (media-service)
 
 ## Production deploy
 
@@ -128,6 +129,8 @@ See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for full operational runbook.
 │   └── deploy/                 # setup-server.sh, deploy.sh, enable-tls.sh, systemd unit
 ├── services/
 │   ├── gps-ingestor/           # Go service – TCP listener + batched ingest
+│   ├── events-engine/          # Go service – geofence / overspeed evaluation
+│   ├── media-service/          # Go service – Teltonika DualCam photo/video capture
 │   ├── api/                    # NestJS REST + WebSocket
 │   └── web/                    # React SPA (landing + dashboard)
 ├── docs/                       # ARCHITECTURE.md, DEPLOYMENT.md

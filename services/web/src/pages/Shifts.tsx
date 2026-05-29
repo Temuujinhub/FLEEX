@@ -27,7 +27,10 @@ const input =
 
 export function Shifts() {
   const auth = useAuth();
-  const canEdit = auth.role === 'FLEET_MANAGER' || auth.role === 'COMPANY_ADMIN' || auth.role === 'SUPER_ADMIN';
+  // AuthState exposes hasRole(), not a bare `role` — `auth.role` was always
+  // undefined, which left canEdit permanently false and the whole page
+  // read-only for every role (including SUPER_ADMIN).
+  const canEdit = auth.hasRole('FLEET_MANAGER');
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<Shift | null>(null);
 

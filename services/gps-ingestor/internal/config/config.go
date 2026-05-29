@@ -28,6 +28,12 @@ type Config struct {
 	// amplification on the hot path as device count grows.
 	RawSampleN int
 
+	// VerifyCRC, when true, drops AVL frames whose CRC-16/IBM does not match
+	// (the device re-sends, so no data loss). Default false: the mismatch is
+	// only counted (fleex_ingestor_crc_errors_total) so operators can confirm
+	// a ~0 false-positive rate against real hardware before enforcing.
+	VerifyCRC bool
+
 	LogLevel string
 }
 
@@ -44,6 +50,7 @@ func Load() (*Config, error) {
 		BatchFlushTimeout: time.Duration(getEnvInt("INGESTOR_BATCH_FLUSH_MS", 1000)) * time.Millisecond,
 		QueueSize:         getEnvInt("INGESTOR_QUEUE_SIZE", 16384),
 		RawSampleN:        getEnvInt("INGESTOR_RAW_SAMPLE_N", 1),
+		VerifyCRC:         getEnvBool("INGESTOR_VERIFY_CRC", false),
 		LogLevel:          getEnvString("LOG_LEVEL", "info"),
 	}
 	if c.DatabaseURL == "" {
@@ -64,6 +71,15 @@ func getEnvInt(k string, def int) int {
 func getEnvString(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
+	}
+	return def
+}
+
+func getEnvBool(k string, def bool) bool {
+	if v := os.Getenv(k); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
 	}
 	return def
 }

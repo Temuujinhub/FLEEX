@@ -26,7 +26,11 @@ import (
 
 func main() {
 	zerolog.TimeFieldFormat = time.RFC3339Nano
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+	// JSON logs by default (aggregator-friendly: Loki/ELK). LOG_FORMAT=console
+	// gives the human-readable output for local dev.
+	if os.Getenv("LOG_FORMAT") == "console" {
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -55,6 +59,11 @@ func main() {
 	if err := srv.runTCP(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		log.Error().Err(err).Msg("tcp server exited")
 	}
+	// Block until the batcher has drained the queue and flushed its final
+	// batch before main returns and the deferred st.Close() tears down the
+	// connection pool. Without this every restart/deploy dropped the
+	// in-flight batch (and whatever was still queued).
+	st.Wait()
 	log.Info().Msg("ingestor stopped")
 }
 
@@ -65,6 +74,7 @@ type server struct {
 	totalConns  atomic.Uint64
 	totalMsgs   atomic.Uint64
 	parseErrors atomic.Uint64
+	crcErrors   atomic.Uint64
 }
 
 func (s *server) runTCP(ctx context.Context) error {
@@ -111,6 +121,16 @@ func (s *server) runTCP(ctx context.Context) error {
 func (s *server) handle(parent context.Context, conn net.Conn) {
 	defer s.activeConns.Add(-1)
 	defer conn.Close()
+	// A single malformed frame must never take down the whole process (and
+	// with it every other connected device). Recover any panic from the
+	// parser, count it, and let just this connection drop.
+	defer func() {
+		if r := recover(); r != nil {
+			s.parseErrors.Add(1)
+			log.Error().Interface("panic", r).Str("remote", conn.RemoteAddr().String()).
+				Msg("recovered panic in connection handler")
+		}
+	}()
 
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
@@ -152,6 +172,17 @@ func (s *server) handle(parent context.Context, conn net.Conn) {
 		if len(records) == 0 {
 			continue
 		}
+		// CRC-16/IBM check. Always counted; only drops the frame when
+		// INGESTOR_VERIFY_CRC is enabled (the device re-sends un-acked data,
+		// so dropping is lossless). Keeps a corrupted-on-wire frame from
+		// silently landing in positions once enforcement is turned on.
+		if !session.LastCRCOK() {
+			s.crcErrors.Add(1)
+			if s.cfg.VerifyCRC {
+				logger.Debug().Msg("crc mismatch — dropping frame (device will re-send)")
+				continue
+			}
+		}
 		s.totalMsgs.Add(uint64(len(records)))
 
 		if err := s.store.Enqueue(ctx, imei, records, session.LastFrameLen()); err != nil {
@@ -175,6 +206,12 @@ func (s *server) handle(parent context.Context, conn net.Conn) {
 // reconnects, a fresh loop is spawned and the new session picks up any
 // commands that landed in the meantime.
 func (s *server) runCommandLoop(ctx context.Context, imei string, session *teltonika.Session) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error().Interface("panic", r).Str("imei", imei).
+				Msg("recovered panic in command loop")
+		}
+	}()
 	for {
 		if ctx.Err() != nil {
 			return
@@ -217,6 +254,7 @@ func (s *server) runHealth(ctx context.Context) {
 		fmt.Fprintf(w, "fleex_ingestor_total_connections %d\n", s.totalConns.Load())
 		fmt.Fprintf(w, "fleex_ingestor_messages_total %d\n", s.totalMsgs.Load())
 		fmt.Fprintf(w, "fleex_ingestor_parse_errors_total %d\n", s.parseErrors.Load())
+		fmt.Fprintf(w, "fleex_ingestor_crc_errors_total %d\n", s.crcErrors.Load())
 		s.store.WriteMetrics(w)
 	})
 

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { useQuery } from '@tanstack/react-query';
-import { api, WS_URL, getToken } from '../lib/api';
+import { api } from '../lib/api';
+import { useLiveSocket } from '../lib/useLiveSocket';
 import { BasemapPicker } from '../components/BasemapPicker';
 import 'leaflet/dist/leaflet.css';
 
@@ -67,23 +68,21 @@ export function LiveMap() {
     queryFn: () => api.get('/garages').then((r) => r.data),
   });
 
-  // WebSocket live updates.
+  // Live positions arrive over the (auto-reconnecting) WebSocket into a ref,
+  // then flush to state on a 500ms timer — so 1000 devices reporting don't
+  // trigger a React re-render per packet.
+  const pendingPos = useRef<Record<string, LivePosition>>({});
+  useLiveSocket((m) => {
+    if (m.type === 'position') pendingPos.current[m.data.deviceId] = m.data as LivePosition;
+  });
   useEffect(() => {
-    const token = getToken();
-    if (!token) return;
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = WS_URL.startsWith('ws')
-      ? `${WS_URL}?token=${encodeURIComponent(token)}`
-      : `${proto}://${window.location.host}${WS_URL}?token=${encodeURIComponent(token)}`;
-    const ws = new WebSocket(url);
-    ws.onmessage = (ev) => {
-      try {
-        const m = JSON.parse(ev.data);
-        if (m.type !== 'position') return;
-        setLivePos((prev) => ({ ...prev, [m.data.deviceId]: m.data }));
-      } catch {}
-    };
-    return () => ws.close();
+    const t = setInterval(() => {
+      if (Object.keys(pendingPos.current).length === 0) return;
+      const batch = pendingPos.current;
+      pendingPos.current = {};
+      setLivePos((prev) => ({ ...prev, ...batch }));
+    }, 500);
+    return () => clearInterval(t);
   }, []);
 
   // Merge REST snapshot with WS live positions.
@@ -138,25 +137,18 @@ export function LiveMap() {
           <BasemapPicker />
 
           {withCoords.map((d) => (
-            <Marker
+            <DeviceMarker
               key={d.id}
-              position={[d.lastLat!, d.lastLng!]}
-              icon={d.online ? onlineIcon : offlineIcon}
-              eventHandlers={{ click: () => setSelected(d.id) }}
-            >
-              <Popup>
-                <div className="text-sm">
-                  <div className="font-semibold">{d.name}</div>
-                  <div className="text-slate-500 text-xs mt-1">IMEI {d.imei}</div>
-                  <div className="mt-2">
-                    Хурд: <b>{d.lastSpeed?.toFixed?.(1) ?? '—'}</b> km/h
-                  </div>
-                  <div>
-                    Сүүлд: {d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString() : '—'}
-                  </div>
-                </div>
-              </Popup>
-            </Marker>
+              id={d.id}
+              lat={d.lastLat!}
+              lng={d.lastLng!}
+              online={d.online}
+              name={d.name}
+              imei={d.imei}
+              speed={d.lastSpeed}
+              lastSeenAt={d.lastSeenAt}
+              onSelect={setSelected}
+            />
           ))}
 
           <FitToBoundsOnce
@@ -239,6 +231,49 @@ export function LiveMap() {
     </div>
   );
 }
+
+// Memoised so only markers whose data actually changed re-render — critical
+// when 1000 devices stream live position updates through the map.
+const DeviceMarker = memo(function DeviceMarker({
+  id,
+  lat,
+  lng,
+  online,
+  name,
+  imei,
+  speed,
+  lastSeenAt,
+  onSelect,
+}: {
+  id: string;
+  lat: number;
+  lng: number;
+  online: boolean;
+  name: string;
+  imei: string;
+  speed: number | null;
+  lastSeenAt: string | null;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <Marker
+      position={[lat, lng]}
+      icon={online ? onlineIcon : offlineIcon}
+      eventHandlers={{ click: () => onSelect(id) }}
+    >
+      <Popup>
+        <div className="text-sm">
+          <div className="font-semibold">{name}</div>
+          <div className="text-slate-500 text-xs mt-1">IMEI {imei}</div>
+          <div className="mt-2">
+            Хурд: <b>{speed?.toFixed?.(1) ?? '—'}</b> km/h
+          </div>
+          <div>Сүүлд: {lastSeenAt ? new Date(lastSeenAt).toLocaleString() : '—'}</div>
+        </div>
+      </Popup>
+    </Marker>
+  );
+});
 
 // Fit map bounds to the device set the first time we have coordinates.
 function FitToBoundsOnce({ points }: { points: [number, number][] }) {

@@ -108,6 +108,9 @@ func CommandToText(cmd *QueuedCommand) string {
 	case "reset":
 		return "cpureset"
 	default:
-		return cmd.Type
+		// Unknown type with no explicit text → send nothing. The API is the
+		// authority on who may issue what (raw text + arbitrary types are
+		// SUPER_ADMIN-only); this is defense-in-depth against a bad envelope.
+		return ""
 	}
 }

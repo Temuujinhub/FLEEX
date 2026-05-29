@@ -54,6 +54,7 @@ ufw allow OpenSSH
 ufw allow 80/tcp
 ufw allow 443/tcp
 ufw allow 5027/tcp  comment 'Teltonika TCP'
+ufw allow 5029/tcp  comment 'DualCam camera (media-service)'
 ufw --force enable
 
 log "Configuring fail2ban"

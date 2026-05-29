@@ -51,7 +51,13 @@ export class UsersService {
       where: { id },
       data: { passwordHash: hash, failedLogins: 0, lockedUntil: null },
     });
-    // Force re-auth on every OTHER session; keep current one alive.
+    // Revoke every refresh token for this user so an old/stolen session can't
+    // outlive the password change (matches resetPassword). The client
+    // re-authenticates with the new password.
+    await this.prisma.refreshToken.updateMany({
+      where: { userId: id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
     return { ok: true };
   }
 
@@ -71,9 +77,14 @@ export class UsersService {
     actor: { role: Role; companyId: string | null },
     dto: { email: string; password: string; fullName?: string; role: Role; companyId?: string; phone?: string },
   ) {
-    // Non-SUPER_ADMIN can only create users in their own company, and only at
-    // lower or equal level (handled by RBAC ladder on the route guard).
+    // Non-SUPER_ADMIN can only create users in their own company.
     const companyId = actor.role === 'SUPER_ADMIN' ? dto.companyId ?? null : actor.companyId;
+    // Enforce the role ladder HERE — the route guard only checks the
+    // COMPANY_ADMIN floor, not the requested role. Without this a COMPANY_ADMIN
+    // could POST a SUPER_ADMIN and escalate to full cross-tenant control.
+    if (rank(dto.role) > rank(actor.role)) {
+      throw new ForbiddenException('Cannot create a user with a role above your own');
+    }
     const hash = await argon2.hash(dto.password, { type: argon2.argon2id });
     return this.prisma.user.create({
       data: {
@@ -100,6 +111,19 @@ export class UsersService {
     // No one can grant a role above their own.
     if (dto.role && rank(dto.role) > rank(actor.role)) {
       throw new ForbiddenException('Cannot elevate above your own role');
+    }
+    // Privilege mutations (role/status) are guarded against lateral abuse and
+    // self-lockout: you cannot change your own role/status here, and a
+    // non-super admin cannot touch the role/status of a peer at or above
+    // their own rank. Profile-only edits (name/phone) are unaffected.
+    const mutatingPrivilege = dto.role !== undefined || dto.status !== undefined;
+    if (mutatingPrivilege) {
+      if (actor.id === id) {
+        throw new ForbiddenException('Cannot change your own role or status');
+      }
+      if (actor.role !== 'SUPER_ADMIN' && rank(target.role) >= rank(actor.role)) {
+        throw new ForbiddenException('Cannot change role or status of a user at or above your own role');
+      }
     }
     return this.prisma.user.update({ where: { id }, data: dto, select: SAFE_USER_FIELDS });
   }

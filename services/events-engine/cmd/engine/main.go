@@ -20,6 +20,11 @@ import (
 	"syscall"
 	"time"
 
+	// Embed the IANA tz database so time.LoadLocation resolves company
+	// timezones (e.g. Asia/Ulaanbaatar) regardless of whether the runtime
+	// image ships tzdata — the day/night speed schedule depends on it.
+	_ "time/tzdata"
+
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
@@ -30,7 +35,11 @@ import (
 
 func main() {
 	zerolog.TimeFieldFormat = time.RFC3339Nano
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+	// JSON logs by default (aggregator-friendly: Loki/ELK). LOG_FORMAT=console
+	// gives the human-readable output for local dev.
+	if os.Getenv("LOG_FORMAT") == "console" {
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
