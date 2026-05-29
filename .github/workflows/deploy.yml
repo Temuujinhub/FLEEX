@@ -41,12 +41,21 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Vet GPS ingestor
+      - name: Build, vet & test GPS ingestor
         working-directory: services/gps-ingestor
         run: |
-          go mod tidy
+          go mod download
           go vet ./...
           go build ./...
+          go test ./...
+
+      - name: Build, vet & test events engine
+        working-directory: services/events-engine
+        run: |
+          go mod download
+          go vet ./...
+          go build ./...
+          go test ./...
 
       - name: Set up Node
         uses: actions/setup-node@v4
