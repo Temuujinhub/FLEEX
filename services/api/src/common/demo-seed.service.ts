@@ -20,9 +20,18 @@ export class DemoSeedService implements OnApplicationBootstrap {
   async onApplicationBootstrap() {
     if (this.config.get<string>('SEED_DEMO_COMPANIES') !== 'true') return;
 
-    const defaultPassword =
-      this.config.get<string>('SEED_DEMO_PASSWORD') ?? 'Fleex@2026';
-    const passwordHash = await argon2.hash(defaultPassword, { type: argon2.argon2id });
+    // Refuse to mint COMPANY_ADMIN accounts with a publicly-known password.
+    // The committed .env.example default would otherwise be trivial takeover
+    // of the demo tenants if the flag is ever enabled in production.
+    const seedPassword = this.config.get<string>('SEED_DEMO_PASSWORD');
+    if (!seedPassword || seedPassword === 'Fleex@2026') {
+      this.logger.error(
+        'SEED_DEMO_COMPANIES=true but SEED_DEMO_PASSWORD is unset or still the committed default — ' +
+          'refusing to seed demo admins with a public password. Set a strong SEED_DEMO_PASSWORD.',
+      );
+      return;
+    }
+    const passwordHash = await argon2.hash(seedPassword, { type: argon2.argon2id });
 
     const tenants = [
       {
@@ -85,7 +94,7 @@ export class DemoSeedService implements OnApplicationBootstrap {
       });
 
       this.logger.warn(
-        `Demo tenant ready: ${t.name} → ${t.adminEmail} / ${defaultPassword} (change immediately).`,
+        `Demo tenant ready: ${t.name} → ${t.adminEmail} / ${seedPassword} (change immediately).`,
       );
     }
   }

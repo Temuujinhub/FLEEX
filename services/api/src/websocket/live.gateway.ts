@@ -118,7 +118,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         client.close(4001, 'no token');
         return;
       }
-      const payload = this.jwt.verify(token);
+      const payload = this.jwt.verify(token, { algorithms: ['HS256'] });
       this.clients.set(client, {
         userId: payload.sub,
         role: payload.role,

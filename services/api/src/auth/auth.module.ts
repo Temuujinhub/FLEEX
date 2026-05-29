@@ -5,6 +5,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
+import { assertStrongJwtSecret } from './jwt-secret.util';
 
 @Module({
   imports: [
@@ -13,8 +14,11 @@ import { JwtStrategy } from './jwt.strategy';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (cfg: ConfigService) => ({
-        secret: cfg.get<string>('JWT_SECRET'),
-        signOptions: { expiresIn: cfg.get<string>('JWT_EXPIRES_IN') ?? '15m' },
+        secret: assertStrongJwtSecret(cfg.get<string>('JWT_SECRET')),
+        signOptions: {
+          algorithm: 'HS256',
+          expiresIn: cfg.get<string>('JWT_EXPIRES_IN') ?? '15m',
+        },
       }),
     }),
   ],

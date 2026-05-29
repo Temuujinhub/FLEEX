@@ -139,11 +139,16 @@ export class AuthService {
       });
       throw new UnauthorizedException('Refresh token reuse detected');
     }
-    // Rotate: revoke the old one and issue a new pair.
-    await this.prisma.refreshToken.update({
-      where: { id: stored.id },
+    // Rotate atomically: only the request that flips revokedAt from null wins
+    // and mints a new pair. A concurrent double-submit of the same token loses
+    // the race (count 0) and is rejected without nuking the user's sessions.
+    const rotated = await this.prisma.refreshToken.updateMany({
+      where: { id: stored.id, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+    if (rotated.count !== 1) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
     return this.issueTokens(
       stored.user.id,
       stored.user.email,

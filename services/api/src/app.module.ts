@@ -41,10 +41,22 @@ import { AuditInterceptor } from './audit/audit.interceptor';
 import { BootstrapService } from './common/bootstrap.service';
 import { DemoSeedService } from './common/demo-seed.service';
 import { TimescaleInitService } from './common/timescale-init.service';
+import { assertStrongJwtSecret } from './auth/jwt-secret.util';
+
+// Fail-fast environment validation at boot. Keeps misconfiguration (a weak or
+// missing JWT secret, a missing DATABASE_URL) from surfacing later as
+// confusing runtime 500s — the process refuses to start instead.
+function validateEnv(env: Record<string, any>): Record<string, any> {
+  assertStrongJwtSecret(env.JWT_SECRET as string | undefined);
+  if (!env.DATABASE_URL) {
+    throw new Error('DATABASE_URL is required');
+  }
+  return env;
+}
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true, cache: true }),
+    ConfigModule.forRoot({ isGlobal: true, cache: true, validate: validateEnv }),
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([
       { name: 'short', ttl: 1000, limit: 20 },
