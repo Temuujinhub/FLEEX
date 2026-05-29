@@ -1,0 +1,67 @@
+{
+  "common": {
+    "brand": "Fleex",
+    "brandTagline": "Mining Fleet Ops",
+    "logout": "Log out",
+    "myProfile": "My profile",
+    "language": "Language",
+    "loading": "Loading…"
+  },
+  "section": {
+    "operations": "Operations",
+    "analytics": "Analytics",
+    "administration": "Administration"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "liveMap": "Live map",
+    "dispatch": "Dispatcher",
+    "devices": "Vehicles · Devices",
+    "drivers": "Drivers · Staff",
+    "groups": "Departments",
+    "shifts": "Shifts",
+    "serviceTasks": "Maintenance",
+    "history": "Route · History",
+    "camera": "Camera · DualCam",
+    "events": "Alerts",
+    "notificationRules": "Alert rules",
+    "healthRules": "Vehicle health",
+    "ecoDriving": "Eco-driving",
+    "places": "Places · Points",
+    "geofences": "Geofences",
+    "reports": "Reports",
+    "proximity": "Proximity report",
+    "users": "Users",
+    "companies": "Companies",
+    "landingSettings": "Site settings",
+    "support": "Support",
+    "audit": "Audit log",
+    "systemHealth": "System health"
+  },
+  "role": {
+    "SUPER_ADMIN": "Super admin",
+    "COMPANY_ADMIN": "Company admin",
+    "FLEET_MANAGER": "Fleet manager",
+    "DISPATCHER": "Dispatcher",
+    "DRIVER": "Driver",
+    "VIEWER": "Viewer"
+  },
+  "login": {
+    "tagline": "Mining-grade fleet intelligence",
+    "headline1": "Real-time control of",
+    "headline2": "your mining",
+    "headline3": "fleet",
+    "subtitle": "Haul trucks, excavators, dozers, fuel bowsers — in one system. Driver behaviour, fuel, engine operation and safety, together.",
+    "email": "Email",
+    "password": "Password",
+    "signIn": "Sign in",
+    "signingIn": "Signing in…",
+    "error": "Sign-in failed",
+    "capRealtime": "Real-time",
+    "capRetention": "Data retention",
+    "capRetentionValue": "12 mo",
+    "capUptime": "Uptime SLA",
+    "heroRegions": "Oyu Tolgoi · Erdenet · UHG",
+    "heroCaption": "Built for heavy industry"
+  }
+}

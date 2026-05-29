@@ -1,5 +1,6 @@
 import { FormEvent, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { api, setTokens } from '../lib/api';
 import { useAuth } from '../store/auth';
 
@@ -13,6 +14,7 @@ export function Login() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const setUser = useAuth((s) => s.setUser);
+  const { t, i18n } = useTranslation();
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -24,7 +26,7 @@ export function Login() {
       setUser(r.data.user);
       navigate('/app');
     } catch (err: any) {
-      setError(err.response?.data?.message ?? 'Нэвтрэх явцад алдаа гарлаа');
+      setError(err.response?.data?.message ?? t('login.error'));
     } finally {
       setLoading(false);
     }
@@ -36,28 +38,40 @@ export function Login() {
       <div className="w-full lg:w-[480px] xl:w-[520px] shrink-0 flex flex-col bg-gradient-to-b from-slate-950 via-slate-900 to-brand-900 px-8 py-10 lg:px-12">
         <header className="flex items-center gap-3">
           <Logo />
-          <div>
+          <div className="flex-1">
             <div className="text-2xl font-extrabold tracking-tight">Fleex</div>
-            <div className="text-xs text-brand-200/80 -mt-0.5">Mining-grade fleet intelligence</div>
+            <div className="text-xs text-brand-200/80 -mt-0.5">{t('login.tagline')}</div>
+          </div>
+          <div className="flex gap-1">
+            {(['mn', 'en'] as const).map((lng) => (
+              <button
+                key={lng}
+                type="button"
+                onClick={() => i18n.changeLanguage(lng)}
+                className={`rounded-md text-xs px-2.5 py-1 font-semibold uppercase transition ${
+                  i18n.resolvedLanguage === lng
+                    ? 'bg-brand-600 text-white'
+                    : 'bg-white/10 text-slate-300 hover:bg-white/20'
+                }`}
+              >
+                {lng}
+              </button>
+            ))}
           </div>
         </header>
 
         <div className="flex-1 flex flex-col justify-center max-w-sm w-full mt-12 lg:mt-0">
           <h1 className="text-3xl font-bold leading-tight">
-            Уурхайн флотын
+            {t('login.headline1')}
             <br />
-            <span className="text-brand-300">бодит цагийн</span> хяналт
+            <span className="text-brand-300">{t('login.headline2')}</span> {t('login.headline3')}
           </h1>
-          <p className="mt-3 text-sm text-slate-300/90 leading-relaxed">
-            Самосвал, экскаватор, бульдозер, түлшний цистерн — нэг систем дээр.
-            Жолоочийн зан төлөв, шатхуун, хөдөлгүүрийн ажиллагаа, аюулгүй байдал
-            хамтад нь.
-          </p>
+          <p className="mt-3 text-sm text-slate-300/90 leading-relaxed">{t('login.subtitle')}</p>
 
           <form onSubmit={submit} className="mt-8 space-y-4">
             <div>
               <label className="block text-xs uppercase tracking-widest text-slate-400 mb-1.5">
-                Имэйл
+                {t('login.email')}
               </label>
               <input
                 type="email"
@@ -71,7 +85,7 @@ export function Login() {
             </div>
             <div>
               <label className="block text-xs uppercase tracking-widest text-slate-400 mb-1.5">
-                Нууц үг
+                {t('login.password')}
               </label>
               <input
                 type="password"
@@ -96,14 +110,14 @@ export function Login() {
               disabled={loading}
               className="w-full rounded-lg bg-brand-600 hover:bg-brand-500 active:bg-brand-700 text-white font-semibold py-2.5 disabled:opacity-60 transition shadow-lg shadow-brand-900/40"
             >
-              {loading ? 'Нэвтэрч байна…' : 'Нэвтрэх'}
+              {loading ? t('login.signingIn') : t('login.signIn')}
             </button>
           </form>
 
           <div className="mt-8 grid grid-cols-3 gap-3 text-center">
-            <Capability label="Real-time" value="<1с" />
-            <Capability label="Дата хадгалалт" value="12 сар" />
-            <Capability label="Uptime SLA" value="99.9%" />
+            <Capability label={t('login.capRealtime')} value="<1s" />
+            <Capability label={t('login.capRetention')} value={t('login.capRetentionValue')} />
+            <Capability label={t('login.capUptime')} value="99.9%" />
           </div>
         </div>
 
@@ -123,10 +137,10 @@ export function Login() {
         <div className="absolute inset-0 bg-gradient-to-r from-slate-950/70 via-slate-950/20 to-slate-950/40" />
         <div className="absolute bottom-10 right-10 max-w-md text-right">
           <div className="text-xs uppercase tracking-[0.3em] text-brand-200/80">
-            Oyu Tolgoi · Erdenet · UHG
+            {t('login.heroRegions')}
           </div>
           <div className="mt-2 text-xl font-semibold text-white drop-shadow-lg">
-            Хүнд үйлдвэрлэлд бүтсэн платформ
+            {t('login.heroCaption')}
           </div>
         </div>
       </div>

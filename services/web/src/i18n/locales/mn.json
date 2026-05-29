@@ -1,0 +1,67 @@
+{
+  "common": {
+    "brand": "Fleex",
+    "brandTagline": "Уул уурхайн флот",
+    "logout": "Гарах",
+    "myProfile": "Миний бүртгэл",
+    "language": "Хэл",
+    "loading": "Уншиж байна…"
+  },
+  "section": {
+    "operations": "Үйл ажиллагаа",
+    "analytics": "Аналитик",
+    "administration": "Удирдлага"
+  },
+  "nav": {
+    "dashboard": "Хяналтын самбар",
+    "liveMap": "Шууд газрын зураг",
+    "dispatch": "Dispatcher",
+    "devices": "Машин · Төхөөрөмж",
+    "drivers": "Жолооч · Ажилчид",
+    "groups": "Алба нэгж",
+    "shifts": "Ээлж",
+    "serviceTasks": "Засвар үйлчилгээ",
+    "history": "Маршрут · Түүх",
+    "camera": "Камер · DualCam",
+    "events": "Дохиоллууд",
+    "notificationRules": "Дохиоллын дүрэм",
+    "healthRules": "Машин эрүүл мэнд",
+    "ecoDriving": "Эко жолоодлого",
+    "places": "Байршил · Цэгүүд",
+    "geofences": "Geofence бүс",
+    "reports": "Тайлан",
+    "proximity": "Орчмын тайлан",
+    "users": "Хэрэглэгчид",
+    "companies": "Компаниуд",
+    "landingSettings": "Сайтын тохиргоо",
+    "support": "Дэмжлэг",
+    "audit": "Аудит лог",
+    "systemHealth": "Системийн эрүүл мэнд"
+  },
+  "role": {
+    "SUPER_ADMIN": "Гол админ",
+    "COMPANY_ADMIN": "Компанийн админ",
+    "FLEET_MANAGER": "Флот менежер",
+    "DISPATCHER": "Диспетчер",
+    "DRIVER": "Жолооч",
+    "VIEWER": "Үзэгч"
+  },
+  "login": {
+    "tagline": "Mining-grade fleet intelligence",
+    "headline1": "Уурхайн флотын",
+    "headline2": "бодит цагийн",
+    "headline3": "хяналт",
+    "subtitle": "Самосвал, экскаватор, бульдозер, түлшний цистерн — нэг систем дээр. Жолоочийн зан төлөв, шатхуун, хөдөлгүүрийн ажиллагаа, аюулгүй байдал хамтад нь.",
+    "email": "Имэйл",
+    "password": "Нууц үг",
+    "signIn": "Нэвтрэх",
+    "signingIn": "Нэвтэрч байна…",
+    "error": "Нэвтрэх явцад алдаа гарлаа",
+    "capRealtime": "Real-time",
+    "capRetention": "Дата хадгалалт",
+    "capRetentionValue": "12 сар",
+    "capUptime": "Uptime SLA",
+    "heroRegions": "Oyu Tolgoi · Erdenet · UHG",
+    "heroCaption": "Хүнд үйлдвэрлэлд бүтсэн платформ"
+  }
+}
