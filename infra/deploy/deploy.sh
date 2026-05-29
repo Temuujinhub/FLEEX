@@ -107,8 +107,30 @@ stop_legacy_camtest() {
   fi
 }
 
+# enable-tls.sh `mv`s fleex-tls.conf.disabled → fleex-tls.conf once, after which
+# the live TLS file is untracked and `git reset --hard` never updates it (same
+# reason sync_csp_into_tls_conf exists). When the /camtest/ location was removed
+# (its host.docker.internal upstream stopped resolving once extra_hosts was
+# dropped), the stale block lingered in the live file and made nginx refuse to
+# start: "host not found in upstream host.docker.internal". Strip it.
+# Idempotent: a no-op when the block is absent.
+strip_camtest_from_tls_conf() {
+  local dst="infra/nginx/conf.d/fleex-tls.conf"
+  [[ -f "$dst" ]] || return 0
+  grep -qE 'location /camtest/|host\.docker\.internal' "$dst" || return 0
+  log "Removing obsolete /camtest/ block from live fleex-tls.conf (camera is now media-service)"
+  awk '
+    /^[[:space:]]*#.*([Cc]amtest|camera-test|host\.docker\.internal)/ { next }
+    /location \/camtest\/ \{/ { skip=1; next }
+    skip==1 && /\}/           { skip=0; next }
+    skip==1                   { next }
+    { print }
+  ' "$dst" > "$dst.tmp" && mv "$dst.tmp" "$dst"
+}
+
 build_and_up() {
   sync_csp_into_tls_conf
+  strip_camtest_from_tls_conf
   stop_legacy_camtest
 
   log "docker compose build"
