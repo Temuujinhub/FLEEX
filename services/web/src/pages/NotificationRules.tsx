@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { api } from '../lib/api';
+import { useAuth } from '../store/auth';
 
 const EVENT_TYPES = [
   { value: 'PANIC',          label: 'Эвакуац / SOS' },
@@ -40,6 +41,11 @@ const input = 'w-full rounded-md border border-slate-200 px-3 py-2 text-sm bg-wh
 
 export function NotificationRules() {
   const qc = useQueryClient();
+  const auth = useAuth();
+  // Dispatchers can open this page (backend GET is VIEWER-level) but only to
+  // review rules — create/edit/delete require FLEET_MANAGER on the server, so
+  // hide those controls to avoid a 403 on click.
+  const canEdit = auth.hasRole('FLEET_MANAGER');
   const rules = useQuery({
     queryKey: ['notification-rules'],
     queryFn: () => api.get('/notification-rules').then((r) => r.data),
@@ -65,7 +71,7 @@ export function NotificationRules() {
             Тодорхой үйл явдал бүртгэгдэхэд хэн рүү, ямар сувгаар дохио илгээхийг тохируулна.
           </p>
         </div>
-        <button onClick={() => { setCreating(true); setEditing(null); }} className="rounded-md bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold px-4 py-2 shadow">
+        <button onClick={() => { setCreating(true); setEditing(null); }} className={clsx('rounded-md bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold px-4 py-2 shadow', !canEdit && 'hidden')}>
           + Шинэ дүрэм
         </button>
       </header>
@@ -100,11 +106,17 @@ export function NotificationRules() {
                 <div className="text-[11px] text-slate-500 mt-1 font-mono">{r.template}</div>
               </div>
               <div className="flex flex-col gap-1">
-                <button onClick={() => toggle.mutate(r)} className="text-xs text-slate-600 hover:underline">
-                  {r.active ? 'Идэвхгүй болгох' : 'Идэвхжүүлэх'}
-                </button>
-                <button onClick={() => { setEditing(r); setCreating(false); }} className="text-xs text-brand-700 hover:underline">Засах</button>
-                <button onClick={() => { if (confirm('Устгах уу?')) remove.mutate(r.id); }} className="text-xs text-rose-700 hover:underline">Устгах</button>
+                {canEdit ? (
+                  <>
+                    <button onClick={() => toggle.mutate(r)} className="text-xs text-slate-600 hover:underline">
+                      {r.active ? 'Идэвхгүй болгох' : 'Идэвхжүүлэх'}
+                    </button>
+                    <button onClick={() => { setEditing(r); setCreating(false); }} className="text-xs text-brand-700 hover:underline">Засах</button>
+                    <button onClick={() => { if (confirm('Устгах уу?')) remove.mutate(r.id); }} className="text-xs text-rose-700 hover:underline">Устгах</button>
+                  </>
+                ) : (
+                  <span className="text-[10px] uppercase tracking-widest text-slate-400">Зөвхөн харах</span>
+                )}
               </div>
             </div>
           </div>
