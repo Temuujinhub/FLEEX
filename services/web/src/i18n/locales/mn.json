@@ -9,7 +9,10 @@
   },
   "section": {
     "operations": "Үйл ажиллагаа",
-    "analytics": "Аналитик",
+    "monitor": "Хяналт",
+    "fleet": "Флот",
+    "analytics": "Аналитик · Бүс",
+    "settings": "Тохиргоо",
     "administration": "Удирдлага"
   },
   "nav": {

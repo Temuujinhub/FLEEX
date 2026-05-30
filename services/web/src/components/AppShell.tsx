@@ -13,42 +13,52 @@ const SECTIONS: {
   items: { to: string; labelKey: string; min: AuthRole; icon: ReactNode }[];
 }[] = [
   {
-    titleKey: 'section.operations',
+    // Day-to-day monitoring — what an operator opens every shift.
+    titleKey: 'section.monitor',
     items: [
       { to: '/app',           labelKey: 'nav.dashboard',     min: 'VIEWER',        icon: <IconDashboard /> },
       { to: '/app/map',       labelKey: 'nav.liveMap',       min: 'VIEWER',        icon: <IconMap /> },
       { to: '/app/dispatch',  labelKey: 'nav.dispatch',      min: 'DISPATCHER',    icon: <IconLayers /> },
-      { to: '/app/devices',   labelKey: 'nav.devices',       min: 'VIEWER',        icon: <IconTruck /> },
-      { to: '/app/drivers',   labelKey: 'nav.drivers',       min: 'VIEWER',        icon: <IconDriver /> },
-      { to: '/app/groups',    labelKey: 'nav.groups',        min: 'FLEET_MANAGER', icon: <IconLayers /> },
-      { to: '/app/shifts',    labelKey: 'nav.shifts',        min: 'FLEET_MANAGER', icon: <IconLayers /> },
-      { to: '/app/service-tasks', labelKey: 'nav.serviceTasks', min: 'VIEWER',     icon: <IconWrench /> },
-      { to: '/app/history',   labelKey: 'nav.history',       min: 'VIEWER',        icon: <IconRoute /> },
+      { to: '/app/events',    labelKey: 'nav.events',        min: 'VIEWER',        icon: <IconBell /> },
       { to: '/app/camera',    labelKey: 'nav.camera',        min: 'VIEWER',        icon: <IconCamera /> },
     ],
   },
   {
-    titleKey: 'section.analytics',
+    // The fleet itself: vehicles, people, upkeep, movement.
+    titleKey: 'section.fleet',
     items: [
-      { to: '/app/events',             labelKey: 'nav.events',            min: 'VIEWER',         icon: <IconBell /> },
-      { to: '/app/notification-rules', labelKey: 'nav.notificationRules', min: 'FLEET_MANAGER',  icon: <IconBell /> },
-      { to: '/app/health-rules',       labelKey: 'nav.healthRules',       min: 'FLEET_MANAGER',  icon: <IconShield /> },
-      { to: '/app/eco-driving',        labelKey: 'nav.ecoDriving',        min: 'VIEWER',         icon: <IconEco /> },
-      { to: '/app/places',             labelKey: 'nav.places',            min: 'VIEWER',         icon: <IconPin /> },
-      { to: '/app/geofences',          labelKey: 'nav.geofences',         min: 'FLEET_MANAGER',  icon: <IconShield /> },
-      { to: '/app/reports',            labelKey: 'nav.reports',           min: 'VIEWER',         icon: <IconChart /> },
-      { to: '/app/proximity',          labelKey: 'nav.proximity',         min: 'VIEWER',         icon: <IconRadius /> },
+      { to: '/app/devices',       labelKey: 'nav.devices',      min: 'VIEWER', icon: <IconTruck /> },
+      { to: '/app/drivers',       labelKey: 'nav.drivers',      min: 'VIEWER', icon: <IconDriver /> },
+      { to: '/app/service-tasks', labelKey: 'nav.serviceTasks', min: 'VIEWER', icon: <IconWrench /> },
+      { to: '/app/history',       labelKey: 'nav.history',      min: 'VIEWER', icon: <IconRoute /> },
+      { to: '/app/eco-driving',   labelKey: 'nav.ecoDriving',   min: 'VIEWER', icon: <IconEco /> },
     ],
   },
   {
-    titleKey: 'section.administration',
+    // Reporting + the spatial layer (places & geofences live together).
+    titleKey: 'section.analytics',
     items: [
-      { to: '/app/users',     labelKey: 'nav.users',         min: 'COMPANY_ADMIN', icon: <IconUsers /> },
-      { to: '/app/companies', labelKey: 'nav.companies',     min: 'SUPER_ADMIN',   icon: <IconBuilding /> },
-      { to: '/app/landing-settings', labelKey: 'nav.landingSettings', min: 'SUPER_ADMIN', icon: <IconCog /> },
-      { to: '/app/support',   labelKey: 'nav.support',       min: 'COMPANY_ADMIN', icon: <IconLifeRing /> },
-      { to: '/app/audit',     labelKey: 'nav.audit',         min: 'COMPANY_ADMIN', icon: <IconAudit /> },
-      { to: '/app/system-health', labelKey: 'nav.systemHealth', min: 'SUPER_ADMIN', icon: <IconPulse /> },
+      { to: '/app/reports',   labelKey: 'nav.reports',   min: 'VIEWER',        icon: <IconChart /> },
+      { to: '/app/proximity', labelKey: 'nav.proximity', min: 'VIEWER',        icon: <IconRadius /> },
+      { to: '/app/geofences', labelKey: 'nav.geofences', min: 'FLEET_MANAGER', icon: <IconShield /> },
+      { to: '/app/places',    labelKey: 'nav.places',    min: 'VIEWER',        icon: <IconPin /> },
+    ],
+  },
+  {
+    // Configuration — rules, org structure, admin. Not opened daily, so it
+    // sits last and stays hidden entirely for view-only / driver roles.
+    titleKey: 'section.settings',
+    items: [
+      { to: '/app/notification-rules', labelKey: 'nav.notificationRules', min: 'FLEET_MANAGER', icon: <IconBell /> },
+      { to: '/app/health-rules',       labelKey: 'nav.healthRules',       min: 'FLEET_MANAGER', icon: <IconShield /> },
+      { to: '/app/groups',             labelKey: 'nav.groups',            min: 'FLEET_MANAGER', icon: <IconLayers /> },
+      { to: '/app/shifts',             labelKey: 'nav.shifts',            min: 'FLEET_MANAGER', icon: <IconLayers /> },
+      { to: '/app/users',              labelKey: 'nav.users',             min: 'COMPANY_ADMIN', icon: <IconUsers /> },
+      { to: '/app/support',            labelKey: 'nav.support',           min: 'COMPANY_ADMIN', icon: <IconLifeRing /> },
+      { to: '/app/audit',              labelKey: 'nav.audit',             min: 'COMPANY_ADMIN', icon: <IconAudit /> },
+      { to: '/app/companies',          labelKey: 'nav.companies',         min: 'SUPER_ADMIN',   icon: <IconBuilding /> },
+      { to: '/app/landing-settings',   labelKey: 'nav.landingSettings',   min: 'SUPER_ADMIN',   icon: <IconCog /> },
+      { to: '/app/system-health',      labelKey: 'nav.systemHealth',      min: 'SUPER_ADMIN',   icon: <IconPulse /> },
     ],
   },
 ];
