@@ -203,15 +203,22 @@ function AddServiceTaskModal({ devices, onClose }: { devices: any[]; onClose: ()
     deviceId: '', title: '', description: '', kind: 'MAINTENANCE' as string,
     status: 'PLANNED' as string,
     cost: '', unplanned: false,
-    scheduledAt: '', reminderDays: '',
+    scheduledAt: '', scheduledOdometerKm: '', scheduledEngineHours: '', reminderDays: '',
     completedAt: '', performedBy: '', completionNotes: '',
   });
+  // Which schedule basis the operator is using. Mining service is usually by
+  // distance/hours, not date — and the odometer-trend predictor only fires when
+  // scheduledOdometerKm is set, so exposing these here is what makes that
+  // feature actually work.
+  const [scheduleBy, setScheduleBy] = useState<'date' | 'odometer' | 'hours'>('odometer');
+  const [showCompletion, setShowCompletion] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const qc = useQueryClient();
 
   const set = (k: keyof typeof form, v: any) => setForm((f) => ({ ...f, [k]: v }));
+  const selectedDevice = devices.find((d) => d.id === form.deviceId);
 
   const mutation = useMutation({
     mutationFn: async (payload: any) => {
@@ -255,7 +262,16 @@ function AddServiceTaskModal({ devices, onClose }: { devices: any[]; onClose: ()
       const n = parseInt(form.reminderDays, 10);
       if (!Number.isNaN(n)) payload.reminderDays = n;
     }
-    if (form.scheduledAt) payload.scheduledAt = new Date(form.scheduledAt).toISOString();
+    // Only send the schedule field matching the chosen basis.
+    if (scheduleBy === 'date' && form.scheduledAt) {
+      payload.scheduledAt = new Date(form.scheduledAt).toISOString();
+    } else if (scheduleBy === 'odometer' && form.scheduledOdometerKm) {
+      const n = parseFloat(form.scheduledOdometerKm);
+      if (!Number.isNaN(n)) payload.scheduledOdometerKm = n;
+    } else if (scheduleBy === 'hours' && form.scheduledEngineHours) {
+      const n = parseFloat(form.scheduledEngineHours);
+      if (!Number.isNaN(n)) payload.scheduledEngineHours = n;
+    }
     if (form.completedAt) payload.completedAt = new Date(form.completedAt).toISOString();
     mutation.mutate(payload);
   };
@@ -270,53 +286,117 @@ function AddServiceTaskModal({ devices, onClose }: { devices: any[]; onClose: ()
 
   return (
     <ModalShell title="Шинэ үйлчилгээ" onClose={onClose}>
-      <div className="p-6 grid md:grid-cols-2 gap-x-5 gap-y-4 overflow-y-auto">
-        <Field label="Машин *" className="md:col-span-2">
-          <select value={form.deviceId} onChange={(e) => set('deviceId', e.target.value)} className={input}>
-            <option value="">— Сонгох —</option>
-            {devices.map((d) => (<option key={d.id} value={d.id}>{d.name}{d.plateNumber ? ` · ${d.plateNumber}` : ''}</option>))}
-          </select>
-        </Field>
-        <Field label="Үйлчилгээний нэр *">
-          <input value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="Жишээ: Хоёр дахь үе шатны үзлэг" className={input} />
-        </Field>
-        <Field label="Төрөл">
-          <select value={form.kind} onChange={(e) => set('kind', e.target.value)} className={input}>
-            {KIND_OPTIONS.map((k) => (<option key={k.value} value={k.value}>{k.label}</option>))}
-          </select>
-        </Field>
-        <Field label="Төлөв">
-          <select value={form.status} onChange={(e) => set('status', e.target.value)} className={input}>
-            {STATUS_OPTIONS.map((s) => (<option key={s.value} value={s.value}>{s.label}</option>))}
-          </select>
-        </Field>
-        <Field label="Зардал (₮)">
-          <input value={form.cost} onChange={(e) => set('cost', e.target.value)} placeholder="250000" className={input} />
-        </Field>
-        <Field label="Тайлбар" className="md:col-span-2">
-          <textarea value={form.description} onChange={(e) => set('description', e.target.value)} rows={3} className={input + ' resize-none'} />
-        </Field>
-        <Field label="Төлөвлөсөн огноо">
-          <input type="date" value={form.scheduledAt} onChange={(e) => set('scheduledAt', e.target.value)} className={input} />
-        </Field>
-        <Field label="Урьдчилан сануулах (өдөр)">
-          <input value={form.reminderDays} onChange={(e) => set('reminderDays', e.target.value)} placeholder="3" className={input} />
-        </Field>
-        <Field label="Биелсэн огноо">
-          <input type="date" value={form.completedAt} onChange={(e) => set('completedAt', e.target.value)} className={input} />
-        </Field>
-        <Field label="Хийсэн засварчин / газар">
-          <input value={form.performedBy} onChange={(e) => set('performedBy', e.target.value)} placeholder="Жишээ: УС Авто Сервис" className={input} />
-        </Field>
-        <Field label="Биелсэн тэмдэглэл" className="md:col-span-2">
-          <textarea value={form.completionNotes} onChange={(e) => set('completionNotes', e.target.value)} rows={2} className={input + ' resize-none'} />
-        </Field>
-        <div className="md:col-span-2 flex items-center gap-2">
-          <input id="unplanned" type="checkbox" checked={form.unplanned} onChange={(e) => set('unplanned', e.target.checked)} className="accent-brand-600" />
-          <label htmlFor="unplanned" className="text-sm">Төлөвлөөгүй яаралтай ажил</label>
-        </div>
+      <div className="p-6 space-y-6 overflow-y-auto">
+        {/* ── 1. Үндсэн мэдээлэл ── */}
+        <Section title="Үндсэн мэдээлэл" step={1}>
+          <div className="grid md:grid-cols-2 gap-x-5 gap-y-4">
+            <Field label="Машин *" className="md:col-span-2">
+              <select value={form.deviceId} onChange={(e) => set('deviceId', e.target.value)} className={input}>
+                <option value="">— Сонгох —</option>
+                {devices.map((d) => (<option key={d.id} value={d.id}>{d.name}{d.plateNumber ? ` · ${d.plateNumber}` : ''}</option>))}
+              </select>
+              {selectedDevice && (
+                <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                  <span>Одоогийн гүйлт: <b className="text-slate-700">{selectedDevice.odometerKm != null ? `${Number(selectedDevice.odometerKm).toLocaleString('mn-MN')} км` : '—'}</b></span>
+                  <span>Хөдөлгүүрийн цаг: <b className="text-slate-700">{selectedDevice.engineHours != null ? `${Number(selectedDevice.engineHours).toLocaleString('mn-MN')} ц` : '—'}</b></span>
+                </div>
+              )}
+            </Field>
+            <Field label="Үйлчилгээний нэр *" className="md:col-span-2">
+              <input value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="Жишээ: Хоёр дахь үе шатны үзлэг" className={input} />
+            </Field>
+            <Field label="Төрөл">
+              <select value={form.kind} onChange={(e) => set('kind', e.target.value)} className={input}>
+                {KIND_OPTIONS.map((k) => (<option key={k.value} value={k.value}>{k.label}</option>))}
+              </select>
+            </Field>
+            <Field label="Төлөв">
+              <select value={form.status} onChange={(e) => set('status', e.target.value)} className={input}>
+                {STATUS_OPTIONS.map((s) => (<option key={s.value} value={s.value}>{s.label}</option>))}
+              </select>
+            </Field>
+            <Field label="Зардал (₮)">
+              <input value={form.cost} onChange={(e) => set('cost', e.target.value)} placeholder="250000" className={input} inputMode="numeric" />
+            </Field>
+            <div className="flex items-end pb-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={form.unplanned} onChange={(e) => set('unplanned', e.target.checked)} className="accent-brand-600" />
+                Төлөвлөөгүй яаралтай ажил
+              </label>
+            </div>
+            <Field label="Тайлбар" className="md:col-span-2">
+              <textarea value={form.description} onChange={(e) => set('description', e.target.value)} rows={2} className={input + ' resize-none'} />
+            </Field>
+          </div>
+        </Section>
 
-        <Field label="Зураг (JPEG/PNG/WEBP/GIF, тус бүр 5 МБ хүртэл)" className="md:col-span-2">
+        {/* ── 2. Хуваарь: огноо / гүйлт / цаг ── */}
+        <Section title="Хуваарь" step={2} hint="Юунаас хамаарч сануулах вэ — огноо, гүйлт (км) эсвэл хөдөлгүүрийн цаг">
+          <div className="flex gap-2 mb-3">
+            {([
+              { id: 'odometer', label: '🛣 Гүйлт (км)' },
+              { id: 'hours',    label: '⏱ Хөдөлгүүрийн цаг' },
+              { id: 'date',     label: '📅 Огноо' },
+            ] as const).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setScheduleBy(opt.id)}
+                className={clsx(
+                  'rounded-lg border px-3 py-1.5 text-sm font-medium transition',
+                  scheduleBy === opt.id
+                    ? 'border-brand-500 bg-brand-50 text-brand-700'
+                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300',
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <div className="grid md:grid-cols-2 gap-x-5 gap-y-4">
+            {scheduleBy === 'date' && (
+              <Field label="Төлөвлөсөн огноо">
+                <input type="date" value={form.scheduledAt} onChange={(e) => set('scheduledAt', e.target.value)} className={input} />
+              </Field>
+            )}
+            {scheduleBy === 'odometer' && (
+              <Field label="Хийх гүйлт (км)" >
+                <input value={form.scheduledOdometerKm} onChange={(e) => set('scheduledOdometerKm', e.target.value)} placeholder={selectedDevice?.odometerKm != null ? `${Math.round(Number(selectedDevice.odometerKm) + 5000)}` : 'Жишээ: 150000'} className={input} inputMode="numeric" />
+              </Field>
+            )}
+            {scheduleBy === 'hours' && (
+              <Field label="Хийх хөдөлгүүрийн цаг">
+                <input value={form.scheduledEngineHours} onChange={(e) => set('scheduledEngineHours', e.target.value)} placeholder={selectedDevice?.engineHours != null ? `${Math.round(Number(selectedDevice.engineHours) + 250)}` : 'Жишээ: 2000'} className={input} inputMode="numeric" />
+              </Field>
+            )}
+            <Field label="Урьдчилан сануулах (өдөр)">
+              <input value={form.reminderDays} onChange={(e) => set('reminderDays', e.target.value)} placeholder="3" className={input} inputMode="numeric" />
+            </Field>
+          </div>
+          {scheduleBy === 'odometer' && (
+            <p className="mt-2 text-[11px] text-slate-500">
+              Гүйлтээр хуваарь тавьбал систем сүүлийн 30 хоногийн дундаж км дээр үндэслэн «удахгүй хийгдэх засвар»-ыг урьдчилан тооцоолно.
+            </p>
+          )}
+        </Section>
+
+        {/* ── 3. Гүйцэтгэл (хийгдсэн бол) ── */}
+        <Section title="Гүйцэтгэл" step={3} hint="Засвар хийгдсэн бол бөглөнө" collapsed={!showCompletion} onToggle={() => setShowCompletion((v) => !v)}>
+          <div className="grid md:grid-cols-2 gap-x-5 gap-y-4">
+            <Field label="Биелсэн огноо">
+              <input type="date" value={form.completedAt} onChange={(e) => set('completedAt', e.target.value)} className={input} />
+            </Field>
+            <Field label="Хийсэн засварчин / газар">
+              <input value={form.performedBy} onChange={(e) => set('performedBy', e.target.value)} placeholder="Жишээ: УС Авто Сервис" className={input} />
+            </Field>
+            <Field label="Биелсэн тэмдэглэл" className="md:col-span-2">
+              <textarea value={form.completionNotes} onChange={(e) => set('completionNotes', e.target.value)} rows={2} className={input + ' resize-none'} />
+            </Field>
+          </div>
+        </Section>
+
+        {/* ── 4. Зураг ── */}
+        <Section title="Зураг" step={4} hint="JPEG/PNG/WEBP/GIF, тус бүр 5 МБ хүртэл">
           <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={onPickFiles} />
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" onClick={() => fileRef.current?.click()} className="rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-sm px-3 py-2">
@@ -338,7 +418,7 @@ function AddServiceTaskModal({ devices, onClose }: { devices: any[]; onClose: ()
               ))}
             </div>
           )}
-        </Field>
+        </Section>
       </div>
 
       {error && <div className="mx-6 mb-3 rounded-md bg-rose-50 border border-rose-200 text-rose-800 text-sm px-3 py-2">{error}</div>}
@@ -378,9 +458,11 @@ function ViewServiceTaskModal({ id, onClose }: { id: string; onClose: () => void
             {t.description && <p className="text-sm text-slate-700 whitespace-pre-wrap">{t.description}</p>}
             <div className="grid grid-cols-2 gap-3 text-sm">
               <Detail label="Зардал" value={t.cost ? `${Number(t.cost).toLocaleString('mn-MN')} ₮` : '—'} />
+              <Detail label="Хуваарь" value={scheduleSummary(t)} />
               <Detail label="Төлөвлөсөн огноо" value={t.scheduledAt ? new Date(t.scheduledAt).toLocaleDateString('mn-MN') : '—'} />
               <Detail label="Биелсэн огноо" value={t.completedAt ? new Date(t.completedAt).toLocaleDateString('mn-MN') : '—'} />
               <Detail label="Засварчин" value={t.performedBy ?? '—'} />
+              <Detail label="Урьдчилан сануулах" value={t.reminderDays != null ? `${t.reminderDays} хоног` : '—'} />
             </div>
             {t.completionNotes && (
               <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-sm text-emerald-900">
@@ -444,6 +526,52 @@ function Field({ label, children, className }: { label: string; children: ReactN
       {children}
     </div>
   );
+}
+
+// Numbered, optionally-collapsible section so the long form reads as discrete
+// steps (Основ → Schedule → Completion → Photos) instead of one tall column.
+function Section({
+  title, step, hint, children, collapsed, onToggle,
+}: {
+  title: string;
+  step: number;
+  hint?: string;
+  children: ReactNode;
+  collapsed?: boolean;
+  onToggle?: () => void;
+}) {
+  return (
+    <section className="rounded-xl border border-slate-200 overflow-hidden">
+      <button
+        type="button"
+        onClick={onToggle}
+        disabled={!onToggle}
+        className={clsx(
+          'w-full flex items-center gap-3 px-4 py-3 text-left',
+          onToggle ? 'hover:bg-slate-50 cursor-pointer' : 'cursor-default',
+        )}
+      >
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-100 text-brand-700 text-xs font-bold">{step}</span>
+        <span className="flex-1">
+          <span className="font-semibold text-sm text-slate-800">{title}</span>
+          {hint && <span className="block text-[11px] text-slate-500 font-normal">{hint}</span>}
+        </span>
+        {onToggle && (
+          <span className="text-slate-400 text-sm">{collapsed ? '▾ Нээх' : '▴ Хаах'}</span>
+        )}
+      </button>
+      {!collapsed && <div className="px-4 pb-4 pt-1">{children}</div>}
+    </section>
+  );
+}
+
+// One-line summary of whatever schedule basis a task uses (km / hours / date).
+function scheduleSummary(t: any): string {
+  const parts: string[] = [];
+  if (t.scheduledOdometerKm != null) parts.push(`${Number(t.scheduledOdometerKm).toLocaleString('mn-MN')} км`);
+  if (t.scheduledEngineHours != null) parts.push(`${Number(t.scheduledEngineHours).toLocaleString('mn-MN')} ц`);
+  if (t.scheduledAt) parts.push(new Date(t.scheduledAt).toLocaleDateString('mn-MN'));
+  return parts.length ? parts.join(' · ') : '—';
 }
 
 function Detail({ label, value }: { label: string; value: string }) {
