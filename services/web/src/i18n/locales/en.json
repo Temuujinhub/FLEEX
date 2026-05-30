@@ -9,7 +9,10 @@
   },
   "section": {
     "operations": "Operations",
-    "analytics": "Analytics",
+    "monitor": "Monitor",
+    "fleet": "Fleet",
+    "analytics": "Analytics · Zones",
+    "settings": "Settings",
     "administration": "Administration"
   },
   "nav": {
