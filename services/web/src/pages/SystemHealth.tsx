@@ -308,7 +308,11 @@ function TestSendCard({ defaultEmail }: { defaultEmail?: string }) {
 
   const testSms = useMutation({
     mutationFn: () => api.post('/system-admin/test-sms', { to: phone }).then((r) => r.data),
-    onSuccess: () => setSmsMsg({ type: 'ok', text: `Илгээгдсэн: ${phone}. Утсаа шалгана уу.` }),
+    onSuccess: (d: any) =>
+      setSmsMsg({
+        type: 'ok',
+        text: `Илгээгдсэн: ${phone}${d?.messageId ? ` (Message ID: ${d.messageId})` : ''}. Утсаа шалгана уу.`,
+      }),
     onError: (err: any) =>
       setSmsMsg({ type: 'err', text: err.response?.data?.message ?? err.message ?? 'Алдаа' }),
   });
