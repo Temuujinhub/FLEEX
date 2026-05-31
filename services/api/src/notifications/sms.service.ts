@@ -46,10 +46,23 @@ export class SmsService implements OnModuleInit {
       this.logger.warn('SMS not configured; SMS notifications disabled');
       return;
     }
-    this.apiKey = apiKey;
-    this.from = from;
+    // API keys / sender ids are opaque ASCII tokens. A copy-paste from a PDF or
+    // terminal can smuggle in a stray non-ASCII char (e.g. "←" U+2190) or
+    // whitespace, which makes fetch throw "Cannot convert argument to a
+    // ByteString" when the value is set as the x-api-key header. Strip anything
+    // outside printable ASCII and warn so the operator knows the stored key was
+    // dirty (if the gateway then 403s, the key really is wrong → re-copy it).
+    const cleanKey = stripNonAscii(apiKey);
+    if (cleanKey !== apiKey) {
+      this.logger.warn(
+        `SMS_API_KEY contained ${apiKey.length - cleanKey.length} non-ASCII/whitespace char(s) — stripped. ` +
+          'If sends now 403, re-copy the key as plain text (System Health → SMS key).',
+      );
+    }
+    this.apiKey = cleanKey;
+    this.from = stripNonAscii(from);
     this.enabledFlag = true;
-    this.logger.log(`SMS provider=messagepro from=${from}`);
+    this.logger.log(`SMS provider=messagepro from=${this.from}`);
   }
 
   enabled() {
@@ -156,4 +169,12 @@ function normaliseMsisdn(raw: string): string | undefined {
   const digits = raw.replace(/\D/g, '');
   const local = digits.startsWith('976') ? digits.slice(3) : digits;
   return local.length === 8 ? local : undefined;
+}
+
+// Keep only printable ASCII (0x21–0x7E). API keys + sender ids are opaque
+// ASCII tokens, so this safely removes whitespace, BOM, and stray non-ASCII
+// glyphs (e.g. "←") that copy-paste can introduce and that would otherwise make
+// fetch throw a ByteString error when used as an HTTP header.
+function stripNonAscii(s: string): string {
+  return s.replace(/[^\x21-\x7E]/g, '');
 }
