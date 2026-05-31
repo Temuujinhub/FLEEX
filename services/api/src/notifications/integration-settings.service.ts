@@ -56,15 +56,20 @@ export class IntegrationSettingsService {
   }
 
   async set(key: IntegrationKey, value: string, userId?: string): Promise<void> {
-    const trimmed = value.trim();
-    if (!trimmed) {
+    // Keep only printable ASCII: API keys are opaque ASCII tokens, and a paste
+    // from a PDF/terminal can smuggle in whitespace, a BOM, or a stray glyph
+    // (e.g. "←" U+2190) that later crashes the HTTP client when used as a header
+    // (fetch: "Cannot convert argument to a ByteString"). Clean at write time so
+    // a dirty paste can't be stored. Empty-after-clean clears the DB override.
+    const clean = value.replace(/[^\x21-\x7E]/g, '');
+    if (!clean) {
       await this.prisma.integrationSetting.delete({ where: { key } }).catch(() => undefined);
       return;
     }
     await this.prisma.integrationSetting.upsert({
       where: { key },
-      create: { key, value: trimmed, updatedById: userId },
-      update: { value: trimmed, updatedById: userId },
+      create: { key, value: clean, updatedById: userId },
+      update: { value: clean, updatedById: userId },
     });
   }
 
