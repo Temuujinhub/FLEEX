@@ -67,12 +67,30 @@ export class SmsService implements OnModuleInit {
         this.logger.warn(`Skipping invalid phone: ${raw}`);
         continue;
       }
-      this.chain = this.chain.then(() => this.sendOne(normalised, body));
+      // Batch path: swallow per-recipient failures (one bad number must not
+      // stop the rest of an alert fanout) — they're logged in sendOne.
+      this.chain = this.chain.then(() => this.sendOne(normalised, body).catch(() => undefined));
     }
     await this.chain;
   }
 
-  private async sendOne(to: string, text: string): Promise<void> {
+  // Test/diagnostic path: sends to exactly one number and THROWS with the real
+  // gateway error (HTTP status + response body) so the System Health "test SMS"
+  // button reports the actual failure instead of a false "delivered". The batch
+  // send() above stays silent on purpose.
+  async sendDirect(rawTo: string, text: string): Promise<{ to: string; messageId?: string }> {
+    if (!this.enabledFlag) {
+      throw new Error('SMS not configured');
+    }
+    const to = normaliseMsisdn(rawTo);
+    if (!to) {
+      throw new Error(`Дугаар буруу байна: "${rawTo}" — 8 оронтой Монгол дугаар оруулна уу (жнь 99XXXXXX)`);
+    }
+    const body = text.length > 160 ? text.slice(0, 157) + '...' : text;
+    return this.sendOne(to, body, /* throwOnError */ true);
+  }
+
+  private async sendOne(to: string, text: string, throwOnError = false): Promise<{ to: string; messageId?: string }> {
     const gap = Date.now() - this.lastSendAt;
     if (gap < THROTTLE_MIN_GAP_MS) {
       await new Promise((r) => setTimeout(r, THROTTLE_MIN_GAP_MS - gap));
@@ -80,23 +98,54 @@ export class SmsService implements OnModuleInit {
     this.lastSendAt = Date.now();
 
     const url = `${MESSAGEPRO_URL}?from=${encodeURIComponent(this.from)}&to=${encodeURIComponent(to)}&text=${encodeURIComponent(text)}`;
+    let res: Response;
+    let raw = '';
     try {
-      const res = await fetch(url, {
+      res = await fetch(url, {
         method: 'GET',
         headers: { 'x-api-key': this.apiKey },
       });
-      if (!res.ok) {
-        this.logger.warn(`SMS send failed to=${to} status=${res.status}`);
-        return;
-      }
-      const json: any = await res.json().catch(() => null);
-      const result = Array.isArray(json) ? json[0] : json;
-      if (result?.Result !== 'SUCCESS') {
-        this.logger.warn(`SMS send rejected to=${to} body=${JSON.stringify(result)}`);
-      }
+      raw = await res.text();
     } catch (err) {
+      const msg = `SMS gateway-д холбогдож чадсангүй: ${(err as Error).message}`;
       this.logger.error(`SMS send error to=${to}: ${(err as Error).message}`);
+      if (throwOnError) throw new Error(msg);
+      return { to };
     }
+
+    if (!res.ok) {
+      // 402=insufficient balance, 403=bad/blocked x-api-key, 404=unknown — per
+      // the MessagePro doc. Surface status + body so the cause is obvious.
+      const msg = `SMS gateway ${res.status} буцаалаа: ${raw || '(хоосон)'}` +
+        (res.status === 402 ? ' — данс/эрхийн үлдэгдэл хүрэлцэхгүй байж болзошгүй'
+         : res.status === 403 ? ' — x-api-key буруу эсвэл блоклогдсон, эсвэл SMS_FROM дугаар зөвшөөрөгдөөгүй'
+         : '');
+      this.logger.warn(`SMS send failed to=${to} status=${res.status} body=${raw}`);
+      if (throwOnError) throw new Error(msg);
+      return { to };
+    }
+
+    // Success HTTP, but the gateway signals per-message result in the body:
+    // [{ "Result": "SUCCESS", "Message ID": xxx }].
+    let result: any = null;
+    try {
+      const json = JSON.parse(raw);
+      result = Array.isArray(json) ? json[0] : json;
+    } catch {
+      // Non-JSON 200 — treat as failure so we don't claim success blindly.
+      const msg = `SMS gateway JSON бус хариу буцаалаа: ${raw || '(хоосон)'}`;
+      this.logger.warn(`SMS non-JSON 200 to=${to} body=${raw}`);
+      if (throwOnError) throw new Error(msg);
+      return { to };
+    }
+
+    if (result?.Result !== 'SUCCESS') {
+      const msg = `SMS gateway татгалзлаа: ${JSON.stringify(result)}`;
+      this.logger.warn(`SMS send rejected to=${to} body=${JSON.stringify(result)}`);
+      if (throwOnError) throw new Error(msg);
+      return { to };
+    }
+    return { to, messageId: result?.['Message ID'] != null ? String(result['Message ID']) : undefined };
   }
 }
 

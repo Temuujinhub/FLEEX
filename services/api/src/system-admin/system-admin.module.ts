@@ -338,13 +338,13 @@ class SystemAdminService {
     const trimmed = to.trim();
     const body = text ?? `Fleex test ${new Date().toISOString().slice(11, 19)} UTC`;
     try {
-      await this.sms.send([trimmed], body);
-      return { ok: true, to: trimmed };
+      // sendDirect throws the real gateway error (status + body) so a failed
+      // delivery is reported honestly instead of a false "sent". It also
+      // returns the gateway Message ID on success.
+      const r = await this.sms.sendDirect(trimmed, body);
+      return { ok: true, to: r.to, messageId: r.messageId ?? null };
     } catch (err: any) {
-      const message = err?.response || err?.code || err?.message || 'Unknown SMS error';
-      throw new BadRequestException(
-        `SMS send failed: ${typeof message === 'string' ? message : JSON.stringify(message)}`,
-      );
+      throw new BadRequestException(err?.message ?? 'Unknown SMS error');
     }
   }
 }

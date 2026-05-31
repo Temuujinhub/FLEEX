@@ -18,6 +18,7 @@ const LandingSettings = lazy(() => import('./pages/LandingSettings').then((m) =>
 const LiveMap = lazy(() => import('./pages/LiveMap').then((m) => ({ default: m.LiveMap })));
 const Dispatch = lazy(() => import('./pages/Dispatch').then((m) => ({ default: m.Dispatch })));
 const Shifts = lazy(() => import('./pages/Shifts').then((m) => ({ default: m.Shifts })));
+const OrgStructure = lazy(() => import('./pages/OrgStructure').then((m) => ({ default: m.OrgStructure })));
 const History = lazy(() => import('./pages/History').then((m) => ({ default: m.History })));
 const Camera = lazy(() => import('./pages/Camera').then((m) => ({ default: m.Camera })));
 const Events = lazy(() => import('./pages/Events').then((m) => ({ default: m.Events })));
@@ -58,6 +59,8 @@ export function App() {
           <Route path="/app/dispatch" element={<Dispatch />} />
           <Route path="/app/devices" element={<Devices />} />
           <Route path="/app/drivers" element={<Drivers />} />
+          <Route path="/app/org" element={<OrgStructure />} />
+          {/* Kept for deep links / bookmarks; the nav points at /app/org. */}
           <Route path="/app/groups" element={<Groups />} />
           <Route path="/app/shifts" element={<Shifts />} />
           <Route path="/app/eco-driving" element={<EcoDriving />} />

@@ -49,10 +49,9 @@ const SECTIONS: {
     // sits last and stays hidden entirely for view-only / driver roles.
     titleKey: 'section.settings',
     items: [
-      { to: '/app/notification-rules', labelKey: 'nav.notificationRules', min: 'FLEET_MANAGER', icon: <IconBell /> },
+      { to: '/app/notification-rules', labelKey: 'nav.notificationRules', min: 'DISPATCHER',   icon: <IconBell /> },
       { to: '/app/health-rules',       labelKey: 'nav.healthRules',       min: 'FLEET_MANAGER', icon: <IconShield /> },
-      { to: '/app/groups',             labelKey: 'nav.groups',            min: 'FLEET_MANAGER', icon: <IconLayers /> },
-      { to: '/app/shifts',             labelKey: 'nav.shifts',            min: 'FLEET_MANAGER', icon: <IconLayers /> },
+      { to: '/app/org',                labelKey: 'nav.org',               min: 'FLEET_MANAGER', icon: <IconLayers /> },
       { to: '/app/users',              labelKey: 'nav.users',             min: 'COMPANY_ADMIN', icon: <IconUsers /> },
       { to: '/app/support',            labelKey: 'nav.support',           min: 'COMPANY_ADMIN', icon: <IconLifeRing /> },
       { to: '/app/audit',              labelKey: 'nav.audit',             min: 'COMPANY_ADMIN', icon: <IconAudit /> },
