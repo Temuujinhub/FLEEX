@@ -95,7 +95,25 @@ export class SmsService implements OnModuleInit {
       );
     }
     this.apiKey = cleanKey;
-    this.from = stripNonAscii(from);
+    // SMS_FROM is always an all-digit lime/sender number (e.g. 72xxxxxx).
+    // .env files don't recognise non-`#` markers as comment delimiters, so
+    // an inline note after the value ("SMS_FROM=72225700  ← PDF дугаар") ends
+    // up parsed into the value. stripNonAscii would still leave any ASCII
+    // letters from the note (e.g. "PDF") attached, producing "72225700PDF"
+    // — which CallPro 404's as an unknown special number. Force digits-only
+    // here so a sloppy .env can't silently break dispatch.
+    const fromDigits = from.replace(/\D/g, '');
+    if (fromDigits.length === 0) {
+      this.logger.warn('SMS_FROM has no digits after sanitising; SMS notifications disabled');
+      return;
+    }
+    if (fromDigits !== from) {
+      this.logger.warn(
+        `SMS_FROM had ${from.length - fromDigits.length} non-digit char(s) (whitespace, comment, glyph) — stripped to "${fromDigits}". ` +
+          'Remove any inline comment after the value in .env (only `#` is a valid comment marker).',
+      );
+    }
+    this.from = fromDigits;
     this.brand = brand ? stripNonAscii(brand) : '';
     this.enabledFlag = true;
     this.logger.log(`SMS provider=callpro from=${this.from}${this.brand ? ` brand=${this.brand}` : ''}`);
