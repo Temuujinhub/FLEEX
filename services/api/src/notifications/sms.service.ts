@@ -30,6 +30,14 @@ interface DailyBalance {
 interface SendResult {
   to: string;
   messageId?: string;
+  // Diagnostic fields populated for the test-SMS path so the UI can show
+  // exactly what URL/body hit the gateway. Never include the x-api-key —
+  // surfacing it to the browser would leak the secret.
+  url?: string;
+  method?: 'GET' | 'POST';
+  requestBody?: Record<string, unknown>;
+  responseStatus?: number;
+  responseBody?: string;
 }
 
 @Injectable()
@@ -87,7 +95,25 @@ export class SmsService implements OnModuleInit {
       );
     }
     this.apiKey = cleanKey;
-    this.from = stripNonAscii(from);
+    // SMS_FROM is always an all-digit lime/sender number (e.g. 72xxxxxx).
+    // .env files don't recognise non-`#` markers as comment delimiters, so
+    // an inline note after the value ("SMS_FROM=72225700  ← PDF дугаар") ends
+    // up parsed into the value. stripNonAscii would still leave any ASCII
+    // letters from the note (e.g. "PDF") attached, producing "72225700PDF"
+    // — which CallPro 404's as an unknown special number. Force digits-only
+    // here so a sloppy .env can't silently break dispatch.
+    const fromDigits = from.replace(/\D/g, '');
+    if (fromDigits.length === 0) {
+      this.logger.warn('SMS_FROM has no digits after sanitising; SMS notifications disabled');
+      return;
+    }
+    if (fromDigits !== from) {
+      this.logger.warn(
+        `SMS_FROM had ${from.length - fromDigits.length} non-digit char(s) (whitespace, comment, glyph) — stripped to "${fromDigits}". ` +
+          'Remove any inline comment after the value in .env (only `#` is a valid comment marker).',
+      );
+    }
+    this.from = fromDigits;
     this.brand = brand ? stripNonAscii(brand) : '';
     this.enabledFlag = true;
     this.logger.log(`SMS provider=callpro from=${this.from}${this.brand ? ` brand=${this.brand}` : ''}`);
@@ -177,11 +203,16 @@ export class SmsService implements OnModuleInit {
 
     const payload: Record<string, string | number> = { from: this.from, to, text };
     if (this.brand) payload.brand = this.brand;
+    const url = `${TEXT_API_BASE}/send`;
+    // Log the URL+body on every send so an operator can grep the API log and
+    // see exactly which request hit the gateway (the x-api-key header itself
+    // never leaves this process — only the URL and JSON body are logged).
+    this.logger.log(`SMS POST ${url} body=${JSON.stringify(payload)}`);
 
     let res: Response;
     let raw = '';
     try {
-      res = await fetch(`${TEXT_API_BASE}/send`, {
+      res = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -191,23 +222,23 @@ export class SmsService implements OnModuleInit {
       });
       raw = await res.text();
     } catch (err) {
-      const msg = `SMS gateway-д холбогдож чадсангүй: ${(err as Error).message}`;
-      this.logger.error(`SMS send error to=${to}: ${(err as Error).message}`);
+      const msg = `SMS gateway-д холбогдож чадсангүй: ${(err as Error).message} (URL: ${url})`;
+      this.logger.error(`SMS send error to=${to} url=${url}: ${(err as Error).message}`);
       if (throwOnError) throw new Error(msg);
-      return { to };
+      return { to, url, method: 'POST', requestBody: payload };
     }
 
     if (!res.ok) {
       // 400 bad params · 401 auth · 402 unpaid · 403 blocked number ·
       // 404 tenant/number not found · 422 validation issues · 500 server.
-      // Surface status + body so the cause is obvious from the System Health
-      // test button without having to tail the server log.
+      // Surface status + URL + body so the cause is obvious from the System
+      // Health test button without having to tail the server log.
       const detail = formatErrorBody(raw);
       const hint = errorHint(res.status);
-      const msg = `SMS gateway ${res.status} буцаалаа: ${detail || '(хоосон)'}${hint}`;
-      this.logger.warn(`SMS send failed to=${to} status=${res.status} body=${raw}`);
+      const msg = `SMS gateway ${res.status} буцаалаа: ${detail || '(хоосон)'}${hint}\nURL: ${url}\nBody: ${JSON.stringify(payload)}`;
+      this.logger.warn(`SMS send failed to=${to} url=${url} status=${res.status} body=${raw}`);
       if (throwOnError) throw new Error(msg);
-      return { to };
+      return { to, url, method: 'POST', requestBody: payload, responseStatus: res.status, responseBody: raw };
     }
 
     // Success envelope: { status: "queued", message_id: "..." }. Anything that
@@ -217,19 +248,27 @@ export class SmsService implements OnModuleInit {
     try {
       result = JSON.parse(raw);
     } catch {
-      const msg = `SMS gateway JSON бус хариу буцаалаа: ${raw || '(хоосон)'}`;
-      this.logger.warn(`SMS non-JSON 200 to=${to} body=${raw}`);
+      const msg = `SMS gateway JSON бус хариу буцаалаа: ${raw || '(хоосон)'} (URL: ${url})`;
+      this.logger.warn(`SMS non-JSON 200 to=${to} url=${url} body=${raw}`);
       if (throwOnError) throw new Error(msg);
-      return { to };
+      return { to, url, method: 'POST', requestBody: payload, responseStatus: res.status, responseBody: raw };
     }
 
     if (!result || result.status !== 'queued') {
-      const msg = `SMS gateway татгалзлаа: ${JSON.stringify(result)}`;
-      this.logger.warn(`SMS send rejected to=${to} body=${JSON.stringify(result)}`);
+      const msg = `SMS gateway татгалзлаа: ${JSON.stringify(result)} (URL: ${url})`;
+      this.logger.warn(`SMS send rejected to=${to} url=${url} body=${JSON.stringify(result)}`);
       if (throwOnError) throw new Error(msg);
-      return { to };
+      return { to, url, method: 'POST', requestBody: payload, responseStatus: res.status, responseBody: raw };
     }
-    return { to, messageId: result.message_id };
+    return {
+      to,
+      messageId: result.message_id,
+      url,
+      method: 'POST',
+      requestBody: payload,
+      responseStatus: res.status,
+      responseBody: raw,
+    };
   }
 }
 
