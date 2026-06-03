@@ -122,9 +122,9 @@ const INTEGRATION_LABEL: Record<Integration['key'], { title: string; hint: strin
     placeholder: 'xkeysib-...',
   },
   sms_api_key: {
-    title: 'MessagePro / CallPro SMS key',
-    hint: 'CallPro-аас өгсөн x-api-key. SMS_FROM-той хамт ажиллана.',
-    placeholder: 'mp-...',
+    title: 'CallPro Text API key',
+    hint: 'api-text.callpro.mn-аас өгсөн x-api-key. SMS_FROM (lime number, жнь 72xxxxxx)-той хамт ажиллана.',
+    placeholder: 'callpro-...',
   },
 };
 

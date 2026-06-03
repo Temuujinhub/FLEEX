@@ -109,7 +109,7 @@ class SystemAdminService {
     };
     out.sms = {
       ok: this.sms.enabled(),
-      detail: this.sms.enabled() ? `${this.config.get('SMS_PROVIDER')} ${this.config.get('SMS_FROM')}` : 'not configured',
+      detail: this.sms.enabled() ? `callpro ${this.config.get('SMS_FROM')}` : 'not configured',
     };
 
     // App services via their /healthz on the internal compose network — the
@@ -333,7 +333,7 @@ class SystemAdminService {
 
   async sendTestSms(to: string, text?: string) {
     if (!this.sms.enabled()) {
-      throw new BadRequestException('SMS not configured. Set SMS_PROVIDER/SMS_API_KEY/SMS_FROM in .env');
+      throw new BadRequestException('SMS not configured. Set SMS_PROVIDER=callpro plus SMS_API_KEY / SMS_FROM in .env (or paste the key in System Health).');
     }
     const trimmed = to.trim();
     const body = text ?? `Fleex test ${new Date().toISOString().slice(11, 19)} UTC`;
