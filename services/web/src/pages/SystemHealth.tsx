@@ -123,7 +123,7 @@ const INTEGRATION_LABEL: Record<Integration['key'], { title: string; hint: strin
   },
   sms_api_key: {
     title: 'CallPro Text API key',
-    hint: 'api-text.callpro.mn-аас өгсөн x-api-key. SMS_FROM (lime number, жнь 72xxxxxx)-той хамт ажиллана.',
+    hint: 'api-text.callpro.mn-аас өгсөн x-api-key. SMS_FROM (lime number, жнь 72xxxxxx)-той хамт ажиллана. Шинэ endpoint 404 буцаавал .env дотор SMS_API_BASE=https://api.messagepro.mn гэж хуучин gateway руу буцааж болно.',
     placeholder: 'callpro-...',
   },
 };

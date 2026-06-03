@@ -109,7 +109,7 @@ class SystemAdminService {
     };
     out.sms = {
       ok: this.sms.enabled(),
-      detail: this.sms.enabled() ? `callpro ${this.config.get('SMS_FROM')}` : 'not configured',
+      detail: this.sms.enabled() ? this.sms.describe() : 'not configured',
     };
 
     // App services via their /healthz on the internal compose network — the
