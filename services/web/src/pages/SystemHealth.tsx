@@ -297,7 +297,15 @@ function TestSendCard({ defaultEmail }: { defaultEmail?: string }) {
   const [email, setEmail] = useState(defaultEmail ?? '');
   const [phone, setPhone] = useState('');
   const [emailMsg, setEmailMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
-  const [smsMsg, setSmsMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [smsMsg, setSmsMsg] = useState<{
+    type: 'ok' | 'err';
+    text: string;
+    url?: string;
+    method?: string;
+    requestBody?: unknown;
+    responseStatus?: number;
+    responseBody?: string;
+  } | null>(null);
 
   const testEmail = useMutation({
     mutationFn: () => api.post('/system-admin/test-email', { to: email }).then((r) => r.data),
@@ -312,9 +320,26 @@ function TestSendCard({ defaultEmail }: { defaultEmail?: string }) {
       setSmsMsg({
         type: 'ok',
         text: `Илгээгдсэн: ${phone}${d?.messageId ? ` (Message ID: ${d.messageId})` : ''}. Утсаа шалгана уу.`,
+        url: d?.url ?? undefined,
+        method: d?.method ?? undefined,
+        requestBody: d?.requestBody ?? undefined,
+        responseStatus: d?.responseStatus ?? undefined,
+        responseBody: d?.responseBody ?? undefined,
       }),
-    onError: (err: any) =>
-      setSmsMsg({ type: 'err', text: err.response?.data?.message ?? err.message ?? 'Алдаа' }),
+    onError: (err: any) => {
+      const data = err.response?.data;
+      setSmsMsg({
+        type: 'err',
+        text: data?.message ?? err.message ?? 'Алдаа',
+        // BadRequestException doesn't carry the structured URL/body fields
+        // when it's serialised as { message }, so we surface whatever the
+        // API echoes back; the URL is also embedded in the error message
+        // text itself (see sms.service.ts).
+        url: data?.url,
+        responseStatus: data?.responseStatus,
+        responseBody: data?.responseBody,
+      });
+    },
   });
 
   return (
@@ -378,11 +403,42 @@ function TestSendCard({ defaultEmail }: { defaultEmail?: string }) {
           </div>
           {smsMsg && (
             <div
-              className={`mt-2 px-3 py-2 rounded-md text-xs ${
+              className={`mt-2 px-3 py-2 rounded-md text-xs space-y-1 ${
                 smsMsg.type === 'ok' ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'
               }`}
             >
-              {smsMsg.text}
+              <div className="whitespace-pre-wrap">{smsMsg.text}</div>
+              {(smsMsg.url || smsMsg.requestBody || smsMsg.responseBody) && (
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-[11px] opacity-80">Илгээсэн хүсэлтийн дэлгэрэнгүй</summary>
+                  <div className="mt-1 space-y-1 font-mono text-[11px] break-all">
+                    {smsMsg.url && (
+                      <div>
+                        <span className="opacity-60">{smsMsg.method ?? 'POST'} </span>
+                        {smsMsg.url}
+                      </div>
+                    )}
+                    {smsMsg.requestBody !== undefined && smsMsg.requestBody !== null && (
+                      <div>
+                        <span className="opacity-60">Body: </span>
+                        {JSON.stringify(smsMsg.requestBody)}
+                      </div>
+                    )}
+                    {smsMsg.responseStatus !== undefined && (
+                      <div>
+                        <span className="opacity-60">Status: </span>
+                        {smsMsg.responseStatus}
+                      </div>
+                    )}
+                    {smsMsg.responseBody && (
+                      <div>
+                        <span className="opacity-60">Response: </span>
+                        {smsMsg.responseBody}
+                      </div>
+                    )}
+                  </div>
+                </details>
+              )}
             </div>
           )}
         </div>

@@ -340,9 +340,19 @@ class SystemAdminService {
     try {
       // sendDirect throws the real gateway error (status + body) so a failed
       // delivery is reported honestly instead of a false "sent". It also
-      // returns the gateway Message ID on success.
+      // returns the gateway Message ID and the request URL/body so the UI
+      // can show exactly which endpoint was hit (handy for diagnosing 404s).
       const r = await this.sms.sendDirect(trimmed, body);
-      return { ok: true, to: r.to, messageId: r.messageId ?? null };
+      return {
+        ok: true,
+        to: r.to,
+        messageId: r.messageId ?? null,
+        url: r.url ?? null,
+        method: r.method ?? null,
+        requestBody: r.requestBody ?? null,
+        responseStatus: r.responseStatus ?? null,
+        responseBody: r.responseBody ?? null,
+      };
     } catch (err: any) {
       throw new BadRequestException(err?.message ?? 'Unknown SMS error');
     }
