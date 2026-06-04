@@ -102,6 +102,30 @@ const TEMPLATES: Template[] = [
 
 const CATS = ['Жолоодлогын тайлан', 'Аюулгүй байдал', 'Ашиглалт', 'Төхөөрөмж'];
 
+// Authenticated file download. If the server returned a Content-Disposition
+// header with a filename, we use that (the template export endpoint does);
+// otherwise we fall back to the caller-supplied default.
+function downloadFromUrl(url: string, fallbackName?: string) {
+  fetch(url, { headers: { Authorization: `Bearer ${getToken()}` } })
+    .then(async (r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const cd = r.headers.get('content-disposition') ?? '';
+      const m = /filename="?([^"]+)"?/i.exec(cd);
+      const filename = m?.[1] ?? fallbackName ?? 'report';
+      return r.blob().then((b) => ({ blob: b, filename }));
+    })
+    .then(({ blob, filename }) => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+    })
+    .catch((err) => {
+      console.error('Report download failed:', err);
+      alert('Тайланг татаж чадсангүй: ' + (err as Error).message);
+    });
+}
+
 // Date range presets.
 const PRESETS: { id: string; label: string; range: () => [Date, Date] }[] = [
   { id: 'today',     label: 'Өнөөдөр', range: () => [startOfDay(new Date()), new Date()] },
@@ -183,27 +207,16 @@ export function Reports() {
         `?from=${new Date(generated.from).toISOString()}&to=${new Date(generated.to).toISOString()}` +
         `&tariff=${encodeURIComponent(generated.tariff)}` +
         (generated.shiftId ? `&shiftId=${encodeURIComponent(generated.shiftId)}` : '');
-      fetch(url, { headers: { Authorization: `Bearer ${getToken()}` } })
-        .then((r) => r.blob())
-        .then((b) => {
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(b);
-          a.download = `idle-billing-${generated.from}_${generated.to}.xlsx`;
-          a.click();
-        });
+      downloadFromUrl(url, `idle-billing-${generated.from}_${generated.to}.xlsx`);
       return;
     }
+    // Template-aware export. The backend picks the right shaper + filename
+    // based on tplId — engine-hours-{plate}-{from}_{to}.xlsx for "Мото
+    // цаг", ignition-{plate}-...xlsx for the ignition event report, etc.
     const url =
-      `${API_BASE}/reports/trip/${generated.deviceId}/${fmt}` +
+      `${API_BASE}/reports/template/${generated.tplId}/${generated.deviceId}/${fmt}` +
       `?from=${new Date(generated.from).toISOString()}&to=${new Date(generated.to).toISOString()}`;
-    fetch(url, { headers: { Authorization: `Bearer ${getToken()}` } })
-      .then((r) => r.blob())
-      .then((b) => {
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(b);
-        a.download = `${tpl.id}-${generated.deviceId}.${fmt === 'excel' ? 'xlsx' : 'pdf'}`;
-        a.click();
-      });
+    downloadFromUrl(url);
   };
 
   return (
@@ -394,8 +407,14 @@ export function Reports() {
             </Field>
 
             {tpl.kind === 'coming-soon' && (
-              <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
-                Энэ тайлан удахгүй гарна. CAN-bus / fuel-probe мэдрэгчтэй машин дээр идэвхждэг.
+              <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800 space-y-1">
+                <div><strong>Шатхууны тайлан хараахан идэвхэжээгүй.</strong></div>
+                <div>
+                  Энэ тайланг гаргахын тулд машинд <strong>CAN-bus унших адаптер</strong> эсвэл
+                  <strong> fuel-probe мэдрэгч</strong> суурилуулж, GPS төхөөрөмж нь түвшний өгөгдлийг
+                  ingestor руу дамжуулдаг байх шаардлагатай. Уг интеграцийг 2026 Q3 roadmap дотор
+                  төлөвлөсөн (CAN-bus PID listener).
+                </div>
               </div>
             )}
           </div>
@@ -482,24 +501,55 @@ function ReportResult(props: {
   deviceName: string;
 }) {
   const isEvents = props.tpl.kind === 'events';
+  const isEngine = props.tpl.kind === 'trip-engine';
+  const isTrip = props.tpl.kind === 'trip';
+  const isIdle = props.tpl.kind === 'trip-idle';
+  const fromIso = new Date(props.from).toISOString();
+  const toIso = new Date(props.to).toISOString();
+
+  // Trip endpoint still backs the speed chart for trip/idle/engine — the
+  // chart needs raw points to draw cliff edges, the dedicated builder
+  // endpoints return shaped session/segment lists.
   const trip = useQuery({
     queryKey: ['reports', 'trip', props.deviceId, props.from, props.to],
     queryFn: () =>
-      api
-        .get(`/reports/trip/${props.deviceId}?from=${new Date(props.from).toISOString()}&to=${new Date(props.to).toISOString()}`)
-        .then((r) => r.data),
+      api.get(`/reports/trip/${props.deviceId}?from=${fromIso}&to=${toIso}`).then((r) => r.data),
     enabled: !isEvents,
+  });
+  const engine = useQuery({
+    queryKey: ['reports', 'engine-sessions', props.deviceId, props.from, props.to],
+    queryFn: () =>
+      api.get(`/reports/engine-sessions/${props.deviceId}?from=${fromIso}&to=${toIso}`).then((r) => r.data),
+    enabled: isEngine,
+  });
+  const segments = useQuery({
+    queryKey: ['reports', 'trip-segments', props.deviceId, props.from, props.to],
+    queryFn: () =>
+      api.get(`/reports/trip-segments/${props.deviceId}?from=${fromIso}&to=${toIso}`).then((r) => r.data),
+    enabled: isTrip,
+  });
+  const idle = useQuery({
+    queryKey: ['reports', 'idle-periods', props.deviceId, props.from, props.to],
+    queryFn: () =>
+      api.get(`/reports/idle-periods/${props.deviceId}?from=${fromIso}&to=${toIso}`).then((r) => r.data),
+    enabled: isIdle,
   });
   const events = useQuery({
     queryKey: ['reports', 'events', props.deviceId, props.from, props.to],
     queryFn: () =>
-      api
-        .get(`/reports/events/${props.deviceId}?from=${new Date(props.from).toISOString()}&to=${new Date(props.to).toISOString()}`)
-        .then((r) => r.data),
+      api.get(`/reports/events/${props.deviceId}?from=${fromIso}&to=${toIso}`).then((r) => r.data),
     enabled: isEvents,
   });
 
-  const loading = isEvents ? events.isLoading : trip.isLoading;
+  const loading = isEvents
+    ? events.isLoading
+    : isEngine
+      ? engine.isLoading || trip.isLoading
+      : isTrip
+        ? segments.isLoading || trip.isLoading
+        : isIdle
+          ? idle.isLoading || trip.isLoading
+          : trip.isLoading;
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -527,8 +577,14 @@ function ReportResult(props: {
             rows={events.data ?? []}
           />
         )}
-        {!loading && !isEvents && trip.data && (
-          <TripResult kind={props.tpl.kind as 'trip' | 'trip-idle' | 'trip-engine'} data={trip.data} />
+        {!loading && isEngine && engine.data && (
+          <EngineResult engine={engine.data} chartPoints={trip.data?.points ?? []} />
+        )}
+        {!loading && isTrip && segments.data && (
+          <TripsResult segments={segments.data} chartPoints={trip.data?.points ?? []} />
+        )}
+        {!loading && isIdle && idle.data && (
+          <IdleResult idle={idle.data} />
         )}
       </div>
     </div>
@@ -549,68 +605,184 @@ function SkeletonResult() {
   );
 }
 
-function TripResult({ kind, data }: { kind: 'trip' | 'trip-idle' | 'trip-engine'; data: any }) {
-  const kpis = (() => {
-    if (kind === 'trip-idle') {
-      return [
-        { label: 'Сул зогсолтын цаг', value: hours(data.totalIdleHours),  accent: 'amber' as const },
-        { label: 'Хөдөлгөөнтэй цаг',  value: hours(data.totalDrivingHours), accent: 'emerald' as const },
-        { label: 'Idle / Total %',     value: pct(data.totalIdleHours, data.totalIdleHours + data.totalDrivingHours), accent: 'slate' as const },
-        { label: 'Цэгийн тоо',         value: fmtNum(data.sampleCount),     accent: 'brand' as const },
-      ];
-    }
-    if (kind === 'trip-engine') {
-      return [
-        { label: 'Мото цаг',          value: hours(data.totalDrivingHours + data.totalIdleHours), accent: 'emerald' as const },
-        { label: 'Жолоодлогын цаг',   value: hours(data.totalDrivingHours), accent: 'brand'   as const },
-        { label: 'Сул зогсолт',       value: hours(data.totalIdleHours),    accent: 'amber'   as const },
-        { label: 'Үр ашиг',           value: pct(data.totalDrivingHours, data.totalDrivingHours + data.totalIdleHours), accent: 'slate' as const },
-      ];
-    }
-    return [
-      { label: 'Нийт зам',         value: km(data.totalDistanceKm),       accent: 'brand'   as const },
-      { label: 'Жолоодлогын цаг',  value: hours(data.totalDrivingHours),  accent: 'emerald' as const },
-      { label: 'Сул зогсолт',      value: hours(data.totalIdleHours),     accent: 'amber'   as const },
-      { label: 'Дээд хурд',        value: `${(data.maxSpeed ?? 0).toFixed(1)} км/ц`, accent: 'rose' as const },
-    ];
-  })();
+// ── Engine sessions (Мото цаг) ────────────────────────────────
+function EngineResult({ engine, chartPoints }: { engine: any; chartPoints: any[] }) {
+  const t = engine.totals ?? {};
+  const sessions: any[] = engine.sessions ?? [];
+  const efficiencyPct = t.totalEngineHours > 0
+    ? Math.round((t.totalDrivingHours / t.totalEngineHours) * 100)
+    : 0;
 
   return (
     <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {kpis.map((k) => <Kpi key={k.label} {...k} />)}
+        <Kpi label="Мото цаг"        value={hours(t.totalEngineHours)}  accent="emerald" />
+        <Kpi label="Хөдөлгөөнд"      value={hours(t.totalDrivingHours)} accent="brand" />
+        <Kpi label="Сул зогсолт"     value={hours(t.totalIdleHours)}    accent="amber" />
+        <Kpi label="Үр ашиг"         value={`${efficiencyPct}%`}        accent="slate" />
       </div>
+      {engine.detection === 'motion' && (
+        <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+          Анхаар: энэ төхөөрөмж <strong>ignition signal илгээгээгүй</strong> учир session-ийг
+          хөдөлгөөн дээр (speed &gt; 3 км/ц) тулгуурлан тооцлоо. Хөдөлгүүр асаалттай боловч хөдөлсөнгүй
+          үе сесшнд орохгүй.
+        </div>
+      )}
 
       <Panel title="Хурдны түүх" subtitle="Цэг тутмын хурд">
-        <SpeedChart points={data.points ?? []} />
+        <SpeedChart points={chartPoints} />
       </Panel>
 
-      <Panel title="Зүсэлт цэгүүд" subtitle={`Эхний ${Math.min(50, data.points?.length ?? 0)} цэг`}>
+      <Panel
+        title="Engine sessions"
+        subtitle={sessions.length === 0
+          ? 'Сонгосон хугацаанд session алга'
+          : `Нийт ${sessions.length} session — Excel-д бүтнээр ордог`}
+      >
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-xs uppercase tracking-widest text-slate-500 border-b border-slate-100">
               <tr>
-                <th className="text-left px-3 py-2">Огноо</th>
-                <th className="text-left px-3 py-2">Өргөрөг</th>
-                <th className="text-left px-3 py-2">Уртраг</th>
-                <th className="text-right px-3 py-2">Хурд</th>
+                <th className="text-left px-3 py-2">#</th>
+                <th className="text-left px-3 py-2">Эхлэлт</th>
+                <th className="text-left px-3 py-2">Дуусгавар</th>
+                <th className="text-right px-3 py-2">Үргэлжлэл</th>
+                <th className="text-right px-3 py-2">Хөдөлгөөн</th>
+                <th className="text-right px-3 py-2">Сул</th>
+                <th className="text-right px-3 py-2">Зам</th>
+                <th className="text-right px-3 py-2">Max км/ц</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {(data.points ?? []).slice(0, 50).map((p: any, i: number) => (
-                <tr key={i} className="hover:bg-slate-50">
-                  <td className="px-3 py-2">{new Date(p.time).toLocaleString('mn-MN')}</td>
-                  <td className="px-3 py-2 tabular-nums">{p.lat.toFixed(5)}</td>
-                  <td className="px-3 py-2 tabular-nums">{p.lng.toFixed(5)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{p.speed.toFixed(1)}</td>
+              {sessions.map((s) => (
+                <tr key={s.sessionNum} className="hover:bg-slate-50">
+                  <td className="px-3 py-2 tabular-nums">{s.sessionNum}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">{new Date(s.startAt).toLocaleString('mn-MN')}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">{new Date(s.endAt).toLocaleString('mn-MN')}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{fmtMin(s.durationMin)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{fmtMin(s.drivingMin)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{fmtMin(s.idleMin)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{s.distanceKm.toFixed(1)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{s.maxSpeed.toFixed(0)}</td>
                 </tr>
               ))}
-              {(data.points ?? []).length === 0 && (
-                <tr>
-                  <td colSpan={4} className="px-3 py-10 text-center text-sm text-slate-400">
-                    Сонгосон хугацаанд өгөгдөл алга
+              {sessions.length === 0 && (
+                <tr><td colSpan={8} className="px-3 py-10 text-center text-sm text-slate-400">Хоосон</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </>
+  );
+}
+
+// ── Trip segments (Зорчилт) ──────────────────────────────────
+function TripsResult({ segments, chartPoints }: { segments: any; chartPoints: any[] }) {
+  const t = segments.totals ?? {};
+  const rows: any[] = segments.segments ?? [];
+  return (
+    <>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Kpi label="Нийт зам"        value={km(t.distanceKm)}            accent="brand" />
+        <Kpi label="Жолоодлогын цаг" value={hours((t.durationMin ?? 0) / 60)} accent="emerald" />
+        <Kpi label="Дундаж хурд"     value={`${(t.avgSpeed ?? 0).toFixed(1)} км/ц`} accent="slate" />
+        <Kpi label="Дээд хурд"       value={`${(t.maxSpeed ?? 0).toFixed(1)} км/ц`} accent="rose" />
+      </div>
+
+      <Panel title="Хурдны түүх" subtitle="Цэг тутмын хурд">
+        <SpeedChart points={chartPoints} />
+      </Panel>
+
+      <Panel
+        title="Trip жагсаалт"
+        subtitle={rows.length === 0 ? 'Сонгосон хугацаанд trip алга' : `Нийт ${rows.length} trip`}
+      >
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-xs uppercase tracking-widest text-slate-500 border-b border-slate-100">
+              <tr>
+                <th className="text-left px-3 py-2">#</th>
+                <th className="text-left px-3 py-2">Эхлэлт</th>
+                <th className="text-left px-3 py-2">Дуусгавар</th>
+                <th className="text-right px-3 py-2">Үргэлжлэл</th>
+                <th className="text-right px-3 py-2">Зам (км)</th>
+                <th className="text-right px-3 py-2">Avg км/ц</th>
+                <th className="text-right px-3 py-2">Max км/ц</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((s) => (
+                <tr key={s.segmentNum} className="hover:bg-slate-50">
+                  <td className="px-3 py-2 tabular-nums">{s.segmentNum}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">{new Date(s.startAt).toLocaleString('mn-MN')}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">{new Date(s.endAt).toLocaleString('mn-MN')}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{fmtMin(s.durationMin)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{s.distanceKm.toFixed(2)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{s.avgSpeedKmh.toFixed(1)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{s.maxSpeedKmh.toFixed(0)}</td>
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr><td colSpan={7} className="px-3 py-10 text-center text-sm text-slate-400">Хоосон</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </>
+  );
+}
+
+// ── Idle periods (Зогсолт) ───────────────────────────────────
+function IdleResult({ idle }: { idle: any }) {
+  const t = idle.totals ?? {};
+  const rows: any[] = idle.periods ?? [];
+  const longest = rows.length === 0 ? 0 : Math.max(...rows.map((p: any) => p.durationMin));
+  return (
+    <>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Kpi label="Нийт сул зогсолт" value={hours(t.totalIdleHours)} accent="amber" />
+        <Kpi label="Зогсолтын тоо"    value={fmtNum(t.periodCount ?? 0)} accent="brand" />
+        <Kpi label="Хамгийн урт"      value={fmtMin(longest)} accent="rose" />
+        <Kpi label="Дундаж урт"       value={rows.length > 0 ? fmtMin(((t.totalIdleHours ?? 0) * 60) / rows.length) : '—'} accent="slate" />
+      </div>
+
+      <Panel
+        title="Зогсолтын жагсаалт"
+        subtitle={rows.length === 0 ? 'Сонгосон хугацаанд зогсолт алга' : `Нийт ${rows.length} зогсолт`}
+      >
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-xs uppercase tracking-widest text-slate-500 border-b border-slate-100">
+              <tr>
+                <th className="text-left px-3 py-2">#</th>
+                <th className="text-left px-3 py-2">Эхлэлт</th>
+                <th className="text-left px-3 py-2">Дуусгавар</th>
+                <th className="text-right px-3 py-2">Үргэлжлэл</th>
+                <th className="text-right px-3 py-2">Lat</th>
+                <th className="text-right px-3 py-2">Lng</th>
+                <th className="text-left px-3 py-2">Шалтгаан</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((p) => (
+                <tr key={p.periodNum} className="hover:bg-slate-50">
+                  <td className="px-3 py-2 tabular-nums">{p.periodNum}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">{new Date(p.startAt).toLocaleString('mn-MN')}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">{new Date(p.endAt).toLocaleString('mn-MN')}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{fmtMin(p.durationMin)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{p.lat.toFixed(5)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{p.lng.toFixed(5)}</td>
+                  <td className="px-3 py-2 text-xs text-slate-500">
+                    {p.reason === 'ENGINE_ON_NO_MOTION'
+                      ? 'Хөдөлгүүр асаалттай хөдөлгөөнгүй'
+                      : 'Trip-үүдийн хооронд зогссон'}
                   </td>
                 </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr><td colSpan={7} className="px-3 py-10 text-center text-sm text-slate-400">Хоосон</td></tr>
               )}
             </tbody>
           </table>
@@ -791,6 +963,14 @@ function toLocalInput(d: Date) {
 function hours(h: number) { return `${(h ?? 0).toFixed(1)} ц`; }
 function km(k: number)    { return `${(k ?? 0).toFixed(1)} км`; }
 function fmtNum(n: number) { return new Intl.NumberFormat('mn-MN').format(n ?? 0); }
+function fmtMin(min: number) {
+  // Pretty-print a minutes count as "Hh Mm" or "Mm" for short stints. Used
+  // by the engine-sessions / trip-segments / idle-periods tables — those
+  // builders return durations in fractional minutes.
+  const m = Math.max(0, Math.round(min ?? 0));
+  if (m < 60) return `${m} мин`;
+  return `${Math.floor(m / 60)} ц ${m % 60} мин`;
+}
 function pct(part: number, whole: number) {
   if (!whole) return '0%';
   return `${Math.round((part / whole) * 100)}%`;

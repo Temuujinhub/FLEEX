@@ -3,7 +3,7 @@ import { Response } from 'express';
 import { Role } from '@prisma/client';
 import { Roles } from '../auth/roles.decorator';
 import { Audit } from '../audit/audit.decorator';
-import { ReportsService } from './reports.service';
+import { ReportsService, REPORT_TEMPLATES, isReportTemplateId, type ReportTemplateId } from './reports.service';
 import { ScorecardCronService } from './scorecard-cron.service';
 
 // Reports expose fleet-wide analytics, personal driver performance and
@@ -51,6 +51,87 @@ export class ReportsController {
   events(@Param('deviceId') id: string, @Query('from') from: string, @Query('to') to: string, @Req() req: any) {
     const r = this.range(from, to);
     return this.svc.eventsReport(id, r.from, r.to, req.user);
+  }
+
+  // ── Per-template data endpoints (new) ──────────────────────────
+  // The UI uses these to render template-specific result panels:
+  // engine sessions (Мото цаг), trip segments (Зорчилт), idle periods
+  // (Зогсолт). Generic positions data still flows through /reports/trip
+  // for the chart and the legacy export route.
+
+  @Get('engine-sessions/:deviceId')
+  @Audit('report.engine_sessions', { resourceType: 'device', resourceIdParam: 'deviceId' })
+  engineSessions(@Param('deviceId') id: string, @Query('from') from: string, @Query('to') to: string, @Req() req: any) {
+    const r = this.range(from, to);
+    return this.svc.engineSessionsReport(id, r.from, r.to, req.user);
+  }
+
+  @Get('trip-segments/:deviceId')
+  @Audit('report.trip_segments', { resourceType: 'device', resourceIdParam: 'deviceId' })
+  tripSegments(@Param('deviceId') id: string, @Query('from') from: string, @Query('to') to: string, @Req() req: any) {
+    const r = this.range(from, to);
+    return this.svc.tripSegmentsReport(id, r.from, r.to, req.user);
+  }
+
+  @Get('idle-periods/:deviceId')
+  @Audit('report.idle_periods', { resourceType: 'device', resourceIdParam: 'deviceId' })
+  idlePeriods(@Param('deviceId') id: string, @Query('from') from: string, @Query('to') to: string, @Req() req: any) {
+    const r = this.range(from, to);
+    return this.svc.idlePeriodsReport(id, r.from, r.to, req.user);
+  }
+
+  // Template-aware export. Replaces the old per-format /reports/trip/...
+  // endpoints for UI-driven downloads — each template now gets a workbook
+  // shaped to match what the user saw on screen (engine sessions, trip
+  // segments, idle periods, filtered events) with a filename like
+  // engine-hours-2804UBYa-2026-05-28_2026-06-04.xlsx.
+  @Get('template/:tplId/:deviceId/:format')
+  @Audit('report.template_export', { resourceType: 'device', resourceIdParam: 'deviceId' })
+  async templateExport(
+    @Param('tplId') tplId: string,
+    @Param('deviceId') deviceId: string,
+    @Param('format') format: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    if (!isReportTemplateId(tplId)) {
+      throw new BadRequestException(`Unknown report template: ${tplId}`);
+    }
+    if (format !== 'excel' && format !== 'pdf') {
+      throw new BadRequestException(`Unknown format: ${format} (use excel|pdf)`);
+    }
+    const r = this.range(from, to);
+    const { buffer, filename } = await this.svc.exportTemplate(
+      tplId as ReportTemplateId,
+      deviceId,
+      r.from,
+      r.to,
+      format,
+      req.user,
+    );
+    res.setHeader(
+      'Content-Type',
+      format === 'excel'
+        ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        : 'application/pdf',
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  }
+
+  // Template catalogue — surfaces filter/title metadata to the frontend so
+  // the UI doesn't have to duplicate the filter arrays. Kept open to any
+  // signed-in reports user; no sensitive data.
+  @Get('templates')
+  templates() {
+    return Object.entries(REPORT_TEMPLATES).map(([id, t]) => ({
+      id,
+      kind: t.kind,
+      title: t.title,
+      filter: (t as any).filter ?? null,
+    }));
   }
 
   // Eco-driving leaderboard. Weights are supplied as repeated `w=TYPE:NN`

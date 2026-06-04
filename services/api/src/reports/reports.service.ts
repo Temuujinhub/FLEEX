@@ -4,6 +4,61 @@ import * as ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import { Readable } from 'stream';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  buildEngineSessions,
+  buildIdlePeriods,
+  buildTripSegments,
+  type RawPosition,
+} from './report-builders';
+import {
+  engineSessionsExcel,
+  engineSessionsPdf,
+  eventsExcel,
+  eventsPdf,
+  idlePeriodsExcel,
+  idlePeriodsPdf,
+  tripSegmentsExcel,
+  tripSegmentsPdf,
+  type DeviceHeader,
+  type ReportRange,
+} from './report-exporters';
+
+// Per-template metadata used by the dispatcher: which event types each
+// event-driven report filters to, and what title/filename it exports under.
+// Trip/idle/engine/idle-billing templates are handled separately because
+// they reshape positions rather than filter events.
+export const REPORT_TEMPLATES = {
+  // Trip / engine family — all hit the positions hypertable and feed
+  // builders in report-builders.ts.
+  trip:      { kind: 'trip',     title: 'Зорчилт',                    fileStem: 'trips' },
+  idle:      { kind: 'idle',     title: 'Зогсолт',                    fileStem: 'idle-periods' },
+  engine:    { kind: 'engine',   title: 'Мото цаг',                   fileStem: 'engine-hours' },
+  // Event family — same Event-table query, different filter.
+  driver:    { kind: 'events',   title: 'Жолоочийн зан төлөв',        fileStem: 'driver-behaviour',
+               filter: ['HARSH_ACCEL', 'HARSH_BRAKE', 'HARSH_CORNER'] },
+  overspeed: { kind: 'events',   title: 'Хурд хэтрэлт',               fileStem: 'overspeed',
+               filter: ['OVERSPEED'] },
+  panic:     { kind: 'events',   title: 'Panic дохио',                fileStem: 'panic',
+               filter: ['PANIC'] },
+  geofence:  { kind: 'events',   title: 'Хязгаар бүс зөрчил',         fileStem: 'geofence',
+               filter: ['GEOFENCE_ENTER', 'GEOFENCE_EXIT'] },
+  safety:    { kind: 'events',   title: 'Аюулгүй байдлын тойм',       fileStem: 'safety',
+               filter: undefined as string[] | undefined },
+  ignition:  { kind: 'events',   title: 'Хөдөлгүүр асаалт/унтраалт',  fileStem: 'ignition',
+               filter: ['IGNITION_ON', 'IGNITION_OFF'] },
+  offline:   { kind: 'events',   title: 'Сүлжээ тасалдалт',           fileStem: 'offline',
+               filter: ['DEVICE_OFFLINE', 'DEVICE_ONLINE'] },
+  power:     { kind: 'events',   title: 'Цахилгаан · батарей',        fileStem: 'power',
+               filter: ['POWER_CUT', 'LOW_BATTERY'] },
+  tamper:    { kind: 'events',   title: 'Хөндөлт (Tamper)',           fileStem: 'tamper',
+               filter: ['TAMPER'] },
+} as const;
+
+export type ReportTemplateId = keyof typeof REPORT_TEMPLATES;
+
+export function isReportTemplateId(s: string): s is ReportTemplateId {
+  return Object.prototype.hasOwnProperty.call(REPORT_TEMPLATES, s);
+}
 
 // All report queries hit the positions hypertable directly. Because reports
 // can span months, we never load the entire range into memory — we stream
@@ -19,9 +74,10 @@ export class ReportsService {
     return dev;
   }
 
-  async tripReport(deviceId: string, from: Date, to: Date, actor: any) {
-    const dev = await this.ensureDeviceAccess(deviceId, actor);
-    const rows = await this.prisma.$queryRaw<any[]>`
+  // Shared raw-positions fetch used by every position-based report. Returns
+  // rows with the windowed meters / dt_sec columns the builders expect.
+  private async fetchPositionsWindow(deviceId: string, from: Date, to: Date): Promise<RawPosition[]> {
+    const rows = await this.prisma.$queryRaw<RawPosition[]>`
       WITH points AS (
         SELECT time, latitude, longitude, speed, ignition,
                LAG(latitude) OVER (ORDER BY time)  AS prev_lat,
@@ -41,6 +97,22 @@ export class ReportsService {
       FROM points
       ORDER BY time ASC;
     `;
+    // Prisma returns Decimal for some numeric columns — coerce to plain
+    // JS numbers so the builders' arithmetic doesn't accidentally do
+    // string concatenation.
+    return rows.map((r) => ({
+      ...r,
+      latitude: Number(r.latitude),
+      longitude: Number(r.longitude),
+      speed: r.speed == null ? null : Number(r.speed),
+      meters: r.meters == null ? 0 : Number(r.meters),
+      dt_sec: r.dt_sec == null ? 0 : Number(r.dt_sec),
+    }));
+  }
+
+  async tripReport(deviceId: string, from: Date, to: Date, actor: any) {
+    const dev = await this.ensureDeviceAccess(deviceId, actor);
+    const rows = await this.fetchPositionsWindow(deviceId, from, to);
     let totalMeters = 0;
     let totalMoveSec = 0;
     let totalIdleSec = 0;
@@ -75,12 +147,130 @@ export class ReportsService {
     };
   }
 
-  async eventsReport(deviceId: string, from: Date, to: Date, actor: any) {
+  // Engine-hours report: returns one row per ignition-on→off cycle (or per
+  // motion-detected session when no ignition signal exists). Used by the
+  // "Мото цаг" template's UI table and Excel/PDF export.
+  async engineSessionsReport(deviceId: string, from: Date, to: Date, actor: any) {
+    const dev = await this.ensureDeviceAccess(deviceId, actor);
+    const rows = await this.fetchPositionsWindow(deviceId, from, to);
+    const sessions = buildEngineSessions(rows);
+    const totalEngineHours = sessions.reduce((s, x) => s + x.durationMin / 60, 0);
+    const totalDrivingHours = sessions.reduce((s, x) => s + x.drivingMin / 60, 0);
+    const totalIdleHours = sessions.reduce((s, x) => s + x.idleMin / 60, 0);
+    const distanceKm = sessions.reduce((s, x) => s + x.distanceKm, 0);
+    const maxSpeed = sessions.reduce((m, x) => Math.max(m, x.maxSpeed), 0);
+    return {
+      device: { id: dev.id, name: dev.name, plateNumber: dev.plateNumber, imei: dev.imei },
+      from, to,
+      detection: sessions[0]?.detection ?? 'ignition',
+      totals: { totalEngineHours, totalDrivingHours, totalIdleHours, distanceKm, maxSpeed },
+      sessions,
+    };
+  }
+
+  // Trip-segments report: one row per contiguous moving stretch.
+  async tripSegmentsReport(deviceId: string, from: Date, to: Date, actor: any) {
+    const dev = await this.ensureDeviceAccess(deviceId, actor);
+    const rows = await this.fetchPositionsWindow(deviceId, from, to);
+    const segments = buildTripSegments(rows);
+    const distanceKm = segments.reduce((s, t) => s + t.distanceKm, 0);
+    const durationMin = segments.reduce((s, t) => s + t.durationMin, 0);
+    const maxSpeed = segments.reduce((m, t) => Math.max(m, t.maxSpeedKmh), 0);
+    const avgSpeed = durationMin > 0 ? distanceKm / (durationMin / 60) : 0;
+    return {
+      device: { id: dev.id, name: dev.name, plateNumber: dev.plateNumber, imei: dev.imei },
+      from, to,
+      totals: { distanceKm, durationMin, maxSpeed, avgSpeed },
+      segments,
+    };
+  }
+
+  // Idle-periods report: one row per stop ≥ 1 minute while engine is on.
+  async idlePeriodsReport(deviceId: string, from: Date, to: Date, actor: any) {
+    const dev = await this.ensureDeviceAccess(deviceId, actor);
+    const rows = await this.fetchPositionsWindow(deviceId, from, to);
+    const periods = buildIdlePeriods(rows);
+    const totalIdleHours = periods.reduce((s, p) => s + p.durationMin / 60, 0);
+    return {
+      device: { id: dev.id, name: dev.name, plateNumber: dev.plateNumber, imei: dev.imei },
+      from, to,
+      totals: { totalIdleHours, periodCount: periods.length },
+      periods,
+    };
+  }
+
+  async eventsReport(deviceId: string, from: Date, to: Date, actor: any, types?: string[]) {
     await this.ensureDeviceAccess(deviceId, actor);
+    const where: any = { deviceId, occurredAt: { gte: from, lte: to } };
+    if (types && types.length > 0) {
+      where.type = { in: types as any };
+    }
     return this.prisma.event.findMany({
-      where: { deviceId, occurredAt: { gte: from, lte: to } },
+      where,
       orderBy: { occurredAt: 'asc' },
     });
+  }
+
+  // Template-aware export dispatcher. Looks at the template ID, picks the
+  // right data shaper + exporter, and returns { buffer, filename } so the
+  // controller can attach a meaningful Content-Disposition. The legacy
+  // /reports/trip/:deviceId/{excel,pdf} endpoints stay alive (they call
+  // exportExcel / exportPdf below) for any external consumer still using
+  // them, but the UI routes through here exclusively.
+  async exportTemplate(
+    tplId: ReportTemplateId,
+    deviceId: string,
+    from: Date,
+    to: Date,
+    format: 'excel' | 'pdf',
+    actor: any,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const tpl = REPORT_TEMPLATES[tplId];
+    const dev = await this.ensureDeviceAccess(deviceId, actor);
+    const device: DeviceHeader = {
+      name: dev.name,
+      plateNumber: dev.plateNumber,
+      imei: dev.imei,
+    };
+    const range: ReportRange = { from, to };
+    const plate = dev.plateNumber || dev.name.replace(/\s+/g, '-') || dev.id.slice(0, 8);
+    const stamp = `${from.toISOString().slice(0, 10)}_${to.toISOString().slice(0, 10)}`;
+    const ext = format === 'excel' ? 'xlsx' : 'pdf';
+    const filename = `${tpl.fileStem}-${plate}-${stamp}.${ext}`;
+
+    let buffer: Buffer;
+    if (tpl.kind === 'engine') {
+      const data = await this.engineSessionsReport(deviceId, from, to, actor);
+      buffer = format === 'excel'
+        ? await engineSessionsExcel(device, range, data.sessions, data.totals)
+        : await engineSessionsPdf(device, range, data.sessions, data.totals);
+    } else if (tpl.kind === 'trip') {
+      const data = await this.tripSegmentsReport(deviceId, from, to, actor);
+      buffer = format === 'excel'
+        ? await tripSegmentsExcel(device, range, data.segments, data.totals)
+        : await tripSegmentsPdf(device, range, data.segments, data.totals);
+    } else if (tpl.kind === 'idle') {
+      const data = await this.idlePeriodsReport(deviceId, from, to, actor);
+      buffer = format === 'excel'
+        ? await idlePeriodsExcel(device, range, data.periods, data.totals)
+        : await idlePeriodsPdf(device, range, data.periods, data.totals);
+    } else {
+      // events kind — covers driver, overspeed, panic, geofence, safety,
+      // ignition, offline, power, tamper. tpl.filter narrows the type set;
+      // safety passes undefined to grab everything in the window.
+      const evTpl = tpl as { filter?: string[]; title: string };
+      const events = await this.eventsReport(deviceId, from, to, actor, evTpl.filter);
+      const meta = {
+        title: evTpl.title,
+        subtitle: evTpl.filter
+          ? `Шүүлт: ${evTpl.filter.join(', ')}`
+          : 'Бүх төрлийн дохиолол',
+      };
+      buffer = format === 'excel'
+        ? await eventsExcel(meta, device, range, events)
+        : await eventsPdf(meta, device, range, events);
+    }
+    return { buffer, filename };
   }
 
   // ── Eco-driving scoreboard ────────────────────────────────
