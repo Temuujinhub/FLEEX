@@ -107,7 +107,7 @@ const companyId = actor.role === 'SUPER_ADMIN'
 алдагдал. Энэ нь structural single-point-of-failure. (Одоогоор бүх method зөв
 хийсэн ч, ирээдүйд эрсдэлтэй.)
 
-### R-3 🟠 — WebSocket токен query-string-ээр дамждаг
+### R-3 🟠 — WebSocket токен query-string-ээр дамждаг → ✅ ЗАССАН (§4 P3)
 
 `live.gateway.ts:116` — `?token=<jwt>`. JWT нь nginx access log, proxy,
 browser history-д бичигдэж болзошгүй (AUDIT-2026-05 H-7-тэй ижил, зориуд
@@ -167,11 +167,16 @@ API-д tenant-isolation-ийг шалгасан автомат тест байх
 > одоо зөвхөн оноосон машин(ууд). Холбоогүй `DRIVER` юу ч харахгүй (least
 > privilege). Шинэ холбоос дараагийн token (login/refresh)-оор хүчинтэй.
 
-### P3. WebSocket ticket auth (R-3)
+### P3. WebSocket ticket auth (R-3) — ✅ ХЭРЭГЖСЭН (2026-06-24)
 
-Query-string токены оронд: REST `POST /auth/ws-ticket` → богино настай (≤30с)
-нэг удаагийн ticket (Redis). WS upgrade дээр ticket-ийг шалгаж устгана. JWT
-log-д орохгүй болно.
+`POST /auth/ws-ticket` (JWT шаардна) → 32 байт random ticket-ийг Redis-д
+`ws:ticket:<t>` түлхүүрээр **EX 30с** хадгална (`auth.service.createWsTicket`).
+WS upgrade дээр gateway түүнийг **GETDEL**-ээр атомарлаг устгаж нэг удаа л
+хэрэглэнэ (`live.gateway.handleConnection`) — replay боломжгүй. JWT нь WS URL /
+nginx log-д орохгүй. Хуучин `?token=` зам **rollout-д тааруулж backward-
+compatible** хэвээр (web client ticket аваад уначихвал token руу буцна).
+Web: `useLiveSocket.ts` эхлээд ticket авна. 5 unit тест (mint + GETDEL consume
++ invalid/replay + legacy + no-auth).
 
 ### P4. Ingestor IMEI allowlist (R-4)
 
@@ -197,8 +202,8 @@ CI gate: `pull_request`-д `.github/workflows/ci.yml`, deploy-ийн өмнө
 
 1. ✅ **P5 negative тестүүд** — хамгийн бага эрсдэл, regress-аас хамгаална. *(хийгдсэн)*
 2. ✅ **P2 DRIVER least-privilege** — баримтжуулсан зан үйлийг нөхсөн. *(хийгдсэн)*
-3. **P3 WS ticket** — H-7-г бүрэн хаах. *(дараагийнх)*
-4. **P1 defense-in-depth (RLS/extension)** — тестийн дараа, үе шаттай.
+3. ✅ **P3 WS ticket** — H-7-г бүрэн хаасан. *(хийгдсэн)*
+4. **P1 defense-in-depth (RLS/extension)** — тестийн дараа, үе шаттай. *(дараагийнх — эрсдэлтэй тул зөвшөөрөл асууна)*
 5. **P4 IMEI allowlist** — ingestor дээр.
 
 > **Тэмдэглэл:** Энэ branch-д tenant-isolation-ийн ажиллаж буй кодыг

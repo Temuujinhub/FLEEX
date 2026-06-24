@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { WS_URL, getToken } from './api';
+import { WS_URL, getToken, api } from './api';
 
 export interface LiveMessage {
   type: string;
@@ -23,7 +23,7 @@ export function useLiveSocket(onMessage: (msg: LiveMessage) => void) {
     let retry = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const connect = () => {
+    const connect = async () => {
       if (stopped) return;
       const token = getToken();
       if (!token) {
@@ -31,10 +31,22 @@ export function useLiveSocket(onMessage: (msg: LiveMessage) => void) {
         timer = setTimeout(connect, 2000);
         return;
       }
+      // Prefer a single-use ticket so the JWT never lands in the WS URL / proxy
+      // access logs (audit H-7). Fall back to the legacy ?token param if the
+      // ticket endpoint is unavailable (e.g. mid-rollout) so live updates keep
+      // working.
+      let query = `?token=${encodeURIComponent(token)}`;
+      try {
+        const { data } = await api.post('/auth/ws-ticket');
+        if (data?.ticket) query = `?ticket=${encodeURIComponent(data.ticket)}`;
+      } catch {
+        /* keep legacy token fallback */
+      }
+      if (stopped) return;
       const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
       const url = WS_URL.startsWith('ws')
-        ? `${WS_URL}?token=${encodeURIComponent(token)}`
-        : `${proto}://${window.location.host}${WS_URL}?token=${encodeURIComponent(token)}`;
+        ? `${WS_URL}${query}`
+        : `${proto}://${window.location.host}${WS_URL}${query}`;
 
       ws = new WebSocket(url);
       ws.onopen = () => {
