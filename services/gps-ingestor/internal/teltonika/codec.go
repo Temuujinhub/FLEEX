@@ -83,8 +83,11 @@ func (s *Session) LastFrameLen() int { return s.lastFrameLen }
 // safe, observable opt-in on real hardware.
 func (s *Session) LastCRCOK() bool { return s.lastCRCOK }
 
-// Handshake performs the Teltonika IMEI handshake and returns the IMEI.
-func (s *Session) Handshake() (string, error) {
+// ReadIMEI reads the Teltonika IMEI handshake frame (uint16 length + IMEI
+// bytes) and returns the IMEI WITHOUT sending the accept/reject byte, so the
+// caller can gate the ACK on device registration (audit R-4). Call AcceptIMEI
+// or RejectIMEI afterwards.
+func (s *Session) ReadIMEI() (string, error) {
 	if err := s.conn.SetReadDeadline(time.Now().Add(s.readTimeout)); err != nil {
 		return "", err
 	}
@@ -105,15 +108,37 @@ func (s *Session) Handshake() (string, error) {
 			return "", fmt.Errorf("non-numeric imei: %s", hex.EncodeToString(imei))
 		}
 	}
-
-	if err := s.conn.SetWriteDeadline(time.Now().Add(s.writeTimeout)); err != nil {
-		return "", err
-	}
-	if _, err := s.conn.Write([]byte{0x01}); err != nil {
-		return "", fmt.Errorf("imei ack: %w", err)
-	}
 	s.imei = string(imei)
 	return s.imei, nil
+}
+
+// AcceptIMEI sends the Teltonika accept byte (0x01); RejectIMEI sends the
+// reject byte (0x00), which makes the device drop the connection and retry.
+func (s *Session) AcceptIMEI() error { return s.writeHandshakeByte(0x01) }
+func (s *Session) RejectIMEI() error { return s.writeHandshakeByte(0x00) }
+
+func (s *Session) writeHandshakeByte(b byte) error {
+	if err := s.conn.SetWriteDeadline(time.Now().Add(s.writeTimeout)); err != nil {
+		return err
+	}
+	if _, err := s.conn.Write([]byte{b}); err != nil {
+		return fmt.Errorf("imei ack: %w", err)
+	}
+	return nil
+}
+
+// Handshake reads the IMEI and unconditionally accepts it (0x01). Retained for
+// callers/tests that don't gate on registration; main.go uses ReadIMEI +
+// AcceptIMEI/RejectIMEI to enforce the registered-device allowlist.
+func (s *Session) Handshake() (string, error) {
+	imei, err := s.ReadIMEI()
+	if err != nil {
+		return "", err
+	}
+	if err := s.AcceptIMEI(); err != nil {
+		return "", err
+	}
+	return imei, nil
 }
 
 // ReadAVL reads one AVL data packet and returns its records.

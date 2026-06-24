@@ -395,20 +395,21 @@ type livePayload struct {
 	IO        map[string]int64 `json:"io,omitempty"`
 }
 
-// resolveDevice looks up the device by IMEI, caching the result for 5
-// minutes in Redis. On a cache miss we fall through to Postgres. Devices
-// that don't exist are also cached briefly (empty value) to avoid hot
-// IMEI floods hammering Postgres.
-func (s *Store) resolveDevice(ctx context.Context, imei string) (DeviceLookup, bool) {
+// lookupDevice resolves a device by IMEI, caching the result for 5 minutes in
+// Redis (and a brief negative cache for unknown IMEIs to spare Postgres from
+// hot floods). The tri-state return distinguishes "definitively not
+// registered" (found=false, err=nil) from "lookup failed" (err!=nil) so
+// callers can choose fail-open vs fail-closed.
+func (s *Store) lookupDevice(ctx context.Context, imei string) (DeviceLookup, bool, error) {
 	cacheKey := "ingestor:dev:" + imei
 	if s.rdb != nil {
 		if v, err := s.rdb.Get(ctx, cacheKey).Result(); err == nil {
 			if v == "" {
-				return DeviceLookup{}, false
+				return DeviceLookup{}, false, nil // negative cache → not registered
 			}
 			var d DeviceLookup
 			if err := json.Unmarshal([]byte(v), &d); err == nil && d.ID != "" {
-				return d, true
+				return d, true, nil
 			}
 		}
 	}
@@ -421,17 +422,38 @@ func (s *Store) resolveDevice(ctx context.Context, imei string) (DeviceLookup, b
 			if s.rdb != nil {
 				_ = s.rdb.Set(ctx, cacheKey, "", 30*time.Second).Err()
 			}
-			log.Debug().Str("imei", imei).Msg("unknown device, dropping")
-			return d, false
+			log.Debug().Str("imei", imei).Msg("unknown device")
+			return d, false, nil
 		}
 		log.Warn().Err(err).Msg("device lookup")
-		return d, false
+		return d, false, err
 	}
 	if s.rdb != nil {
 		blob, _ := json.Marshal(d)
 		_ = s.rdb.Set(ctx, cacheKey, blob, deviceCacheTTL).Err()
 	}
-	return d, true
+	return d, true, nil
+}
+
+// resolveDevice is the data-path lookup: unknown IMEI or lookup error both
+// mean "drop" (conservative — never attribute telemetry to the wrong device).
+func (s *Store) resolveDevice(ctx context.Context, imei string) (DeviceLookup, bool) {
+	d, ok, _ := s.lookupDevice(ctx, imei)
+	return d, ok
+}
+
+// AcceptHandshake reports whether the IMEI handshake should be accepted
+// (audit R-4). Registered IMEIs are accepted; a definitively-unknown IMEI is
+// rejected so an attacker can't hold a connection or probe the fleet with a
+// spoofed identity. On a transient lookup failure we fail OPEN (accept) so a
+// database blip can't lock the whole fleet out — telemetry for a truly unknown
+// IMEI is still dropped downstream by resolveDevice.
+func (s *Store) AcceptHandshake(ctx context.Context, imei string) bool {
+	_, found, err := s.lookupDevice(ctx, imei)
+	if err != nil {
+		return true
+	}
+	return found
 }
 
 // MarkOnline keeps a short-lived presence key in Redis so the API can

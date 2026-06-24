@@ -34,6 +34,13 @@ type Config struct {
 	// a ~0 false-positive rate against real hardware before enforcing.
 	VerifyCRC bool
 
+	// RequireRegisteredDevice, when true (default), rejects the IMEI handshake
+	// for devices not present in the database, so a spoofed/unknown IMEI can't
+	// hold a connection or probe the fleet (audit R-4). A transient DB lookup
+	// failure fails open (accept) so a blip can't lock out the whole fleet.
+	// Set INGESTOR_REQUIRE_REGISTERED_DEVICE=false to revert to accept-all.
+	RequireRegisteredDevice bool
+
 	LogLevel string
 }
 
@@ -50,8 +57,9 @@ func Load() (*Config, error) {
 		BatchFlushTimeout: time.Duration(getEnvInt("INGESTOR_BATCH_FLUSH_MS", 1000)) * time.Millisecond,
 		QueueSize:         getEnvInt("INGESTOR_QUEUE_SIZE", 16384),
 		RawSampleN:        getEnvInt("INGESTOR_RAW_SAMPLE_N", 1),
-		VerifyCRC:         getEnvBool("INGESTOR_VERIFY_CRC", false),
-		LogLevel:          getEnvString("LOG_LEVEL", "info"),
+		VerifyCRC:               getEnvBool("INGESTOR_VERIFY_CRC", false),
+		RequireRegisteredDevice: getEnvBool("INGESTOR_REQUIRE_REGISTERED_DEVICE", true),
+		LogLevel:                getEnvString("LOG_LEVEL", "info"),
 	}
 	if c.DatabaseURL == "" {
 		return nil, errors.New("DATABASE_URL is required")

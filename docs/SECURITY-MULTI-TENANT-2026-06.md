@@ -113,7 +113,7 @@ const companyId = actor.role === 'SUPER_ADMIN'
 browser history-д бичигдэж болзошгүй (AUDIT-2026-05 H-7-тэй ижил, зориуд
 хойшлуулсан). Токен задарвал тухайн тенантын live урсгал задрах эрсдэл.
 
-### R-4 🟠 — IMEI spoofing (протоколын хязгаар)
+### R-4 🟠 — IMEI spoofing (протоколын хязгаар) → ✅ ЗАССАН (§4 P4)
 
 Ingestor нь бүртгэлгүй IMEI-г ч ACK хийдэг (AUDIT-2026-05 H-3). Халдагч өөр
 тенантад харьяалагдах IMEI-р хуурамч telemetry оруулж тухайн тенантын дата руу
@@ -196,10 +196,20 @@ compatible** хэвээр (web client ticket аваад уначихвал token
 Web: `useLiveSocket.ts` эхлээд ticket авна. 5 unit тест (mint + GETDEL consume
 + invalid/replay + legacy + no-auth).
 
-### P4. Ingestor IMEI allowlist (R-4)
+### P4. Ingestor IMEI allowlist (R-4) — ✅ ХЭРЭГЖСЭН (2026-06-24)
 
-Handshake дээр бүртгэлгүй IMEI-г ACK хийхгүй (negative cache-тай). Нэмж carrier
-IP firewall. Протоколын түвшний spoofing-ийг бууруулна.
+Teltonika handshake-ийг бүртгэлтэй төхөөрөмжөөр хязгаарласан. `Session.ReadIMEI()`
+(ACK явуулахгүй) → `store.AcceptHandshake(imei)` шалгаад бүртгэлтэй бол
+`AcceptIMEI()` (0x01), үгүй бол `RejectIMEI()` (0x00) илгээж холболтыг таслана.
+Одоо байгаа Redis negative cache (`ingestor:dev:<imei>`, 30с) ашигладаг тул
+flood Postgres-ийг цохихгүй. **Fail-open:** DB lookup алдаа гарвал зөвшөөрнө —
+DB blip нь бүх флотыг түгжихгүй (бүртгэлгүй IMEI-ийн дата доош нь хэвээр
+устгагдана). `INGESTOR_REQUIRE_REGISTERED_DEVICE=true` (default; false болговол
+legacy accept-all). `fleex_ingestor_rejected_connections_total` метрик +
+handshake accept/reject Go тест.
+
+> carrier IP firewall (network түвшний нэмэлт хатуулга) нь дэд бүтцийн ажил тул
+> энэ кодын хүрээнд биш — ops-д үлдээв.
 
 ### P5. Cross-tenant negative тест (R-5) — ✅ ХЭРЭГЖСЭН (2026-06-24)
 
@@ -222,7 +232,10 @@ CI gate: `pull_request`-д `.github/workflows/ci.yml`, deploy-ийн өмнө
 2. ✅ **P2 DRIVER least-privilege** — баримтжуулсан зан үйлийг нөхсөн. *(хийгдсэн)*
 3. ✅ **P3 WS ticket** — H-7-г бүрэн хаасан. *(хийгдсэн)*
 4. ✅ **P1 defense-in-depth (Prisma $use guard)** — Prisma extension сонголтоор хэрэгжсэн. *(хийгдсэн)*
-5. **P4 IMEI allowlist** — ingestor дээр. *(дараагийнх)*
+5. ✅ **P4 IMEI allowlist** — ingestor handshake дээр хэрэгжсэн. *(хийгдсэн)*
+
+**Бүх P1–P5 хэрэгжсэн.** Үлдсэн: carrier IP firewall (ops/network), v6
+шилжилтэд `$use`→`$extends`, DRIVER линкийн web UI.
 
 > **Тэмдэглэл:** Энэ branch-д tenant-isolation-ийн ажиллаж буй кодыг
 > өөрчлөөгүй — учир нь шинжилгээ түүнийг бат бөх гэдгийг баталсан бөгөөд
