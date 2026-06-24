@@ -84,7 +84,7 @@ export class AuthService {
       data: { failedLogins: 0, lockedUntil: null, lastLoginAt: new Date(), status: 'ACTIVE' },
     });
 
-    const tokens = await this.issueTokens(user.id, user.email, user.role, user.companyId, ip, userAgent);
+    const tokens = await this.issueTokens(user.id, user.email, user.role, user.companyId, user.driverId, ip, userAgent);
 
     await this.audit.record({
       actorId: user.id,
@@ -154,6 +154,7 @@ export class AuthService {
       stored.user.email,
       stored.user.role,
       stored.user.companyId,
+      stored.user.driverId,
       ip,
       userAgent,
     );
@@ -174,11 +175,12 @@ export class AuthService {
     email: string,
     role: string,
     companyId: string | null,
+    driverId: string | null,
     ip?: string,
     userAgent?: string,
   ) {
     const accessToken = await this.jwt.signAsync(
-      { sub: userId, email, role, companyId },
+      { sub: userId, email, role, companyId, driverId },
       { expiresIn: this.config.get<string>('JWT_EXPIRES_IN') ?? '15m' },
     );
 

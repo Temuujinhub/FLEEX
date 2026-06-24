@@ -41,12 +41,17 @@ import { DevicesModule } from '../src/devices/devices.module';
 import { PositionsModule } from '../src/positions/positions.module';
 import { MediaModule } from '../src/media/media.module';
 import { TripsModule } from '../src/trips/trips.module';
+import { EventsModule } from '../src/events/events.module';
+import { NO_DRIVER_MATCH } from '../src/auth/actor-scope';
 
 const COMPANY_A = '11111111-1111-1111-1111-111111111111';
 const COMPANY_B = '22222222-2222-2222-2222-222222222222';
 const DEVICE_ID = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
 const TRIP_ID = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
 const IMAGE_ID = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
+// Two drivers within COMPANY_A, used for the DRIVER least-privilege tests.
+const DRIVER_D1 = 'd1111111-1111-1111-1111-111111111111';
+const DRIVER_D2 = 'd2222222-2222-2222-2222-222222222222';
 
 // Per-resource Prisma mock. Each test sets the return value to a row owned by
 // COMPANY_B (the "victim" tenant) and then hits the route with COMPANY_A's
@@ -55,6 +60,7 @@ const prisma = {
   device: { findUnique: jest.fn(), findMany: jest.fn() },
   trip: { findUnique: jest.fn(), findMany: jest.fn() },
   deviceImage: { findUnique: jest.fn(), findMany: jest.fn() },
+  event: { findUnique: jest.fn(), findMany: jest.fn() },
   $queryRaw: jest.fn(),
 };
 
@@ -75,13 +81,14 @@ const redis = {
 let app: INestApplication;
 const jwt = new JwtService();
 
-function token(opts: { role?: Role; companyId?: string | null } = {}): string {
+function token(opts: { role?: Role; companyId?: string | null; driverId?: string | null } = {}): string {
   return jwt.sign(
     {
       sub: 'user-' + (opts.companyId ?? 'x'),
       email: 'user@example.com',
       role: opts.role ?? Role.COMPANY_ADMIN,
       companyId: opts.companyId === undefined ? COMPANY_A : opts.companyId,
+      driverId: opts.driverId ?? null,
     },
     { secret: process.env.JWT_SECRET as string, algorithm: 'HS256', expiresIn: '15m' },
   );
@@ -103,6 +110,7 @@ beforeAll(async () => {
       PositionsModule,
       MediaModule,
       TripsModule,
+      EventsModule,
     ],
     providers: [
       JwtStrategy,
@@ -244,5 +252,101 @@ describe('Media', () => {
       .get(`/api/devices/${DEVICE_ID}/images`)
       .set('Authorization', `Bearer ${tokenA()}`)
       .expect(200);
+  });
+});
+
+// P2: a DRIVER is scoped to their own assigned vehicle(s) within their tenant.
+// All resources below belong to COMPANY_A; the distinction is the assigned
+// driver (DRIVER_D1 = self, DRIVER_D2 = a peer in the same company).
+describe('DRIVER least-privilege (P2)', () => {
+  const driverTok = (driverId: string | null) =>
+    token({ role: Role.DRIVER, companyId: COMPANY_A, driverId });
+
+  describe('devices', () => {
+    it('GET /devices/:id — driver reads own assigned vehicle (200)', async () => {
+      prisma.device.findUnique.mockResolvedValue({ id: DEVICE_ID, companyId: COMPANY_A, driverId: DRIVER_D1, imei: '1' });
+      await http().get(`/api/devices/${DEVICE_ID}`).set('Authorization', `Bearer ${driverTok(DRIVER_D1)}`).expect(200);
+    });
+
+    it("GET /devices/:id — driver blocked on a peer driver's vehicle (403)", async () => {
+      prisma.device.findUnique.mockResolvedValue({ id: DEVICE_ID, companyId: COMPANY_A, driverId: DRIVER_D2, imei: '1' });
+      await http().get(`/api/devices/${DEVICE_ID}`).set('Authorization', `Bearer ${driverTok(DRIVER_D1)}`).expect(403);
+    });
+
+    it("GET /devices — list is scoped to the driver's own vehicles", async () => {
+      prisma.device.findMany.mockResolvedValue([]);
+      await http().get('/api/devices').set('Authorization', `Bearer ${driverTok(DRIVER_D1)}`).expect(200);
+      expect(prisma.device.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ companyId: COMPANY_A, driverId: DRIVER_D1 }) }),
+      );
+    });
+
+    it('GET /devices — an unlinked driver sees nothing (fail closed)', async () => {
+      prisma.device.findMany.mockResolvedValue([]);
+      await http().get('/api/devices').set('Authorization', `Bearer ${driverTok(null)}`).expect(200);
+      expect(prisma.device.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ companyId: COMPANY_A, driverId: NO_DRIVER_MATCH }) }),
+      );
+    });
+  });
+
+  describe('trips', () => {
+    it("GET /trips/:id — driver blocked on a peer driver's trip (403)", async () => {
+      prisma.trip.findUnique.mockResolvedValue({ id: TRIP_ID, companyId: COMPANY_A, driverId: DRIVER_D2 });
+      await http().get(`/api/trips/${TRIP_ID}`).set('Authorization', `Bearer ${driverTok(DRIVER_D1)}`).expect(403);
+    });
+
+    it('GET /trips/:id — driver reads own trip (200)', async () => {
+      prisma.trip.findUnique.mockResolvedValue({ id: TRIP_ID, companyId: COMPANY_A, driverId: DRIVER_D1 });
+      await http().get(`/api/trips/${TRIP_ID}`).set('Authorization', `Bearer ${driverTok(DRIVER_D1)}`).expect(200);
+    });
+
+    it('GET /trips?driverId=peer — driver scope overrides the query param', async () => {
+      prisma.trip.findMany.mockResolvedValue([]);
+      await http()
+        .get(`/api/trips?driverId=${DRIVER_D2}`)
+        .set('Authorization', `Bearer ${driverTok(DRIVER_D1)}`)
+        .expect(200);
+      expect(prisma.trip.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ companyId: COMPANY_A, driverId: DRIVER_D1 }) }),
+      );
+    });
+  });
+
+  describe('positions history', () => {
+    const range = 'from=2026-01-01T00:00:00Z&to=2026-01-02T00:00:00Z';
+
+    it('GET /positions/:deviceId/history — driver blocked on a peer vehicle (403)', async () => {
+      prisma.device.findUnique.mockResolvedValue({ id: DEVICE_ID, companyId: COMPANY_A, driverId: DRIVER_D2 });
+      await http()
+        .get(`/api/positions/${DEVICE_ID}/history?${range}`)
+        .set('Authorization', `Bearer ${driverTok(DRIVER_D1)}`)
+        .expect(403);
+    });
+
+    it('GET /positions/:deviceId/history — driver reads own vehicle (200)', async () => {
+      prisma.device.findUnique.mockResolvedValue({ id: DEVICE_ID, companyId: COMPANY_A, driverId: DRIVER_D1 });
+      prisma.$queryRaw.mockResolvedValue([]);
+      await http()
+        .get(`/api/positions/${DEVICE_ID}/history?${range}`)
+        .set('Authorization', `Bearer ${driverTok(DRIVER_D1)}`)
+        .expect(200);
+    });
+  });
+
+  describe('events', () => {
+    it("GET /events — list is restricted to the driver's own devices", async () => {
+      prisma.device.findMany.mockResolvedValue([{ id: DEVICE_ID }]);
+      prisma.event.findMany.mockResolvedValue([]);
+      await http().get('/api/events').set('Authorization', `Bearer ${driverTok(DRIVER_D1)}`).expect(200);
+      // First resolves the driver's own device ids (scoped by driverId)…
+      expect(prisma.device.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ companyId: COMPANY_A, driverId: DRIVER_D1 }) }),
+      );
+      // …then filters events to exactly those device ids.
+      expect(prisma.event.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ deviceId: { in: [DEVICE_ID] } }) }),
+      );
+    });
   });
 });

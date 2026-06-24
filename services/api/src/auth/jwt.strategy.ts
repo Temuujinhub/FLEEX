@@ -21,6 +21,9 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       email: payload.email,
       role: payload.role,
       companyId: payload.companyId,
+      // Present only for DRIVER logins linked to a Driver record; drives
+      // least-privilege scoping in the resource services.
+      driverId: payload.driverId ?? null,
     };
   }
 }

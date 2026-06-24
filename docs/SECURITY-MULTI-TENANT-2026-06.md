@@ -82,7 +82,7 @@ const companyId = actor.role === 'SUPER_ADMIN'
 
 ## 3. Илэрсэн эрсдэл ба цоорхой
 
-### R-1 🟠 (HIGH, тенант доторх) — `DRIVER` least-privilege хэрэгжээгүй
+### R-1 🟠 (HIGH, тенант доторх) — `DRIVER` least-privilege хэрэгжээгүй → ✅ ЗАССАН (§4 P2)
 
 **Баримт (`ARCHITECTURE.md:161`):** «DRIVER — Read their own assignment(s) only
 (route-level filter)».
@@ -119,7 +119,7 @@ Ingestor нь бүртгэлгүй IMEI-г ч ACK хийдэг (AUDIT-2026-05 H-
 тенантад харьяалагдах IMEI-р хуурамч telemetry оруулж тухайн тенантын дата руу
 "бичих" талаас нь cross-tenant нөлөө үзүүлж болзошгүй.
 
-### R-5 🟠 — Cross-tenant negative тест алга
+### R-5 🟠 — Cross-tenant negative тест алга → ✅ ЗАССАН (§4 P5)
 
 API-д tenant-isolation-ийг шалгасан автомат тест байхгүй (AUDIT §3). Regress
 гарвал илрэхгүй өнгөрөх эрсдэлтэй.
@@ -148,13 +148,24 @@ API-д tenant-isolation-ийг шалгасан автомат тест байх
 > сохроор нэвтрүүлбэл уншилт тасрах эрсдэлтэй. Тиймээс энэ нь зориудаар код
 > биш зөвлөмж хэлбэрээр энд орсон.
 
-### P2. `DRIVER` least-privilege (R-1)
+### P2. `DRIVER` least-privilege (R-1) — ✅ ХЭРЭГЖСЭН (2026-06-24)
 
-1. Schema: `User.driverId String? @db.Uuid` (эсвэл `Driver.userId`) нэмж,
-   login-ийг жолоочид холбоно. Migration + Users UI-д "холбох" талбар.
-2. Helper: `scopeForActor(actor)` — `DRIVER` бол `{ companyId, driverId:
-   actor.driverId }` эсвэл оноосон `deviceId`-уудаар хязгаарлана.
-3. `positions/devices/trips/events` service-үүдэд энэ helper-ийг хэрэглэнэ.
+1. Schema: `User.driverId String? @db.Uuid` + `driver`/`users` relation
+   нэмсэн (`schema.prisma`). `prisma db push`-аар materialise хийгдэнэ
+   (migration файл хэрэггүй — schema-first). Users `PATCH /users/:id`-д
+   `driverId`-аар холбоно (тенант шалгалттай).
+2. JWT-д `driverId` claim нэмсэн (`auth.service.issueTokens`,
+   `jwt.strategy.validate`). Helper: `src/auth/actor-scope.ts` —
+   `applyActorScope()` (companyId + DRIVER үед driverId) ба
+   `driverMayAccess()`. **Fail-closed:** холбоогүй `DRIVER` юу ч харахгүй
+   (`NO_DRIVER_MATCH` sentinel).
+3. `devices`, `trips`, `positions` (latest/history/daily/fleetSummary),
+   `events` service-үүдэд хэрэгжүүлсэн. `events` нь driverId багантай биш
+   тул жолоочийн `deviceId`-уудаар шүүнэ. Бүгд e2e тестээр баталгаажсан.
+
+> Зан үйлийн өөрчлөлт: өмнө нь `DRIVER` компанийн бүхнийг хардаг байсан →
+> одоо зөвхөн оноосон машин(ууд). Холбоогүй `DRIVER` юу ч харахгүй (least
+> privilege). Шинэ холбоос дараагийн token (login/refresh)-оор хүчинтэй.
 
 ### P3. WebSocket ticket auth (R-3)
 
@@ -167,19 +178,26 @@ log-д орохгүй болно.
 Handshake дээр бүртгэлгүй IMEI-г ACK хийхгүй (negative cache-тай). Нэмж carrier
 IP firewall. Протоколын түвшний spoofing-ийг бууруулна.
 
-### P5. Cross-tenant negative тест (R-5)
+### P5. Cross-tenant negative тест (R-5) — ✅ ХЭРЭГЖСЭН (2026-06-24)
 
-Хамгийн бага зардлаар хамгийн их үнэ цэнэ: tenant A-ийн токеноор tenant B-ийн
-`device/:id`, `trip/:id`, `positions/:id/history`, `/media/:id`-д хандаж
-**403** буцаахыг шалгасан Vitest/e2e багц. CI gate болгоно.
+`services/api/test/tenant-isolation.e2e-spec.ts` — жинхэнэ Nest app-ыг
+JWT/Roles guard + гарын үсэгтэй токентой (Prisma/Redis mock, DB шаардахгүй)
+ачаалж: tenant A-ийн токеноор tenant B-ийн `device/:id`, `trip/:id`,
+`positions/:deviceId/history`, `media/:id/file`-д **403**; list endpoint-ууд
+companyId-аар хязгаарлагдсан; `SUPER_ADMIN` cross-tenant унших хэвээр; токенгүй
+үед **401**. Нэмж DRIVER least-privilege (P2)-ийн scope тестүүд. Нийт 24 кейс.
+
+CI gate: `pull_request`-д `.github/workflows/ci.yml`, deploy-ийн өмнө
+`deploy.yml`-ийн `build-check` дотор `npm test`. (`ensureSameTenant`/
+`driverMayAccess`-ийг түр идэвхгүй болгож mutation-тест хийж баталгаажуулсан.)
 
 ---
 
 ## 5. Хэрэгжүүлэх дараалал (санал)
 
-1. **P5 negative тестүүд** — хамгийн бага эрсдэл, regress-аас хамгаална. (эхэлэх)
-2. **P2 DRIVER least-privilege** — баримтжуулсан зан үйлийг нөхнө.
-3. **P3 WS ticket** — H-7-г бүрэн хаах.
+1. ✅ **P5 negative тестүүд** — хамгийн бага эрсдэл, regress-аас хамгаална. *(хийгдсэн)*
+2. ✅ **P2 DRIVER least-privilege** — баримтжуулсан зан үйлийг нөхсөн. *(хийгдсэн)*
+3. **P3 WS ticket** — H-7-г бүрэн хаах. *(дараагийнх)*
 4. **P1 defense-in-depth (RLS/extension)** — тестийн дараа, үе шаттай.
 5. **P4 IMEI allowlist** — ingestor дээр.
 

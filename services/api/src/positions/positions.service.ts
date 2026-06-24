@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { Actor, applyActorScope, driverMayAccess, NO_DRIVER_MATCH } from '../auth/actor-scope';
 
 // Positions live in a TimescaleDB hypertable that Prisma doesn't model
 // directly. All access goes through tagged-template raw queries to keep
@@ -28,7 +29,7 @@ export class PositionsService {
 
   async history(
     deviceId: string,
-    actor: { role: Role; companyId: string | null },
+    actor: Actor,
     from: Date,
     to: Date,
     limit = 5000,
@@ -36,6 +37,7 @@ export class PositionsService {
     const dev = await this.prisma.device.findUnique({ where: { id: deviceId } });
     if (!dev) throw new NotFoundException('Device not found');
     if (actor.role !== 'SUPER_ADMIN' && dev.companyId !== actor.companyId) throw new ForbiddenException();
+    if (!driverMayAccess(actor, dev.driverId)) throw new ForbiddenException();
 
     const safeLimit = Math.min(Math.max(limit, 1), 50_000);
     return this.prisma.$queryRaw<Position[]>`
@@ -50,10 +52,11 @@ export class PositionsService {
     `;
   }
 
-  async latest(actor: { role: Role; companyId: string | null }): Promise<Position[]> {
+  async latest(actor: Actor): Promise<Position[]> {
     // One row per device — the latest snapshot we hold. We read from the
     // devices table (already maintained by the ingestor) to keep this cheap.
-    const where = actor.role === 'SUPER_ADMIN' ? {} : { companyId: actor.companyId! };
+    // DRIVER actors are scoped to their own assigned vehicle(s).
+    const where = applyActorScope(actor, {});
     const rows = await this.prisma.device.findMany({
       where,
       select: {
@@ -89,10 +92,11 @@ export class PositionsService {
       }));
   }
 
-  async dailySummary(deviceId: string, actor: { role: Role; companyId: string | null }, from: Date, to: Date) {
+  async dailySummary(deviceId: string, actor: Actor, from: Date, to: Date) {
     const dev = await this.prisma.device.findUnique({ where: { id: deviceId } });
     if (!dev) throw new NotFoundException();
     if (actor.role !== 'SUPER_ADMIN' && dev.companyId !== actor.companyId) throw new ForbiddenException();
+    if (!driverMayAccess(actor, dev.driverId)) throw new ForbiddenException();
     return this.prisma.$queryRaw<any[]>`
       SELECT day, samples, max_speed, avg_speed, distance_km, engine_hours
       FROM positions_daily
@@ -108,12 +112,18 @@ export class PositionsService {
   // per device. `company_id` lives on `positions_daily`, so the filter is the
   // single source of tenant isolation here — never trust a client-supplied id.
   async fleetSummary(
-    actor: { role: Role; companyId: string | null },
+    actor: Actor,
     from: Date,
     to: Date,
   ): Promise<{ deviceId: string; distanceKm: number; maxSpeed: number; samples: number }[]> {
     const isSuper = actor.role === 'SUPER_ADMIN';
     if (!isSuper && !actor.companyId) throw new ForbiddenException('No company context');
+    // DRIVER actors only see their own assigned vehicles; an unlinked driver
+    // matches no devices (fail closed). Everyone else gets the whole company.
+    const driverFilter =
+      actor.role === 'DRIVER'
+        ? Prisma.sql`AND device_id IN (SELECT id FROM devices WHERE driver_id = ${actor.driverId ?? NO_DRIVER_MATCH}::uuid)`
+        : Prisma.empty;
     return this.prisma.$queryRaw<
       { deviceId: string; distanceKm: number; maxSpeed: number; samples: number }[]
     >`
@@ -124,6 +134,7 @@ export class PositionsService {
       FROM positions_daily
       WHERE day BETWEEN ${from}::date AND ${to}::date
         AND (${isSuper}::boolean OR company_id = ${actor.companyId}::uuid)
+        ${driverFilter}
       GROUP BY device_id;
     `;
   }

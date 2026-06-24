@@ -3,6 +3,7 @@ import { Role, TripStatus } from '@prisma/client';
 import { Roles } from '../auth/roles.decorator';
 import { Audit } from '../audit/audit.decorator';
 import { PrismaService } from '../prisma/prisma.service';
+import { Actor, applyActorScope, driverMayAccess } from '../auth/actor-scope';
 
 // Trips are persisted by a background trip-detector in the events engine
 // (engine-on → engine-off, with min thresholds). This controller serves
@@ -14,15 +15,17 @@ class TripsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async list(
-    actor: { role: Role; companyId: string | null },
+    actor: Actor,
     opts: { deviceId?: string; driverId?: string; from?: Date; to?: Date; status?: TripStatus; limit: number },
   ) {
     const where: any = {};
-    if (actor.role !== 'SUPER_ADMIN') where.companyId = actor.companyId;
     if (opts.deviceId) where.deviceId = opts.deviceId;
     if (opts.driverId) where.driverId = opts.driverId;
     if (opts.status) where.status = opts.status;
     if (opts.from || opts.to) where.startedAt = { gte: opts.from, lte: opts.to };
+    // Applied last so a DRIVER's own-driver scope overrides any client-supplied
+    // ?driverId (which would otherwise let them read a peer's trips).
+    applyActorScope(actor, where);
     return this.prisma.trip.findMany({
       where,
       orderBy: { startedAt: 'desc' },
@@ -31,13 +34,14 @@ class TripsService {
     });
   }
 
-  async get(id: string, actor: { role: Role; companyId: string | null }) {
+  async get(id: string, actor: Actor) {
     const trip = await this.prisma.trip.findUnique({
       where: { id },
       include: { driver: { select: { id: true, fullName: true } } },
     });
     if (!trip) throw new NotFoundException();
     if (actor.role !== 'SUPER_ADMIN' && trip.companyId !== actor.companyId) throw new ForbiddenException();
+    if (!driverMayAccess(actor, trip.driverId)) throw new ForbiddenException();
     return trip;
   }
 }
