@@ -26,10 +26,11 @@ import (
 )
 
 type server struct {
-	cfg         *config.Config
-	store       *store.Store
-	activeConns atomic.Int64
-	totalConns  atomic.Uint64
+	cfg           *config.Config
+	store         *store.Store
+	activeConns   atomic.Int64
+	totalConns    atomic.Uint64
+	rejectedConns atomic.Uint64
 }
 
 func main() {
@@ -93,6 +94,14 @@ func (s *server) runTCP(ctx context.Context) error {
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
+		// Connection cap (audit H1): refuse once at the ceiling so a flood of
+		// open sockets can't exhaust FDs/goroutines/memory.
+		if n := s.activeConns.Load(); n >= int64(s.cfg.MaxConnections) {
+			s.rejectedConns.Add(1)
+			log.Warn().Int64("active", n).Msg("max connections reached, refusing")
+			_ = conn.Close()
+			continue
+		}
 		s.totalConns.Add(1)
 		s.activeConns.Add(1)
 		go s.handle(ctx, conn)
@@ -127,6 +136,7 @@ func (s *server) runHealth(ctx context.Context) {
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "fleex_media_active_connections %d\n", s.activeConns.Load())
 		fmt.Fprintf(w, "fleex_media_total_connections %d\n", s.totalConns.Load())
+		fmt.Fprintf(w, "fleex_media_rejected_connections_total %d\n", s.rejectedConns.Load())
 		s.store.WriteMetrics(w)
 	})
 

@@ -88,6 +88,10 @@ func Handle(ctx context.Context, conn net.Conn, st *store.Store, cfg *config.Con
 		return
 	}
 
+	// Per-session file budget (audit M1): bound how many files one connection
+	// can push so a malicious device can't loop forever thrashing disk.
+	sessionSaved := 0
+
 	// pull drains every available file of one type via START→RESUME→SYNC→DATA.
 	pull := func(identifier, kind, trigger string) int {
 		saved := 0
@@ -118,7 +122,10 @@ func Handle(ctx context.Context, conn net.Conn, st *store.Store, cfg *config.Con
 				logger.Debug().Uint16("got", sc).Msg("cam expected SYNC")
 				return saved
 			}
-			fileBuf := make([]byte, 0, int(packets)*1024)
+			// Grow as DATA arrives — never pre-allocate from the attacker-
+			// declared packet count (audit H2). A hard byte cap below bounds it
+			// regardless of per-packet length (DATA len is uint16).
+			var fileBuf []byte
 			var prevCRC uint16
 			complete := true
 			for i := uint32(0); i < packets; i++ {
@@ -135,13 +142,23 @@ func Handle(ctx context.Context, conn net.Conn, st *store.Store, cfg *config.Con
 				}
 				prevCRC = pktCRC // chain: each packet's CRC seeds the next
 				fileBuf = append(fileBuf, fileData...)
+				if len(fileBuf) > cfg.MaxFileBytes {
+					logger.Warn().Int("bytes", len(fileBuf)).Msg("cam file exceeds MaxFileBytes — aborting")
+					complete = false
+					break
+				}
 			}
 			if !complete {
 				return saved
 			}
 			if name, e := st.SaveMedia(ctx, dev, imei, kind, trigger, fileBuf); e == nil {
 				saved++
+				sessionSaved++
 				logger.Info().Str("kind", kind).Str("file", name).Int("bytes", len(fileBuf)).Msg("cam media saved")
+				if sessionSaved >= cfg.MaxFilesPerSession {
+					logger.Warn().Int("session", sessionSaved).Msg("cam per-session file cap reached")
+					return saved
+				}
 			} else {
 				logger.Warn().Err(e).Msg("cam save media")
 			}

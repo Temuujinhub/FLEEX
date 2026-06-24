@@ -159,21 +159,25 @@ func (s *Store) SaveMedia(ctx context.Context, dev DeviceLookup, imei, kind, tri
 
 	s.imagesSaved.Add(1)
 	s.bytesSaved.Add(uint64(len(data)))
-	s.pruneRetention(ctx)
+	s.pruneRetention(ctx, dev.CompanyID)
 	return name, nil
 }
 
-// pruneRetention keeps the newest MaxFiles rows (and their blobs) so the
-// volume stays bounded. Cheap: the DELETE matches nothing until the cap is
-// exceeded. Object storage at fleet scale replaces this.
-func (s *Store) pruneRetention(ctx context.Context) {
+// pruneRetention keeps the newest MaxFiles rows (and their blobs) PER COMPANY so
+// the volume stays bounded without one noisy tenant evicting another's media
+// (audit M1). Only the saving company's overflow is scanned, so it stays cheap
+// (indexed on companyId). Object storage at fleet scale replaces this.
+func (s *Store) pruneRetention(ctx context.Context, companyID string) {
 	if s.cfg.MaxFiles <= 0 {
 		return
 	}
 	rows, err := s.pg.Query(ctx,
 		`DELETE FROM device_images
-		 WHERE id IN (SELECT id FROM device_images ORDER BY "capturedAt" DESC OFFSET $1)
-		 RETURNING "fileName"`, s.cfg.MaxFiles)
+		 WHERE "companyId" = $1::uuid AND id IN (
+		   SELECT id FROM device_images WHERE "companyId" = $1::uuid
+		   ORDER BY "capturedAt" DESC OFFSET $2
+		 )
+		 RETURNING "fileName"`, companyID, s.cfg.MaxFiles)
 	if err != nil {
 		log.Debug().Err(err).Msg("retention prune")
 		return
