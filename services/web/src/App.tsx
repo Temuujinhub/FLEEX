@@ -9,6 +9,7 @@ import { Protected } from './components/Protected';
 const Landing = lazy(() => import('./pages/Landing').then((m) => ({ default: m.Landing })));
 const Login = lazy(() => import('./pages/Login').then((m) => ({ default: m.Login })));
 const Dashboard = lazy(() => import('./pages/Dashboard').then((m) => ({ default: m.Dashboard })));
+const MobileSummary = lazy(() => import('./pages/MobileSummary').then((m) => ({ default: m.MobileSummary })));
 const Devices = lazy(() => import('./pages/Devices').then((m) => ({ default: m.Devices })));
 const Drivers = lazy(() => import('./pages/Drivers').then((m) => ({ default: m.Drivers })));
 const EcoDriving = lazy(() => import('./pages/EcoDriving').then((m) => ({ default: m.EcoDriving })));
@@ -47,6 +48,18 @@ export function App() {
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
+        {/* Standalone lightweight mobile view — no sidebar chrome. */}
+        <Route
+          path="/m"
+          element={
+            <Protected>
+              <MobileSummary />
+            </Protected>
+          }
+        />
+        {/* Convenience aliases people are likely to type on a phone. */}
+        <Route path="/mobile" element={<Navigate to="/m" replace />} />
+        <Route path="/lite" element={<Navigate to="/m" replace />} />
         <Route
           element={
             <Protected>

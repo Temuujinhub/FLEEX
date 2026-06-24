@@ -101,4 +101,30 @@ export class PositionsService {
       ORDER BY day ASC;
     `;
   }
+
+  // Fleet-wide per-device distance/speed roll-up over [from,to], in a single
+  // tenant-scoped query against the continuous aggregate. Powers the
+  // lightweight mobile summary page so it never has to fan out one request
+  // per device. `company_id` lives on `positions_daily`, so the filter is the
+  // single source of tenant isolation here — never trust a client-supplied id.
+  async fleetSummary(
+    actor: { role: Role; companyId: string | null },
+    from: Date,
+    to: Date,
+  ): Promise<{ deviceId: string; distanceKm: number; maxSpeed: number; samples: number }[]> {
+    const isSuper = actor.role === 'SUPER_ADMIN';
+    if (!isSuper && !actor.companyId) throw new ForbiddenException('No company context');
+    return this.prisma.$queryRaw<
+      { deviceId: string; distanceKm: number; maxSpeed: number; samples: number }[]
+    >`
+      SELECT device_id::text                              AS "deviceId",
+             COALESCE(SUM(GREATEST(distance_km, 0)), 0)::float AS "distanceKm",
+             COALESCE(MAX(max_speed), 0)::float           AS "maxSpeed",
+             COALESCE(SUM(samples), 0)::int               AS "samples"
+      FROM positions_daily
+      WHERE day BETWEEN ${from}::date AND ${to}::date
+        AND (${isSuper}::boolean OR company_id = ${actor.companyId}::uuid)
+      GROUP BY device_id;
+    `;
+  }
 }
