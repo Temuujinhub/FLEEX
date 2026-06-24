@@ -100,7 +100,7 @@ const companyId = actor.role === 'SUPER_ADMIN'
 жолоочдын маршрут, цаг, eco-оноог хардаг — нууцлал/HR-ийн асуудал. Тенант
 **хооронд** алдагдахгүй (companyId шүүлт хэвээр).
 
-### R-2 🟠 (Систем дэх) — Tenant-scope нь "конвенц"-д тулгуурладаг
+### R-2 🟠 (Систем дэх) — Tenant-scope нь "конвенц"-д тулгуурладаг → ✅ ЗАССАН (§4 P1)
 
 Одоогийн хамгаалалт нь service method **бүр** `where: { companyId }`-ийг
 санаж бичсэнд найддаг. Шинэ endpoint нэмэхэд нэг л мартвал → шууд cross-tenant
@@ -128,7 +128,25 @@ API-д tenant-isolation-ийг шалгасан автомат тест байх
 
 ## 4. Эрсдэл бууруулах зөвлөмж (эрэмбэлсэн)
 
-### P1. Гүнд хамгаалалт — Prisma tenant-guard extension (R-2)
+### P1. Гүнд хамгаалалт — Prisma tenant-guard (R-2) — ✅ ХЭРЭГЖСЭН (2026-06-24)
+
+**Хэрэгжүүлсэн:** App-layer auto-guard. `TenantContextInterceptor` (global,
+auth-ийн дараа ажиллана) `req.user`-ийн `{companyId, role}`-ийг
+`AsyncLocalStorage`-д хийнэ; Prisma `$use` middleware түүнийг уншиж,
+non-SUPER_ADMIN үед tenant model-уудын **collection/bulk** үйлдэлд
+(`findMany/findFirst/count/aggregate/groupBy/updateMany/deleteMany`)
+`where.companyId`-г албадан оруулна (`src/common/tenant-guard.ts`,
+`tenant-context.ts`, `tenant-context.interceptor.ts`). **Additive:** by-id
+(`findUnique`) болон raw (`$queryRaw`) нь өмнөх шалгалтаараа хэвээр; request-
+ийн гадна (bootstrap/seed/cron) context байхгүй тул no-op.
+
+> `$extends` query hook-ийн оронд `$use` middleware сонгосон шалтгаан: одоо
+> байгаа ~30 service бүгд `PrismaService`-ийг шууд inject хийдэг тул `$use` нь
+> **ил тод (transparent)**, нэг ч service-ийг өөрчлөхгүй, амархан буцаах
+> боломжтой. (v6 рүү шилжихэд `$extends` рүү шилжиж болно.) 8 unit тест +
+> e2e-д interceptor идэвхтэйгээр 24 кейс дамжсан.
+
+#### Анхны зөвлөмж (лавлагаа): хоёр сонголт байсан
 
 `where: { companyId }`-ийг **автоматаар** оруулдаг давхарга нэмж, "мартах"
 эрсдэлийг устгана. Хоёр сонголт:
@@ -203,8 +221,8 @@ CI gate: `pull_request`-д `.github/workflows/ci.yml`, deploy-ийн өмнө
 1. ✅ **P5 negative тестүүд** — хамгийн бага эрсдэл, regress-аас хамгаална. *(хийгдсэн)*
 2. ✅ **P2 DRIVER least-privilege** — баримтжуулсан зан үйлийг нөхсөн. *(хийгдсэн)*
 3. ✅ **P3 WS ticket** — H-7-г бүрэн хаасан. *(хийгдсэн)*
-4. **P1 defense-in-depth (RLS/extension)** — тестийн дараа, үе шаттай. *(дараагийнх — эрсдэлтэй тул зөвшөөрөл асууна)*
-5. **P4 IMEI allowlist** — ingestor дээр.
+4. ✅ **P1 defense-in-depth (Prisma $use guard)** — Prisma extension сонголтоор хэрэгжсэн. *(хийгдсэн)*
+5. **P4 IMEI allowlist** — ingestor дээр. *(дараагийнх)*
 
 > **Тэмдэглэл:** Энэ branch-д tenant-isolation-ийн ажиллаж буй кодыг
 > өөрчлөөгүй — учир нь шинжилгээ түүнийг бат бөх гэдгийг баталсан бөгөөд
