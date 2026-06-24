@@ -8,8 +8,9 @@ ENV VITE_API_URL=$VITE_API_URL \
     VITE_WS_URL=$VITE_WS_URL \
     VITE_GOOGLE_MAPS_API_KEY=$VITE_GOOGLE_MAPS_API_KEY
 
-COPY package.json package-lock.json* ./
-RUN npm install --no-audit --no-fund --legacy-peer-deps
+COPY package.json package-lock.json ./
+# npm ci (audit M6): reproducible, integrity-checked install from the lockfile.
+RUN npm ci --no-audit --no-fund --legacy-peer-deps
 
 COPY . .
 RUN npm run build

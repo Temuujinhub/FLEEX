@@ -38,11 +38,15 @@ case "$CMD" in
     ;;
 
   logs-ingestor)
-    $COMPOSE logs --tail="$TAIL" --no-color gps-ingestor
+    $COMPOSE logs --tail="$TAIL" --no-color ingestor
     ;;
 
   logs-engine)
     $COMPOSE logs --tail="$TAIL" --no-color events-engine
+    ;;
+
+  logs-media)
+    $COMPOSE logs --tail="$TAIL" --no-color media-service
     ;;
 
   logs-web)
@@ -61,10 +65,10 @@ case "$CMD" in
     ;;
 
   restart-ingestor)
-    log "Restarting gps-ingestor"
-    $COMPOSE restart gps-ingestor
+    log "Restarting ingestor"
+    $COMPOSE restart ingestor
     sleep 3
-    $COMPOSE ps gps-ingestor
+    $COMPOSE ps ingestor
     ;;
 
   restart-engine)
@@ -72,6 +76,13 @@ case "$CMD" in
     $COMPOSE restart events-engine
     sleep 3
     $COMPOSE ps events-engine
+    ;;
+
+  restart-media)
+    log "Restarting media-service"
+    $COMPOSE restart media-service
+    sleep 3
+    $COMPOSE ps media-service
     ;;
 
   restart-web)
@@ -100,8 +111,12 @@ case "$CMD" in
     else
       echo 'SEED_DEMO_COMPANIES=true' >> .env
     fi
-    if ! grep -q '^SEED_DEMO_PASSWORD=' .env; then
-      echo 'SEED_DEMO_PASSWORD=Fleex@2026' >> .env
+    # Don't write a known-weak default (audit I-5/M7): the seed service refuses
+    # placeholder passwords, so writing one here just silently no-ops. Require
+    # the operator to set a strong one first.
+    if ! grep -q '^SEED_DEMO_PASSWORD=.\+' .env; then
+      warn "SEED_DEMO_PASSWORD is not set to a strong value in .env — set one first (the seed refuses known defaults). Aborting."
+      exit 1
     fi
     log "Flag set, restarting api"
     $COMPOSE restart api
@@ -120,7 +135,7 @@ case "$CMD" in
 
   *)
     echo "Unknown command: $CMD" >&2
-    echo "Allowed: status, logs-api, logs-ingestor, logs-engine, logs-web, logs-db, restart-api, restart-ingestor, restart-engine, restart-web, restart-all, seed-demo-companies, prune-images" >&2
+    echo "Allowed: status, logs-api, logs-ingestor, logs-engine, logs-media, logs-web, logs-db, restart-api, restart-ingestor, restart-engine, restart-media, restart-web, restart-all, seed-demo-companies, prune-images" >&2
     exit 2
     ;;
 esac

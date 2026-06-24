@@ -65,5 +65,17 @@ docker compose start nginx
 sleep 2
 docker compose exec nginx nginx -t
 
+# Auto-renewal (audit L7): install + enable the systemd timer so the cert can
+# never silently expire (which would self-DoS the whole site). Idempotent.
+if command -v systemctl >/dev/null 2>&1; then
+  echo "[enable-tls] Installing the renewal timer"
+  cp infra/deploy/systemd/fleex-certbot-renew.service /etc/systemd/system/
+  cp infra/deploy/systemd/fleex-certbot-renew.timer   /etc/systemd/system/
+  systemctl daemon-reload
+  systemctl enable --now fleex-certbot-renew.timer
+  echo "[enable-tls] Renewal timer: $(systemctl is-active fleex-certbot-renew.timer)"
+else
+  echo "[enable-tls] systemd not found — set up renewal manually (see docs/DEPLOYMENT.md)."
+fi
+
 echo "TLS enabled for https://$DOMAIN"
-echo "Set up auto-renewal in /etc/cron.d/. See docs/DEPLOYMENT.md."

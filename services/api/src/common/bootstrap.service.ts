@@ -22,6 +22,17 @@ export class BootstrapService implements OnApplicationBootstrap {
     const companyName = this.config.get<string>('BOOTSTRAP_ADMIN_COMPANY') ?? 'Fleex';
     if (!email || !password) return;
 
+    // Refuse to bootstrap a SUPER_ADMIN with a known-default / weak password
+    // (audit M7). Fail closed — better no admin than one with a publicly-known
+    // password. The operator must set a strong BOOTSTRAP_ADMIN_PASSWORD.
+    if (WEAK_BOOTSTRAP_PASSWORDS.has(password) || password.length < 12) {
+      this.logger.error(
+        'BOOTSTRAP_ADMIN_PASSWORD is a known default or shorter than 12 chars — refusing to ' +
+          'create the SUPER_ADMIN. Set a strong password and restart.',
+      );
+      return;
+    }
+
     const existing = await this.prisma.user.findFirst({
       where: { role: 'SUPER_ADMIN', status: 'ACTIVE' },
       select: { id: true },
@@ -64,6 +75,17 @@ export class BootstrapService implements OnApplicationBootstrap {
     this.logger.warn(`Bootstrap SUPER_ADMIN created for ${email} – change the password immediately.`);
   }
 }
+
+// Known placeholder/weak admin passwords that must never reach production
+// (audit M7). Mirrors the demo-seed guard.
+const WEAK_BOOTSTRAP_PASSWORDS = new Set<string>([
+  'ChangeMeOnFirstLogin!',
+  'change-me',
+  'changeme',
+  'password',
+  'admin',
+  'Fleex@2026',
+]);
 
 function slugify(s: string): string {
   return s

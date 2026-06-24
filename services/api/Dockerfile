@@ -6,8 +6,10 @@ WORKDIR /app
 
 RUN apk add --no-cache python3 make g++ openssl
 
-COPY package.json package-lock.json* ./
-RUN npm install --no-audit --no-fund --legacy-peer-deps
+COPY package.json package-lock.json ./
+# npm ci (audit M6): reproducible, integrity-checked install from the lockfile;
+# fails on lock/package.json drift instead of silently resolving new versions.
+RUN npm ci --no-audit --no-fund --legacy-peer-deps
 
 COPY prisma ./prisma
 RUN npx prisma generate

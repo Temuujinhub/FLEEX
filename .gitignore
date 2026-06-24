@@ -1,8 +1,8 @@
 # Dependencies
 node_modules/
 **/node_modules/
-package-lock.json
-**/package-lock.json
+# package-lock.json is TRACKED (audit M6): npm ci needs it for reproducible,
+# integrity-checked installs. Do not ignore it.
 .pnp.*
 .yarn/*
 !.yarn/patches

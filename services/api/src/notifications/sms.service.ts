@@ -204,10 +204,11 @@ export class SmsService implements OnModuleInit {
     const payload: Record<string, string | number> = { from: this.from, to, text };
     if (this.brand) payload.brand = this.brand;
     const url = `${TEXT_API_BASE}/send`;
-    // Log the URL+body on every send so an operator can grep the API log and
-    // see exactly which request hit the gateway (the x-api-key header itself
-    // never leaves this process — only the URL and JSON body are logged).
-    this.logger.log(`SMS POST ${url} body=${JSON.stringify(payload)}`);
+    // Don't log the recipient MSISDN / message text at info level — that's PII +
+    // location data sitting in the app log (audit L5). Info shows only the
+    // endpoint; the full body stays at debug for troubleshooting.
+    this.logger.log(`SMS POST ${url}`);
+    this.logger.debug(`SMS POST ${url} body=${JSON.stringify(payload)}`);
 
     let res: Response;
     let raw = '';
