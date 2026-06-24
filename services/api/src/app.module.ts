@@ -40,6 +40,7 @@ import { GeoModule } from './geo/geo.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
 import { AuditInterceptor } from './audit/audit.interceptor';
+import { TenantContextInterceptor } from './common/tenant-context.interceptor';
 import { BootstrapService } from './common/bootstrap.service';
 import { DemoSeedService } from './common/demo-seed.service';
 import { TimescaleInitService } from './common/timescale-init.service';
@@ -109,6 +110,9 @@ function validateEnv(env: Record<string, any>): Record<string, any> {
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    // Outermost interceptor: establish the tenant context for the whole
+    // handler (and the Prisma guard) before anything else runs.
+    { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
   ],
 })

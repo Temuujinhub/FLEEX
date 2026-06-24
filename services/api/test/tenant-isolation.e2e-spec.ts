@@ -22,7 +22,7 @@ process.env.JWT_SECRET =
   process.env.JWT_SECRET ?? 'test-only-jwt-secret-not-for-production-0123456789abcdef';
 
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { PassportModule } from '@nestjs/passport';
 import { JwtService } from '@nestjs/jwt';
@@ -37,6 +37,7 @@ import { RedisService } from '../src/common/redis.service';
 import { JwtStrategy } from '../src/auth/jwt.strategy';
 import { JwtAuthGuard } from '../src/auth/jwt-auth.guard';
 import { RolesGuard } from '../src/auth/roles.guard';
+import { TenantContextInterceptor } from '../src/common/tenant-context.interceptor';
 import { DevicesModule } from '../src/devices/devices.module';
 import { PositionsModule } from '../src/positions/positions.module';
 import { MediaModule } from '../src/media/media.module';
@@ -116,6 +117,8 @@ beforeAll(async () => {
       JwtStrategy,
       { provide: APP_GUARD, useClass: JwtAuthGuard },
       { provide: APP_GUARD, useClass: RolesGuard },
+      // P1 interceptor: proves it doesn't break the request/response matrix.
+      { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
     ],
   })
     .overrideProvider(PrismaService)

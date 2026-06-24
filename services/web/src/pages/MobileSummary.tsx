@@ -19,6 +19,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { api, clearTokens } from '../lib/api';
 import { useAuth } from '../store/auth';
+import { setViewPref } from '../lib/viewMode';
 import * as Icon from '../components/icons';
 
 type Period = 'today' | 'week';
@@ -108,6 +109,7 @@ export function MobileSummary() {
           <div className="flex items-center gap-1.5">
             <Link
               to="/app"
+              onClick={() => setViewPref('full')}
               className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-brand-500"
               title={t('mobile.fullConsole', 'Бүрэн самбар')}
             >

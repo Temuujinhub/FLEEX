@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, setTokens } from '../lib/api';
 import { useAuth } from '../store/auth';
+import { homeRoute } from '../lib/viewMode';
 
 const HERO =
   'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=1800&q=85&auto=format&fit=crop';
@@ -24,7 +25,9 @@ export function Login() {
       const r = await api.post('/auth/login', { email, password });
       setTokens(r.data.accessToken, r.data.refreshToken);
       setUser(r.data.user);
-      navigate('/app');
+      // Land on the lightweight view for phones / data-saver clients (or a
+      // saved preference); desktops get the full console.
+      navigate(homeRoute());
     } catch (err: any) {
       setError(err.response?.data?.message ?? t('login.error'));
     } finally {

@@ -2,7 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { ReactNode, useMemo } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../store/auth';
-import { Check } from '../components/icons';
+import { Check, MapPin, Truck, BarChart, AlertTriangle, Gauge, Camera, ArrowRight, Smartphone } from '../components/icons';
+import { setViewPref } from '../lib/viewMode';
 
 // Mining-flavored ops dashboard. Pulls live device + recent-event data
 // and projects a handful of fleet KPIs on top. Chartlets are pure SVG so
@@ -31,13 +32,31 @@ export function Dashboard() {
     queryFn: () => api.get('/device-health/status').then((r) => r.data),
     refetchInterval: 60_000,
   });
+  // Fleet distance driven today — one tenant-scoped roll-up (same endpoint the
+  // lightweight mobile page uses), folded into the header as a live KPI.
+  const summary = useQuery({
+    queryKey: ['positions-summary', 'today'],
+    queryFn: () => {
+      const now = new Date();
+      const from = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+      return api.get(`/positions/summary?from=${from}&to=${now.toISOString()}`).then((r) => r.data);
+    },
+    refetchInterval: 60_000,
+  });
 
   const list: any[] = devices.data ?? [];
   const evts: any[] = events.data ?? [];
   const online = list.filter((d) => d.online).length;
   const offline = list.length - online;
   const movingNow = list.filter((d) => (d.lastSpeed ?? 0) > 1).length;
+  // Online but stationary — "idle" (engine may be on, not moving).
+  const idle = list.filter((d) => d.online && (d.lastSpeed ?? 0) <= 1).length;
   const critical = evts.filter((e) => e.severity === 'CRITICAL').length;
+  const todayKm = useMemo(
+    () => (summary.data ?? []).reduce((a: number, r: any) => a + (r.distanceKm ?? 0), 0),
+    [summary.data],
+  );
+  const loading = devices.isLoading;
 
   // Last-24h alert distribution by hour, used by the spark bar chart.
   const sparkBars = useMemo(() => buildHourlyHistogram(evts), [evts]);
@@ -51,54 +70,94 @@ export function Dashboard() {
 
   return (
     <div className="p-6 md:p-8 space-y-6 bg-slate-100 min-h-full">
-      {/* Header */}
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <div className="text-xs uppercase tracking-widest text-brand-700/80">
-            {greeting()} {user?.fullName?.split(' ')[0] ?? ''}
+      {/* Header banner */}
+      <header className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-brand-800 via-brand-700 to-brand-600 text-white p-6 md:p-7 shadow-sm">
+        {/* subtle decorative glow, purely cosmetic */}
+        <div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-white/10 blur-2xl" />
+        <div className="relative flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <div className="text-xs uppercase tracking-widest text-white/70">
+              {greeting()} {user?.fullName?.split(' ')[0] ?? ''}
+            </div>
+            <h1 className="text-2xl md:text-3xl font-bold mt-1">Хяналтын самбар</h1>
+            <p className="text-sm text-white/70 mt-0.5">
+              Уурхайн флотын бодит цагийн дүр зураг · {new Date().toLocaleString('mn-MN')}
+            </p>
           </div>
-          <h1 className="text-3xl font-bold mt-1">Хяналтын самбар</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Уурхайн флотын бодит цагийн дүр зураг · {new Date().toLocaleString('mn-MN')}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 text-xs">
-          <Dot color="emerald" /> Real-time холболт идэвхтэй
+          <div className="flex flex-wrap items-center gap-2">
+            <HeaderPill label="Онлайн" value={`${online}/${list.length || 0}`} tone="emerald" />
+            <HeaderPill label="Хөдөлгөөнтэй" value={movingNow} tone="sky" />
+            <HeaderPill label="Өнөөдрийн зам" value={`${fmtKm(todayKm)} км`} tone="sky" />
+            <HeaderPill label="Дохиолол" value={evts.length} tone={critical > 0 ? 'rose' : 'slate'} />
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs">
+              <Dot color="emerald" /> Real-time
+            </span>
+            {/* Switch to the lightweight phone view (sticky choice). */}
+            <a
+              href="/m"
+              onClick={() => setViewPref('lite')}
+              className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium transition hover:bg-white/20"
+              title="Хөнгөн харагдац руу шилжих"
+            >
+              <span className="h-3.5 w-3.5">
+                <Smartphone className="h-full w-full" />
+              </span>
+              Хөнгөн харагдац
+            </a>
+          </div>
         </div>
       </header>
 
-      {/* KPI cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Kpi
-          title="Нийт машин"
-          value={list.length}
-          hint="Бүртгэгдсэн төхөөрөмж"
-          icon={<TruckGlyph />}
-          accent="slate"
-        />
-        <Kpi
-          title="Онлайн"
-          value={online}
-          hint={`${online}/${list.length || 1} холбогдсон`}
-          icon={<SignalGlyph />}
-          accent="emerald"
-          progress={list.length ? (online / list.length) * 100 : 0}
-        />
-        <Kpi
-          title="Хөдөлгөөнтэй"
-          value={movingNow}
-          hint="Одоо явж буй"
-          icon={<MotionGlyph />}
-          accent="brand"
-        />
-        <Kpi
-          title="Шинэ дохиолол"
-          value={evts.length}
-          hint={critical > 0 ? `${critical} ноцтой` : 'Бүгд хэвийн'}
-          icon={<AlertGlyph />}
-          accent={critical > 0 ? 'rose' : evts.length > 0 ? 'amber' : 'slate'}
-        />
+      {/* Quick actions launchpad */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <QuickAction href="/app/map" icon={<MapPin className="h-full w-full" />} label="Шууд зураг" />
+        <QuickAction href="/app/devices" icon={<Truck className="h-full w-full" />} label="Машинууд" />
+        <QuickAction href="/app/events" icon={<AlertTriangle className="h-full w-full" />} label="Дохиолол" />
+        <QuickAction href="/app/reports" icon={<BarChart className="h-full w-full" />} label="Тайлан" />
+        <QuickAction href="/app/eco-driving" icon={<Gauge className="h-full w-full" />} label="Эко жолоодлого" />
+        <QuickAction href="/app/camera" icon={<Camera className="h-full w-full" />} label="Камер" />
       </div>
+
+      {/* KPI cards */}
+      {loading ? (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <KpiSkeleton key={i} />
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <Kpi
+            title="Нийт машин"
+            value={list.length}
+            hint="Бүртгэгдсэн төхөөрөмж"
+            icon={<TruckGlyph />}
+            accent="slate"
+          />
+          <Kpi
+            title="Онлайн"
+            value={online}
+            hint={`${online}/${list.length || 1} холбогдсон`}
+            icon={<SignalGlyph />}
+            accent="emerald"
+            progress={list.length ? (online / list.length) * 100 : 0}
+          />
+          <Kpi
+            title="Хөдөлгөөнтэй"
+            value={movingNow}
+            hint={idle > 0 ? `${idle} сул зогсолттой` : 'Одоо явж буй'}
+            icon={<MotionGlyph />}
+            accent="brand"
+          />
+          <Kpi
+            title="Шинэ дохиолол"
+            value={evts.length}
+            hint={critical > 0 ? `${critical} ноцтой` : 'Бүгд хэвийн'}
+            icon={<AlertGlyph />}
+            accent={critical > 0 ? 'rose' : evts.length > 0 ? 'amber' : 'slate'}
+          />
+        </div>
+      )}
 
       {/* Charts row */}
       <div className="grid lg:grid-cols-3 gap-4">
@@ -404,6 +463,64 @@ function Dot({ color }: { color: 'emerald' | 'amber' | 'rose' }) {
   return <span className={`inline-block h-2 w-2 rounded-full ${m[color]} animate-pulse`} />;
 }
 
+// At-a-glance chip shown in the header banner (on the dark gradient).
+function HeaderPill({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number | string;
+  tone: 'emerald' | 'sky' | 'rose' | 'slate';
+}) {
+  const dot: Record<string, string> = {
+    emerald: 'bg-emerald-400',
+    sky: 'bg-sky-300',
+    rose: 'bg-rose-400',
+    slate: 'bg-slate-300',
+  };
+  return (
+    <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-xs">
+      <span className={`h-2 w-2 rounded-full ${dot[tone]}`} />
+      <span className="text-white/70">{label}</span>
+      <span className="font-bold tabular-nums">{value}</span>
+    </span>
+  );
+}
+
+// Launchpad shortcut card under the header — turns the dashboard into a hub.
+function QuickAction({ href, icon, label }: { href: string; icon: ReactNode; label: string }) {
+  return (
+    <a
+      href={href}
+      className="group flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition hover:border-brand-300 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+    >
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-700 transition group-hover:bg-brand-100">
+        <span className="h-5 w-5">{icon}</span>
+      </span>
+      <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700">{label}</span>
+      <span className="h-4 w-4 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-brand-500">
+        <ArrowRight className="h-full w-full" />
+      </span>
+    </a>
+  );
+}
+
+// Pulsing placeholder shown in place of a KPI card while devices load, so the
+// dashboard doesn't flash a wall of zeros before the first fetch resolves.
+function KpiSkeleton() {
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 animate-pulse">
+      <div className="flex items-start justify-between gap-2">
+        <div className="h-3 w-20 rounded bg-slate-200" />
+        <div className="h-9 w-9 rounded-lg bg-slate-100" />
+      </div>
+      <div className="mt-4 h-8 w-16 rounded bg-slate-200" />
+      <div className="mt-2 h-3 w-24 rounded bg-slate-100" />
+    </div>
+  );
+}
+
 function SeverityChip({ s }: { s: string }) {
   const m: Record<string, string> = {
     INFO: 'bg-sky-100 text-sky-800',
@@ -454,6 +571,11 @@ function greeting() {
   if (h < 12) return 'Өглөөний мэнд,';
   if (h < 18) return 'Өдрийн мэнд,';
   return 'Оройн мэнд,';
+}
+
+function fmtKm(n: number) {
+  if (!Number.isFinite(n)) return '0';
+  return n >= 100 ? Math.round(n).toLocaleString('en-US') : n.toFixed(1);
 }
 
 function buildHourlyHistogram(evts: any[]) {

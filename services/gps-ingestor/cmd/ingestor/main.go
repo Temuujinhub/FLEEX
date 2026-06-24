@@ -72,9 +72,10 @@ type server struct {
 	store       *store.Store
 	activeConns atomic.Int64
 	totalConns  atomic.Uint64
-	totalMsgs   atomic.Uint64
-	parseErrors atomic.Uint64
-	crcErrors   atomic.Uint64
+	totalMsgs     atomic.Uint64
+	parseErrors   atomic.Uint64
+	crcErrors     atomic.Uint64
+	rejectedConns atomic.Uint64
 }
 
 func (s *server) runTCP(ctx context.Context) error {
@@ -139,12 +140,28 @@ func (s *server) handle(parent context.Context, conn net.Conn) {
 	logger := log.With().Str("remote", remote).Logger()
 
 	session := teltonika.NewSession(conn, s.cfg.ReadTimeout, s.cfg.WriteTimeout)
-	imei, err := session.Handshake()
+	imei, err := session.ReadIMEI()
 	if err != nil {
 		logger.Warn().Err(err).Msg("handshake")
 		return
 	}
 	logger = logger.With().Str("imei", imei).Logger()
+
+	// Allowlist (audit R-4): only registered devices get the accept byte, so a
+	// spoofed or unknown IMEI can't hold the connection or probe the fleet.
+	// AcceptHandshake fails open on a DB lookup error so a database blip can't
+	// lock out the whole fleet; telemetry for a truly unknown IMEI is still
+	// dropped downstream.
+	if s.cfg.RequireRegisteredDevice && !s.store.AcceptHandshake(ctx, imei) {
+		_ = session.RejectIMEI()
+		s.rejectedConns.Add(1)
+		logger.Warn().Msg("rejected unregistered device")
+		return
+	}
+	if err := session.AcceptIMEI(); err != nil {
+		logger.Warn().Err(err).Msg("imei ack")
+		return
+	}
 	logger.Info().Msg("device connected")
 	defer logger.Info().Msg("device disconnected")
 
@@ -255,6 +272,7 @@ func (s *server) runHealth(ctx context.Context) {
 		fmt.Fprintf(w, "fleex_ingestor_messages_total %d\n", s.totalMsgs.Load())
 		fmt.Fprintf(w, "fleex_ingestor_parse_errors_total %d\n", s.parseErrors.Load())
 		fmt.Fprintf(w, "fleex_ingestor_crc_errors_total %d\n", s.crcErrors.Load())
+		fmt.Fprintf(w, "fleex_ingestor_rejected_connections_total %d\n", s.rejectedConns.Load())
 		s.store.WriteMetrics(w)
 	})
 
