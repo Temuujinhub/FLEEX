@@ -73,6 +73,10 @@ export class AuthService {
     };
 
     if (!user) {
+      // Equalize timing with the known-user path so an attacker can't enumerate
+      // accounts by measuring latency (audit M5): run a real Argon2id verify
+      // against a throwaway hash before returning the identical failure.
+      await dummyVerify(password);
       await auditFail('unknown_user');
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -229,6 +233,18 @@ export class AuthService {
     });
     return { accessToken, refreshToken };
   }
+}
+
+// Lazily-computed throwaway Argon2id hash used to equalize login timing for
+// unknown emails (so the no-such-user path costs ~the same as a wrong-password
+// verify). Computed once on first use; subsequent calls are a plain verify.
+let dummyHashPromise: Promise<string> | null = null;
+async function dummyVerify(password: string): Promise<void> {
+  if (!dummyHashPromise) {
+    dummyHashPromise = argon2.hash('fleex-timing-equalizer', { type: argon2.argon2id });
+  }
+  const h = await dummyHashPromise;
+  await argon2.verify(h, password).catch(() => false);
 }
 
 function sha256(s: string): string {

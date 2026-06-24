@@ -13,7 +13,9 @@ const SAFE_USER_FIELDS = {
   status: true,
   companyId: true,
   driverId: true,
-  mfaEnabled: true,
+  // mfaEnabled/mfaSecret are NOT surfaced: MFA is not enforced anywhere in the
+  // login flow yet, so advertising it would be a false sense of security
+  // (audit M4). Re-add once TOTP enrollment + verification ships.
   lastLoginAt: true,
   createdAt: true,
   updatedAt: true,
