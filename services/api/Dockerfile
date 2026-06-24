@@ -48,4 +48,10 @@ ENTRYPOINT ["/sbin/tini", "--"]
 # hypertable because the continuous aggregate's dependent views blocked
 # it). The relational schema is stable in production; if a real
 # migration is needed, run `prisma db push` manually with eyes on.
-CMD ["sh", "-c", "./node_modules/.bin/prisma db push --accept-data-loss --schema=prisma/schema.prisma || echo '[entrypoint] WARNING: prisma db push failed; booting with existing DB schema'; exec node dist/main.js"]
+#
+# --accept-data-loss is GATED behind PRISMA_DB_PUSH_ACCEPT_DATA_LOSS
+# (default off, audit H7). By default db push runs WITHOUT it, so a schema
+# drift that would DROP a column/table is refused (the `||` branch keeps the
+# existing schema and boots) instead of silently destroying production data.
+# Only set the flag true for an intentional, backed-up destructive sync.
+CMD ["sh", "-c", "FLAGS=''; [ \"$PRISMA_DB_PUSH_ACCEPT_DATA_LOSS\" = 'true' ] && { echo '[entrypoint] WARNING: --accept-data-loss enabled — destructive schema sync'; FLAGS='--accept-data-loss'; }; ./node_modules/.bin/prisma db push $FLAGS --schema=prisma/schema.prisma || echo '[entrypoint] WARNING: prisma db push failed; booting with existing DB schema'; exec node dist/main.js"]

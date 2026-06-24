@@ -126,20 +126,33 @@ docker compose logs -f ingestor --tail=200
 docker compose restart api
 ```
 
-### Backups
+### Backups (automated — audit L6)
 
-PostgreSQL data lives in the `postgres-data` named volume. Recommended:
-nightly `pg_dump` to a remote object store. Example unit:
+`infra/deploy/backup.sh` does a compressed `pg_dump -Fc`, rotates local copies
+(`BACKUP_KEEP_DAYS`, default 14), optionally ships off-host (`BACKUP_REMOTE_CMD`),
+and can verify the audit chain (`AUDIT_VERIFY_TOKEN`). Enable the nightly timer
+once on the host:
 
 ```bash
-docker exec fleex-postgres pg_dump -U "$POSTGRES_USER" -Fc -f /tmp/fleex-$(date -I).dump "$POSTGRES_DB"
-docker cp fleex-postgres:/tmp/fleex-$(date -I).dump /var/backups/fleex/
-# then push to Spaces / S3
+sudo cp /opt/fleex/infra/deploy/systemd/fleex-backup.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now fleex-backup.timer
+systemctl list-timers fleex-backup.timer        # confirm next run
+sudo /opt/fleex/infra/deploy/backup.sh          # run once now to test
 ```
 
-`audit_logs` and the latest `positions_daily` rows should be replicated
-**off-host** for compliance — the hash chain only proves nothing was
-mutated, not that the table wasn't dropped wholesale.
+Set `BACKUP_REMOTE_CMD` in `.env` to replicate **off-host** (S3/Spaces) — the
+audit hash chain proves rows weren't mutated, not that the table/volume wasn't
+dropped wholesale. Restore: `gunzip -c <file>.dump.gz | docker compose exec -T
+postgres pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean`.
+
+> **Schema changes (audit H7):** the API boots with `prisma db push` in
+> NON-destructive mode by default. An intentional destructive migration needs
+> `PRISMA_DB_PUSH_ACCEPT_DATA_LOSS=true` — **take a backup first**.
+
+> **media-service non-root (audit H6):** the service now runs as uid 10001. A
+> fresh `media-data` volume inherits this automatically; when upgrading an
+> existing (root-owned) volume, chown it once:
+> `docker compose run --rm -u 0 --entrypoint sh media-service -c 'chown -R 10001:10001 /data/media'`.
 
 ### Verify audit chain
 
