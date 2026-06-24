@@ -110,9 +110,36 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     await this.sub?.quit().catch(() => undefined);
   }
 
-  handleConnection(client: WebSocket, request: { url?: string; headers: Record<string, string | string[]> }) {
+  async handleConnection(
+    client: WebSocket,
+    request: { url?: string; headers: Record<string, string | string[]> },
+  ) {
     try {
       const url = new URL(request.url ?? '/', 'http://localhost');
+
+      // Preferred path: a single-use ticket minted by POST /auth/ws-ticket.
+      // Consumed atomically (GETDEL) so it can't be replayed, and the JWT
+      // never appears in the WS URL / access logs (audit H-7 / R-3).
+      const ticket = url.searchParams.get('ticket');
+      if (ticket) {
+        const raw = await this.redis.client.getdel(`ws:ticket:${ticket}`);
+        if (!raw) {
+          client.close(4001, 'invalid ticket');
+          return;
+        }
+        const id = JSON.parse(raw) as { sub: string; role: string; companyId: string | null };
+        this.clients.set(client, {
+          userId: id.sub,
+          role: id.role,
+          companyId: id.companyId,
+          deviceFilter: new Set<string>(),
+        });
+        client.send(JSON.stringify({ type: 'hello', userId: id.sub }));
+        return;
+      }
+
+      // Legacy path: JWT in the query string / Authorization header. Kept for
+      // backward compatibility during rollout; prefer ?ticket.
       const token = url.searchParams.get('token') ?? extractBearer(request.headers.authorization);
       if (!token) {
         client.close(4001, 'no token');

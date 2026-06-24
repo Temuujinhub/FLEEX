@@ -1,0 +1,36 @@
+# Pull-request CI gate. Runs the API test suite — most importantly the
+# cross-tenant isolation regression suite (services/api/test/
+# tenant-isolation.e2e-spec.ts) — so a change that breaks multi-tenant
+# isolation fails the PR check instead of reaching production.
+#
+# Deploys are gated separately by deploy.yml's build-check on push to the
+# deploy branches; this workflow gives every PR an early, visible signal.
+
+name: ci
+
+on:
+  pull_request:
+  workflow_dispatch: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-tests:
+    name: API tests (tenant isolation)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install, generate Prisma client & test
+        working-directory: services/api
+        run: |
+          npm install --no-audit --no-fund --legacy-peer-deps
+          npx prisma generate
+          npm test

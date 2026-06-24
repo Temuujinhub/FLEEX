@@ -4,17 +4,18 @@ import * as ExcelJS from 'exceljs';
 import { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../common/redis.service';
+import { Actor, applyActorScope, driverMayAccess } from '../auth/actor-scope';
 
 @Injectable()
 export class DevicesService {
   constructor(private readonly prisma: PrismaService, private readonly redis: RedisService) {}
 
   async list(
-    actor: { role: Role; companyId: string | null },
+    actor: Actor,
     opts: { groupId?: string; garageId?: string; vehicleType?: VehicleType; status?: DeviceStatus; search?: string },
   ) {
-    const where: any = {};
-    if (actor.role !== 'SUPER_ADMIN') where.companyId = actor.companyId;
+    // Tenant scope, plus driver scope for DRIVER actors (own vehicles only).
+    const where: any = applyActorScope(actor, {});
     if (opts.groupId) where.groupId = opts.groupId;
     if (opts.garageId) where.garageId = opts.garageId;
     if (opts.vehicleType) where.vehicleType = opts.vehicleType;
@@ -58,7 +59,7 @@ export class DevicesService {
     }));
   }
 
-  async get(id: string, actor: { role: Role; companyId: string | null }) {
+  async get(id: string, actor: Actor) {
     const d = await this.prisma.device.findUnique({
       where: { id },
       include: {
@@ -70,6 +71,7 @@ export class DevicesService {
     });
     if (!d) throw new NotFoundException();
     this.ensureSameTenant(actor, d.companyId);
+    if (!driverMayAccess(actor, d.driverId)) throw new ForbiddenException('Not assigned to this vehicle');
     const online = Boolean(await this.redis.client.exists(`ingestor:online:${d.imei}`));
     return { ...d, online };
   }

@@ -66,6 +66,11 @@ model User {
   id            String     @id @default(uuid()) @db.Uuid
   companyId     String?    @db.Uuid
   company       Company?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  // Optional link to a Driver record. When a DRIVER-role user is linked, the
+  // API scopes their reads to that driver's assigned vehicle(s) (least
+  // privilege, audit R-1). An unlinked DRIVER sees nothing — fail closed.
+  driverId      String?    @db.Uuid
+  driver        Driver?    @relation(fields: [driverId], references: [id], onDelete: SetNull)
   email         String     @unique
   username      String?    @unique
   passwordHash  String
@@ -562,6 +567,7 @@ model Driver {
   devices     Device[]
   scores      DriverScore[]
   trips       Trip[]
+  users       User[]                              // app logins linked to this driver
 
   @@index([companyId])
   @@index([groupId])

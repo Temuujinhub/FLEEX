@@ -19,6 +19,9 @@ class UpdateUserDto {
   @IsOptional() @IsString() phone?: string;
   @IsOptional() @IsEnum(Role) role?: Role;
   @IsOptional() @IsEnum(UserStatus) status?: UserStatus;
+  // Link this login to a Driver record (or null to unlink). @IsOptional skips
+  // validation for null/undefined, so null is accepted as "unlink".
+  @IsOptional() @IsUUID() driverId?: string | null;
 }
 
 class ResetPasswordDto {

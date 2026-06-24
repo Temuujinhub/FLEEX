@@ -10,6 +10,7 @@ import * as argon2 from 'argon2';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { RedisService } from '../common/redis.service';
 
 const FAIL_THRESHOLD = 5;
 const LOCK_MINUTES = 15;
@@ -23,7 +24,25 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly audit: AuditService,
+    private readonly redis: RedisService,
   ) {}
+
+  // Mints a single-use, short-lived (30s) ticket for the WebSocket upgrade so
+  // the long-lived JWT never travels in the WS URL — where it would otherwise
+  // be captured by nginx/proxy access logs and browser history (audit H-7 /
+  // R-3). The ticket is stored in Redis and consumed exactly once (GETDEL) by
+  // the gateway on connect.
+  async createWsTicket(user: { id: string; role: string; companyId: string | null }) {
+    const ticket = randomBytes(32).toString('hex');
+    const expiresIn = 30;
+    await this.redis.client.set(
+      `ws:ticket:${ticket}`,
+      JSON.stringify({ sub: user.id, role: user.role, companyId: user.companyId }),
+      'EX',
+      expiresIn,
+    );
+    return { ticket, expiresIn };
+  }
 
   async login(email: string, password: string, ip?: string, userAgent?: string) {
     const user = await this.prisma.user.findUnique({
@@ -84,7 +103,7 @@ export class AuthService {
       data: { failedLogins: 0, lockedUntil: null, lastLoginAt: new Date(), status: 'ACTIVE' },
     });
 
-    const tokens = await this.issueTokens(user.id, user.email, user.role, user.companyId, ip, userAgent);
+    const tokens = await this.issueTokens(user.id, user.email, user.role, user.companyId, user.driverId, ip, userAgent);
 
     await this.audit.record({
       actorId: user.id,
@@ -154,6 +173,7 @@ export class AuthService {
       stored.user.email,
       stored.user.role,
       stored.user.companyId,
+      stored.user.driverId,
       ip,
       userAgent,
     );
@@ -174,11 +194,12 @@ export class AuthService {
     email: string,
     role: string,
     companyId: string | null,
+    driverId: string | null,
     ip?: string,
     userAgent?: string,
   ) {
     const accessToken = await this.jwt.signAsync(
-      { sub: userId, email, role, companyId },
+      { sub: userId, email, role, companyId, driverId },
       { expiresIn: this.config.get<string>('JWT_EXPIRES_IN') ?? '15m' },
     );
 

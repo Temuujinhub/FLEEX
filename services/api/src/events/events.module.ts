@@ -6,6 +6,7 @@ import { EventType, Role } from '@prisma/client';
 import { Roles } from '../auth/roles.decorator';
 import { Audit } from '../audit/audit.decorator';
 import { PrismaService } from '../prisma/prisma.service';
+import { Actor, NO_DRIVER_MATCH } from '../auth/actor-scope';
 
 class AckDto {
   @IsOptional() @IsString() note?: string;
@@ -16,7 +17,7 @@ class EventsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async list(
-    actor: { role: Role; companyId: string | null },
+    actor: Actor,
     opts: { from?: Date; to?: Date; type?: EventType; deviceId?: string; acknowledged?: boolean; cursor?: bigint; limit: number },
   ) {
     const where: any = {};
@@ -25,6 +26,18 @@ class EventsService {
     if (opts.type) where.type = opts.type;
     if (typeof opts.acknowledged === 'boolean') where.acknowledged = opts.acknowledged;
     if (opts.from || opts.to) where.occurredAt = { gte: opts.from, lte: opts.to };
+
+    // DRIVER least-privilege: events carry no driverId, so restrict to the
+    // driver's own vehicles by deviceId. An unlinked driver (no devices) sees
+    // nothing; a ?deviceId for a vehicle they don't own is ignored.
+    if (actor.role === 'DRIVER') {
+      const own = await this.prisma.device.findMany({
+        where: { companyId: actor.companyId, driverId: actor.driverId ?? NO_DRIVER_MATCH },
+        select: { id: true },
+      });
+      const ids = own.map((d) => d.id);
+      where.deviceId = opts.deviceId && ids.includes(opts.deviceId) ? opts.deviceId : { in: ids };
+    }
 
     const items = await this.prisma.event.findMany({
       where,

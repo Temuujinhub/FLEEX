@@ -12,6 +12,7 @@ const SAFE_USER_FIELDS = {
   role: true,
   status: true,
   companyId: true,
+  driverId: true,
   mfaEnabled: true,
   lastLoginAt: true,
   createdAt: true,
@@ -102,11 +103,21 @@ export class UsersService {
   async update(
     id: string,
     actor: { role: Role; companyId: string | null; id: string },
-    dto: Partial<{ fullName: string; phone: string; role: Role; status: 'ACTIVE' | 'DISABLED' | 'LOCKED' }>,
+    dto: Partial<{ fullName: string; phone: string; role: Role; status: 'ACTIVE' | 'DISABLED' | 'LOCKED'; driverId: string | null }>,
   ) {
     const target = await this.prisma.user.findUnique({ where: { id } });
     if (!target) throw new NotFoundException();
     this.ensureSameTenant(actor, target.companyId);
+
+    // Linking a login to a Driver (drives DRIVER least-privilege scoping). The
+    // driver must belong to the same tenant as the user; null unlinks. The new
+    // link only takes effect on the user's next token (login/refresh).
+    if (dto.driverId) {
+      const driver = await this.prisma.driver.findUnique({ where: { id: dto.driverId } });
+      if (!driver || (actor.role !== 'SUPER_ADMIN' && driver.companyId !== target.companyId)) {
+        throw new BadRequestException('Driver not found in this company');
+      }
+    }
 
     // No one can grant a role above their own.
     if (dto.role && rank(dto.role) > rank(actor.role)) {

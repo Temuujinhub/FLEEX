@@ -36,6 +36,14 @@ export class AuthController {
   logout(@Body() dto: RefreshDto, @Req() req: any) {
     return this.auth.logout(dto.refreshToken, req.user?.id);
   }
+
+  // Exchanges the caller's JWT for a single-use, 30s WebSocket ticket so the
+  // JWT never appears in the WS URL / access logs (audit H-7 / R-3).
+  @UseGuards(JwtAuthGuard)
+  @Post('ws-ticket')
+  wsTicket(@Req() req: any) {
+    return this.auth.createWsTicket(req.user);
+  }
 }
 
 // With `trust proxy` set in main.ts, Express resolves req.ip from the

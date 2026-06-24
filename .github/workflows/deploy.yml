@@ -77,6 +77,10 @@ jobs:
           npx prisma generate
           npx nest build
 
+      - name: API – tenant-isolation tests
+        working-directory: services/api
+        run: npm test
+
       - name: Web – install & build
         working-directory: services/web
         env:
