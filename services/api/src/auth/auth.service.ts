@@ -11,6 +11,7 @@ import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { RedisService } from '../common/redis.service';
+import { NO_DRIVER_MATCH } from './actor-scope';
 
 const FAIL_THRESHOLD = 5;
 const LOCK_MINUTES = 15;
@@ -32,15 +33,25 @@ export class AuthService {
   // be captured by nginx/proxy access logs and browser history (audit H-7 /
   // R-3). The ticket is stored in Redis and consumed exactly once (GETDEL) by
   // the gateway on connect.
-  async createWsTicket(user: { id: string; role: string; companyId: string | null }) {
+  async createWsTicket(user: { id: string; role: string; companyId: string | null; driverId?: string | null }) {
     const ticket = randomBytes(32).toString('hex');
     const expiresIn = 30;
-    await this.redis.client.set(
-      `ws:ticket:${ticket}`,
-      JSON.stringify({ sub: user.id, role: user.role, companyId: user.companyId }),
-      'EX',
-      expiresIn,
-    );
+    const payload: { sub: string; role: string; companyId: string | null; deviceIds?: string[] } = {
+      sub: user.id,
+      role: user.role,
+      companyId: user.companyId,
+    };
+    // DRIVER least-privilege (audit H3): embed the driver's assigned vehicle
+    // ids so the WS gateway (which has no DB) can scope the live stream to
+    // them. An unlinked driver gets an empty list → receives nothing.
+    if (user.role === 'DRIVER') {
+      const devs = await this.prisma.device.findMany({
+        where: { companyId: user.companyId, driverId: user.driverId ?? NO_DRIVER_MATCH },
+        select: { id: true },
+      });
+      payload.deviceIds = devs.map((d) => d.id);
+    }
+    await this.redis.client.set(`ws:ticket:${ticket}`, JSON.stringify(payload), 'EX', expiresIn);
     return { ticket, expiresIn };
   }
 

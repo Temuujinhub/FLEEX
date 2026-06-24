@@ -48,6 +48,11 @@ interface ClientCtx {
   companyId: string | null;
   // Specific devices the client opted into; empty set means "all my company".
   deviceFilter: Set<string>;
+  // DRIVER least-privilege (audit H3): the vehicle ids this driver may see,
+  // embedded in the ws-ticket at mint time (the gateway has no DB). null for
+  // non-driver roles (no extra scoping); an empty set = linked to nothing →
+  // receives nothing (fail closed).
+  driverDeviceIds: Set<string> | null;
 }
 
 // Live gateway. Authenticates on the upgrade (?token=jwt), then subscribes to
@@ -127,20 +132,31 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect, On
           client.close(4001, 'invalid ticket');
           return;
         }
-        const id = JSON.parse(raw) as { sub: string; role: string; companyId: string | null };
+        const id = JSON.parse(raw) as {
+          sub: string;
+          role: string;
+          companyId: string | null;
+          deviceIds?: string[];
+        };
         this.clients.set(client, {
           userId: id.sub,
           role: id.role,
           companyId: id.companyId,
           deviceFilter: new Set<string>(),
+          driverDeviceIds: id.role === 'DRIVER' ? new Set(id.deviceIds ?? []) : null,
         });
         client.send(JSON.stringify({ type: 'hello', userId: id.sub }));
         return;
       }
 
-      // Legacy path: JWT in the query string / Authorization header. Kept for
-      // backward compatibility during rollout; prefer ?ticket.
-      const token = url.searchParams.get('token') ?? extractBearer(request.headers.authorization);
+      // Legacy JWT path. The ?token= query form is OFF by default (audit H4) —
+      // it leaks the JWT into URLs / proxy logs; prefer ?ticket. The
+      // Authorization header is log-safe and always accepted.
+      const allowQueryToken =
+        (this.config.get<string>('WS_ALLOW_TOKEN_QUERY') ?? 'false') === 'true';
+      const token =
+        extractBearer(request.headers.authorization) ??
+        (allowQueryToken ? url.searchParams.get('token') : null);
       if (!token) {
         client.close(4001, 'no token');
         return;
@@ -151,6 +167,10 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         role: payload.role,
         companyId: payload.companyId,
         deviceFilter: new Set<string>(),
+        // The gateway can't resolve a driver's vehicles here (no DB), so a
+        // DRIVER on the legacy path is fail-closed — they must use a ws-ticket
+        // (which carries the device ids) to receive live data.
+        driverDeviceIds: payload.role === 'DRIVER' ? new Set<string>() : null,
       });
       client.send(JSON.stringify({ type: 'hello', userId: payload.sub }));
     } catch (e) {
@@ -176,12 +196,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       if (c.readyState !== WebSocket.OPEN) return;
       const ctx = this.clients.get(c);
       if (!ctx) return;
-      // Tenant isolation: clients can only see their own company's traffic,
-      // except SUPER_ADMIN which sees everything.
-      if (ctx.role !== 'SUPER_ADMIN' && ctx.companyId !== companyId) return;
-      // Device filter only applies when the envelope has a device — alerts
-      // without a device (rare, e.g. company-wide notices) skip the filter.
-      if (deviceId && ctx.deviceFilter.size > 0 && !ctx.deviceFilter.has(deviceId)) return;
+      if (!shouldDeliver(ctx, companyId, deviceId)) return;
       try {
         c.send(data);
       } catch (e) {
@@ -189,6 +204,23 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       }
     });
   }
+}
+
+// Decides whether a connected client should receive an envelope: tenant
+// isolation (SUPER_ADMIN sees all), DRIVER least-privilege (audit H3 — only
+// assigned vehicles, never company-wide), then the client's own device filter
+// (a UX convenience, not a security boundary). Pure → unit-tested directly.
+export function shouldDeliver(
+  ctx: { role: string; companyId: string | null; deviceFilter: Set<string>; driverDeviceIds: Set<string> | null },
+  companyId: string,
+  deviceId?: string | null,
+): boolean {
+  if (ctx.role !== 'SUPER_ADMIN' && ctx.companyId !== companyId) return false;
+  if (ctx.driverDeviceIds) {
+    if (!deviceId || !ctx.driverDeviceIds.has(deviceId)) return false;
+  }
+  if (deviceId && ctx.deviceFilter.size > 0 && !ctx.deviceFilter.has(deviceId)) return false;
+  return true;
 }
 
 function extractBearer(h: string | string[] | undefined): string | null {
