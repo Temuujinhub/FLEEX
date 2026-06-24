@@ -40,6 +40,32 @@ metadata блоклодог), **XSS алга** (React auto-escape, `dangerouslyS
 
 ---
 
+## 0.1 Хэрэгжүүлэлтийн төлөв — ✅ БҮГД ЗАССАН (2026-06-24)
+
+Доорх **бүх 25 олдворыг** хэрэгжүүлсэн (A1–A7), тест/build-аар баталгаажуулсан:
+
+| Багц | Commit сэдэв | Хамрах олдвор |
+|---|---|---|
+| **A1** | media-service DoS хатуужил | H1, H2, M1, H6(non-root) |
+| **A2** | контейнерийн limit + cap_drop | H5, H6 |
+| **A3** | WS driver-scope + legacy token хаалт | H3, H4 |
+| **A4** | db push gating + автомат backup | H7, L6 |
+| **A5** | export formula-guard + import cap | M2, M3 |
+| **A6** | timing-safe login, throttle, health, MFA | M5, L2, L3, M4 |
+| **A7** | supply-chain + ops + low items | M6, M7, M8, M9, L1, L4, L5, L8, L9 |
+
+Шалгалт: API 47 тест ✅, Go 3 service build/vet/test ✅, web tsc/build ✅,
+`docker compose config` ✅, бүх shell `bash -n` ✅. Шинэ тестүүд: WS
+`shouldDeliver` driver-scope матриц, ticket-д driver deviceId, export
+`hardenWorkbook`. PR #52.
+
+> Үлдсэн зөвхөн **гадаад/ops-аас хамаарах** алхмууд (код биш): backup timer,
+> certbot renew timer, carrier CIDR-ийг **host дээр enable** хийх (DEPLOYMENT.md),
+> media volume-ийн нэг удаагийн chown, шаардвал `WS_ALLOW_TOKEN_QUERY` /
+> `PRISMA_DB_PUSH_ACCEPT_DATA_LOSS` флагууд.
+
+---
+
 ## 1. Олдворын хүснэгт (severity-аар)
 
 | ID | Зэрэг | Гадаргуу | Байршил | Товч |
