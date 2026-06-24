@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ReactNode, useMemo } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../store/auth';
+import { Check } from '../components/icons';
 
 // Mining-flavored ops dashboard. Pulls live device + recent-event data
 // and projects a handful of fleet KPIs on top. Chartlets are pure SVG so
@@ -93,7 +94,7 @@ export function Dashboard() {
         <Kpi
           title="Шинэ дохиолол"
           value={evts.length}
-          hint={critical > 0 ? `⚠ ${critical} ноцтой` : 'Бүгд хэвийн'}
+          hint={critical > 0 ? `${critical} ноцтой` : 'Бүгд хэвийн'}
           icon={<AlertGlyph />}
           accent={critical > 0 ? 'rose' : evts.length > 0 ? 'amber' : 'slate'}
         />
@@ -201,7 +202,12 @@ export function Dashboard() {
           <ul className="divide-y divide-slate-100 max-h-[26rem] overflow-y-auto">
             {evts.length === 0 && (
               <li className="px-5 py-10 text-sm text-slate-400 text-center">
-                🟢 Шинэ дохиолол алга — флот хэвийн ажиллаж байна
+                <span className="inline-flex items-center gap-2">
+                  <span className="grid h-5 w-5 place-items-center rounded-full bg-emerald-100 text-emerald-600">
+                    <Check className="h-3 w-3" />
+                  </span>
+                  Шинэ дохиолол алга — флот хэвийн ажиллаж байна
+                </span>
               </li>
             )}
             {evts.map((e) => (

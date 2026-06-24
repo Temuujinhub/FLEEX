@@ -4,6 +4,7 @@ import { ReactNode, Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../store/auth';
 import { clearTokens } from '../lib/api';
+import { Smartphone } from './icons';
 
 // Sidebar nav. Grouped by purpose so the eye can scan it like Gaikham /
 // Navixy, but tailored for a mining ops vocabulary. Labels/titles are i18n
@@ -21,6 +22,7 @@ const SECTIONS: {
       { to: '/app/dispatch',  labelKey: 'nav.dispatch',      min: 'DISPATCHER',    icon: <IconLayers /> },
       { to: '/app/events',    labelKey: 'nav.events',        min: 'VIEWER',        icon: <IconBell /> },
       { to: '/app/camera',    labelKey: 'nav.camera',        min: 'VIEWER',        icon: <IconCamera /> },
+      { to: '/m',             labelKey: 'nav.mobile',        min: 'VIEWER',        icon: <Smartphone /> },
     ],
   },
   {

@@ -3,8 +3,59 @@
 @tailwind utilities;
 
 html, body, #root { height: 100%; }
-body { font-family: 'Inter', system-ui, sans-serif; }
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
 
 .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
 .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
 .scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 3px; }
+
+/* ── Accessibility baseline (UI/UX checklist) ────────────────────
+   These are global so every screen — old and new — inherits them
+   without having to repeat utility classes on each element. */
+
+/* Pointer affordance on anything that behaves like a control. */
+@layer base {
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  a[href],
+  label[for],
+  summary,
+  select,
+  input[type='checkbox'],
+  input[type='radio'] {
+    cursor: pointer;
+  }
+  button:disabled,
+  [aria-disabled='true'] {
+    cursor: not-allowed;
+  }
+
+  /* Visible, consistent keyboard focus. Mouse clicks don't trigger
+     :focus-visible, so this only shows for keyboard/AT users. */
+  :focus-visible {
+    outline: 2px solid theme('colors.brand.500');
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+  /* We draw our own ring on these, so suppress the duplicate outline. */
+  a:focus-visible,
+  button:focus-visible {
+    outline: none;
+  }
+}
+
+/* Honour the OS "reduce motion" setting — no harsh/looping animations. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

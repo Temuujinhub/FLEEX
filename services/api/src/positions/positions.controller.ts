@@ -15,6 +15,21 @@ export class PositionsController {
     return this.svc.latest(req.user);
   }
 
+  // Per-device distance roll-up for the caller's whole fleet over [from,to].
+  // Defaults to "today" when the range is missing/invalid so the mobile
+  // summary can call it with no params.
+  @Get('summary')
+  @Audit('positions.summary')
+  summary(@Query('from') from: string, @Query('to') to: string, @Req() req: any) {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const fromD = from ? new Date(from) : startOfToday;
+    const toD = to ? new Date(to) : now;
+    const safeFrom = isNaN(fromD.getTime()) ? startOfToday : fromD;
+    const safeTo = isNaN(toD.getTime()) ? now : toD;
+    return this.svc.fleetSummary(req.user, safeFrom, safeTo);
+  }
+
   @Get(':deviceId/history')
   @Audit('positions.history', { resourceType: 'device', resourceIdParam: 'deviceId' })
   history(

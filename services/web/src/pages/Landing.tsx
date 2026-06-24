@@ -1,6 +1,12 @@
+import { ComponentType, SVGProps } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api, API_BASE } from '../lib/api';
+import * as Icon from '../components/icons';
+
+// Marketing copy below pairs each point with an SVG icon component (never an
+// emoji — see components/icons.tsx for why). `IconType` is the shared shape.
+type IconType = ComponentType<SVGProps<SVGSVGElement>>;
 
 // Default copy when the operator has not customised the landing page
 // through the super-admin settings page. The CMS-backed values
@@ -55,69 +61,69 @@ const KEY_NUMBERS = [
   { value: '1000+',  label: 'Зэрэгцээ төхөөрөмж' },
 ];
 
-const WHY_FLEEX = [
+const WHY_FLEEX: { Icon: IconType; title: string; body: string }[] = [
   {
-    icon: '🆘',
+    Icon: Icon.ShieldAlert,
     title: '"Lone worker" автомат хамгаалалт',
     body:
       'Жолооч 2 цаг хариу алга, эсвэл хөдөлгөөнгүй зогссон бол менежерт автомат сэрэмжлүүлэг. Pit-ийн алслагдсан хэсэгт зүрхний түгшилт, гэнэтийн осолд орсон жолоочийг яаралтай олж тусална. Уул уурхайн lone-worker HSE policy-ийг гар бичигтгүй автоматжуулсан.',
   },
   {
-    icon: '🚨',
+    Icon: Icon.Siren,
     title: 'PANIC ⇒ 5km дотор шууд SMS',
     body:
       'Жолооч улаан товч дармагц 5km радиуст ажиллаж буй жолоочдийн утсанд Google Maps холбоостой SMS яваад дуусчихсан байна. Radio call хүлээх шаардлагагүй — 30 секундийн дотор анхны хариу үйлдэл.',
   },
   {
-    icon: '⛽',
+    Icon: Icon.Fuel,
     title: 'Шатахууны зардлыг 10–15% бууруулна',
     body:
       'Fuel probe эсвэл CAN-bus-аар бодит түвшинг секунд тутам хардаг. Гэнэт буурсан үед SMS / push дохио шууд явна — алдагдал, хулгай гарвал тэр өдөртөө мэдэгдэнэ.',
   },
   {
-    icon: '⏱️',
+    Icon: Icon.Clock,
     title: 'Хөдөлгүүр сул зогсох цагийг 30%-аар хасна',
     body:
       'Машин асаалттай, хурд 0 байх бүх минутыг тоолж дансанд бичнэ. Idle цаг × ₮/цаг тарифаар нэхэмжлэх дүн Excel-ийн товчоор гарна — нягтлан бодогчид баримтжина.',
   },
   {
-    icon: '🤖',
+    Icon: Icon.Award,
     title: 'Жолооч бүрд 0–100 онооны үнэлгээ',
     body:
       'Сар бүрийн 1-нд жолооч бүрд scorecard PDF автоматаар email-ээр явна — HR-н ажлыг 2-3 цагаар хэмнэдэг. Менежерт rank-н нэгдсэн тайлан давхар.',
   },
   {
-    icon: '📋',
+    Icon: Icon.Kanban,
     title: 'Dispatcher live kanban',
     body:
       'Бүх машинаа нэг харагдацанд — хөдөлж буй, хүлээж буй, холбоо тасарсан. 50+ машинтай pit-д map-р pin scan хийх шаардлагагүй; "25м зогссон" гэх timer-р шууд анхааралд авна.',
   },
   {
-    icon: '🌙',
+    Icon: Icon.Moon,
     title: 'Geofence өдөр / шөнийн хурдны хязгаар',
     body:
       'Нэг geofence-д хоёр хурд — өдрийн 50, шөнийн 30. Цагаар автомат сэлгэгдэнэ. Haul road-ийн шуурга, харанхуйн нөхцөлд аюулгүй байдлыг код-гүй тохиргоогоор хангана.',
   },
   {
-    icon: '🔧',
+    Icon: Icon.Wrench,
     title: 'Засварын урьдчилсан тооцоолол',
     body:
       'Одометр + сүүлийн 30 хоногийн дундаж км/өдөр → "Oil change 12 хоногийн дараа болно". 14 хоногийн өмнө менежерт автомат email — workshop slot, ОУ-аас захиалах эд ангид lead time өгнө.',
   },
   {
-    icon: '🔑',
+    Icon: Icon.KeyRound,
     title: 'Алсаас хөдөлгүүр асаах / унтраах',
     body:
       'Түрээсийн машин төлбөргүй болсон, корпорат машиныг зөвшөөрөлгүй хүн жолоодох гээд олон тохиолдол. Диспетчер 1 товчоор хөдөлгүүрийг түгжинэ. RFID карт уншуулж л дахин асна.',
   },
   {
-    icon: '🎥',
+    Icon: Icon.Video,
     title: 'Осол / зөрчилд видео нотолгоо',
     body:
       'Dash-cam-тай холбосон тохиолдолд осол, ширүүн тоормосолт, panic дохио гарсан хором бүрд өмнө 15 / хойно 15 секундын бичлэг тус машинд хадгалагдана. Даатгал, шүүхийн мэтгэлцээнд хэрэглэхэд бэлэн.',
   },
   {
-    icon: '🛡️',
+    Icon: Icon.Cpu,
     title: 'Teltonika Pro GPS — Үйлдвэрлэлийн зэрэглэл',
     body:
       'Бид Teltonika FMC650 / FMM650, Garmin dezl-ийг ашиглаж байна. -40°C-д ажиллана, GSM-ийг жаам хийсэн, эсвэл утсыг тасалсан үед ч таны server-руу анхааруулга илгээнэ.',
@@ -169,84 +175,84 @@ const USE_CASES = [
   },
 ];
 
-const FEATURES = [
+const FEATURES: { Icon: IconType; title: string; body: string }[] = [
   {
-    icon: '📍',
+    Icon: Icon.MapPin,
     title: 'Real-time GPS tracking',
     body: 'WebSocket + Redis Pub/Sub ашиглан секунд тутмын байршил. Газрын зураг 3 layer (гудамж, хиймэл дагуул, рельеф).',
   },
   {
-    icon: '⛽',
+    Icon: Icon.Fuel,
     title: 'Шатахуун мэдрэгчийн интеграц',
     body: 'CAN-bus / fuel-probe-аас бодит зарцуулалт, цэнэглэлт, гэнэтийн алдагдлыг 1 минутын дотор илрүүлж дохио өгнө. Калибрацийг хүснэгтэн хэлбэрээр оруулна — JSON код бичих хэрэггүй.',
   },
   {
-    icon: '🔧',
+    Icon: Icon.Wrench,
     title: 'Засварын урьдчилсан тооцоолол',
     body: 'Одометр + сүүлийн 30 хоногийн дундаж км/өдөр → "Oil change 12 хоногийн дараа". 14 хоног үлдсэн үед менежерт автомат email — workshop slot захиалах цаг хангалттай.',
   },
   {
-    icon: '🤖',
+    Icon: Icon.Award,
     title: 'Жолоочийн scorecard (cron)',
     body: 'Сар бүрийн 1-нд жолооч бүрт оноо нь email-ээр автомат. Eco-driving 0–100. Манагерт rank-сан нэгдсэн тайлан. HR-н ажлыг 2-3 цагаар хэмнэдэг.',
   },
   {
-    icon: '🆘',
+    Icon: Icon.ShieldAlert,
     title: 'Lone-worker safety алгоритм',
     body: 'Жолооч 2 цаг хариу алга, эсвэл хөдөлгөөнгүй зогссон бол автомат risk event. Pit-ийн алслагдсан хэсэгт зүрхний түгшилт, гэнэтийн осолд орсон жолоочийг шууд илрүүлнэ.',
   },
   {
-    icon: '🚨',
+    Icon: Icon.Siren,
     title: 'PANIC ⇒ ойролцоох жолоочдод',
     body: 'Жолооч улаан товч дармагц 5km дотор ажиллаж буй жолоочдод Google Maps холбоостой SMS. Radio call хүлээх шаардлагагүй — 30 секундийн анхны хариу.',
   },
   {
-    icon: '🛑',
+    Icon: Icon.Power,
     title: 'Алсаас хөдөлгүүр унтраах / асаах',
     body: 'Жолооч аюултай байдалд орсон, машин хулгайлагдсан, түрээсийн төлбөр төлөгдөөгүй тохиолдолд алсаас хяналт. RFID карт уншуулж л дахин асна.',
   },
   {
-    icon: '🎥',
+    Icon: Icon.Video,
     title: 'Видео аналитик · Dash-cam',
     body: 'Mobile брэндийн dash-cam төхөөрөмжтэй интеграц. Осол гарсан агшинд өмнө/хойно 30 секундийн бичлэгийг автоматаар хадгална.',
   },
   {
-    icon: '📍',
+    Icon: Icon.MapPin,
     title: 'Place ↔ Geofence авто-синхрон',
     body: 'Газрын зураг дээр Place тэмдэглэхэд автомат geofence үүснэ. Refuel station, weighbridge, dumping bay тус бүрд орох/гарах автомат event — production KPI шууд бэлэн.',
   },
   {
-    icon: '🌙',
+    Icon: Icon.Moon,
     title: 'Geofence өдөр / шөнийн хурд',
     body: 'Нэг бүс, хоёр хурд — өдрийн 50, шөнийн 30. Цагаар автомат сэлгэгдэнэ. Haul road шуурга, харанхуйд аюулгүй байдлыг код-гүй хангана.',
   },
   {
-    icon: '📋',
+    Icon: Icon.Kanban,
     title: 'Dispatcher live kanban',
     body: 'Хөдөлж буй / хүлээж буй / холбоо тасарсан 3-баганат самбар. 50+ машин дээр map-р pin scan хийх шаардлагагүй — "25м зогссон" timer-р шууд анхааруулна.',
   },
   {
-    icon: '👥',
+    Icon: Icon.Users,
     title: 'Driver shift hierarchy',
     body: 'Бригад / ээлжийг model болгож тус тусдаа тайлан. Өглөөний vs шөнийн ээлжийн idle, оноо, ачаалал — менежер аль нь илүү бүтээмжтэй вэ гэдгийг хэмжинэ.',
   },
   {
-    icon: '💰',
+    Icon: Icon.Coins,
     title: 'Idle billing — Excel',
     body: 'Жолооч тус бүрийн idle цаг × ₮/цаг тариф = нэхэмжлэх дүн. Shift-ээр шүүгдэнэ. Нягтлан бодогчид Excel-ийн товчоор шууд татаж явуулна.',
   },
   {
-    icon: '🗺️',
+    Icon: Icon.Layers,
     title: 'Geofence ба маршрут',
     body: 'Polygon / circle бүс, давхар бүс, маршрут хазайлт, түр оруулга/гарга мэдэгдэл. Place-ээр Geofence авто-үүсгэх.',
   },
   {
-    icon: '📊',
+    Icon: Icon.BarChart,
     title: 'KPI тайлан, экспорт',
     body: '12 сарын дата хадгалалт, TimescaleDB compression. Excel / PDF-ээр трип, idle, fuel, driver, geofence, scorecard тайлан.',
   },
   {
-    icon: '🔐',
+    Icon: Icon.ShieldCheck,
     title: 'Аудит, эрхийн түвшин',
     body: '6-түвшинт RBAC (SUPER_ADMIN → VIEWER), tamper-evident hash chain audit log, multi-tenant tenant-isolation.',
   },
@@ -413,13 +419,19 @@ export function Landing() {
                 Захиалга өгөх
               </a>
             </div>
-            <div className="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-sm text-brand-100/80">
-              <span>✓ Lone-worker автомат сэрэмжлүүлэг</span>
-              <span>✓ PANIC ⇒ 5km дотор тусламж</span>
-              <span>✓ Dispatcher live kanban</span>
-              <span>✓ Shift KPI · Idle billing Excel</span>
-              <span>✓ Засварын урьдчилсан тооцоо</span>
-              <span>✓ Teltonika FMC650 / Garmin dezl</span>
+            <div className="mt-8 flex flex-wrap gap-x-5 gap-y-2 text-sm text-brand-100/90">
+              {[
+                'Lone-worker автомат сэрэмжлүүлэг',
+                'PANIC ⇒ 5km дотор тусламж',
+                'Dispatcher live kanban',
+                'Shift KPI · Idle billing Excel',
+                'Засварын урьдчилсан тооцоо',
+                'Teltonika FMC650 / Garmin dezl',
+              ].map((s) => (
+                <span key={s} className="inline-flex items-center gap-1.5">
+                  <Icon.Check className="h-4 w-4 shrink-0 text-brand-300" /> {s}
+                </span>
+              ))}
             </div>
           </div>
           <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur shadow-2xl">
@@ -429,10 +441,10 @@ export function Landing() {
               className="rounded-xl object-cover w-full h-72"
             />
             <div className="mt-4 grid grid-cols-2 gap-3">
-              <Badge title="AI Аналитик" sub="Жолоочийн зан төлөв" />
-              <Badge title="⛽ 10–15%" sub="Шатахуун хэмнэлт" />
-              <Badge title="🎥 Видео" sub="Осол бичлэг" />
-              <Badge title="🔑 Алсаас" sub="Engine block" />
+              <Badge Icon={Icon.Award} title="AI Аналитик" sub="Жолоочийн зан төлөв" />
+              <Badge Icon={Icon.Fuel} title="10–15%" sub="Шатахуун хэмнэлт" />
+              <Badge Icon={Icon.Video} title="Видео" sub="Осол бичлэг" />
+              <Badge Icon={Icon.KeyRound} title="Алсаас" sub="Engine block" />
             </div>
           </div>
         </div>
@@ -462,9 +474,11 @@ export function Landing() {
           </div>
           <div className="mt-12 grid md:grid-cols-2 lg:grid-cols-3 gap-5">
             {WHY_FLEEX.map((w) => (
-              <div key={w.title} className="rounded-2xl border border-slate-200 p-6 hover:border-brand-300 hover:shadow-lg transition bg-white">
-                <div className="text-3xl">{w.icon}</div>
-                <div className="mt-3 font-bold text-lg leading-tight">{w.title}</div>
+              <div key={w.title} className="group rounded-2xl border border-slate-200 p-6 hover:border-brand-300 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 bg-white">
+                <span className="inline-grid h-12 w-12 place-items-center rounded-xl bg-brand-50 text-brand-600 ring-1 ring-brand-100 transition-colors duration-200 group-hover:bg-brand-600 group-hover:text-white">
+                  <w.Icon className="h-6 w-6" />
+                </span>
+                <div className="mt-4 font-bold text-lg leading-tight">{w.title}</div>
                 <p className="mt-2 text-sm text-slate-600 leading-relaxed">{w.body}</p>
               </div>
             ))}
@@ -495,10 +509,10 @@ export function Landing() {
             мянган нэгжтэй уурхайн флот хүртэл нэг л системээр удирдана.
           </p>
           <ul className="mt-6 space-y-3 text-slate-700">
-            <li className="flex gap-3"><span className="text-emerald-600">✓</span> Дата нь Монголд хадгалагдана — гадаад руу гардаггүй</li>
-            <li className="flex gap-3"><span className="text-emerald-600">✓</span> 24/7 Монгол хэлээр техникийн тусламж</li>
-            <li className="flex gap-3"><span className="text-emerald-600">✓</span> Teltonika, Garmin GPS, OBD-II, CAN-bus, fuel sensor, dash-cam холбогддог</li>
-            <li className="flex gap-3"><span className="text-emerald-600">✓</span> Танай ERP, 1С, нягтлан бодох системтэй API-аар уялдана</li>
+            <li className="flex gap-3"><span className="mt-0.5 shrink-0 text-emerald-600"><Icon.Check className="h-4 w-4" /></span> Дата нь Монголд хадгалагдана — гадаад руу гардаггүй</li>
+            <li className="flex gap-3"><span className="mt-0.5 shrink-0 text-emerald-600"><Icon.Check className="h-4 w-4" /></span> 24/7 Монгол хэлээр техникийн тусламж</li>
+            <li className="flex gap-3"><span className="mt-0.5 shrink-0 text-emerald-600"><Icon.Check className="h-4 w-4" /></span> Teltonika, Garmin GPS, OBD-II, CAN-bus, fuel sensor, dash-cam холбогддог</li>
+            <li className="flex gap-3"><span className="mt-0.5 shrink-0 text-emerald-600"><Icon.Check className="h-4 w-4" /></span> Танай ERP, 1С, нягтлан бодох системтэй API-аар уялдана</li>
           </ul>
         </div>
         <div className="relative">
@@ -560,9 +574,9 @@ export function Landing() {
               10 шинэ боломж — Монголын томоохон уул уурхайн компанитай хамтын хөгжүүлэлтийн үр дүн.
             </p>
             <ul className="mt-5 space-y-2 text-base text-brand-50">
-              <li className="flex gap-2"><span className="text-emerald-400">✅</span> HSE бодлогыг кодгүй хэрэгжүүлсэн</li>
-              <li className="flex gap-2"><span className="text-emerald-400">✅</span> Диспетчерийн гар ажиллагааг бүрэн автоматжуулсан</li>
-              <li className="flex gap-2"><span className="text-emerald-400">✅</span> Бүх шийдэл аль хэдийн production-д ажиллаж байна</li>
+              <li className="flex gap-2"><span className="mt-0.5 shrink-0 text-emerald-400"><Icon.Check className="h-4 w-4" /></span> HSE бодлогыг кодгүй хэрэгжүүлсэн</li>
+              <li className="flex gap-2"><span className="mt-0.5 shrink-0 text-emerald-400"><Icon.Check className="h-4 w-4" /></span> Диспетчерийн гар ажиллагааг бүрэн автоматжуулсан</li>
+              <li className="flex gap-2"><span className="mt-0.5 shrink-0 text-emerald-400"><Icon.Check className="h-4 w-4" /></span> Бүх шийдэл аль хэдийн production-д ажиллаж байна</li>
             </ul>
             <p className="mt-5 text-brand-200 font-medium italic">
               Аюулгүй ажиллагаа, үр ашиг, найдвартай байдал — нэг дор.
@@ -599,9 +613,11 @@ export function Landing() {
           </div>
           <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {FEATURES.map((f) => (
-              <div key={f.title} className="rounded-xl border border-slate-200 p-6 bg-white hover:border-brand-300 hover:shadow-md transition">
-                <div className="text-3xl">{f.icon}</div>
-                <div className="mt-3 font-semibold text-lg">{f.title}</div>
+              <div key={f.title} className="group rounded-xl border border-slate-200 p-6 bg-white hover:border-brand-300 hover:shadow-md transition-all duration-200">
+                <span className="inline-grid h-11 w-11 place-items-center rounded-lg bg-slate-100 text-slate-600 transition-colors duration-200 group-hover:bg-brand-50 group-hover:text-brand-600">
+                  <f.Icon className="h-5 w-5" />
+                </span>
+                <div className="mt-4 font-semibold text-lg">{f.title}</div>
                 <p className="mt-2 text-sm text-slate-600 leading-relaxed">{f.body}</p>
               </div>
             ))}
@@ -669,7 +685,7 @@ export function Landing() {
                 <ul className="mt-6 space-y-2 text-sm text-slate-700 flex-1">
                   {p.features.map((f) => (
                     <li key={f} className="flex gap-2">
-                      <span className="text-emerald-600">✓</span> {f}
+                      <span className="mt-0.5 shrink-0 text-emerald-600"><Icon.Check className="h-4 w-4" /></span> {f}
                     </li>
                   ))}
                 </ul>
@@ -703,21 +719,27 @@ export function Landing() {
             </p>
             <div className="mt-8 space-y-4">
               <a href="tel:+97688881018" className="flex items-center gap-4 group">
-                <span className="h-12 w-12 rounded-full bg-brand-600 flex items-center justify-center text-xl">📞</span>
+                <span className="h-12 w-12 rounded-full bg-brand-600 flex items-center justify-center text-white transition-colors group-hover:bg-brand-500">
+                  <Icon.Phone className="h-5 w-5" />
+                </span>
                 <div>
                   <div className="text-xs uppercase text-slate-400 tracking-widest">Утас</div>
                   <div className="text-xl font-bold group-hover:text-brand-300">8888-1018</div>
                 </div>
               </a>
               <a href="mailto:fleex@mediapro.mn" className="flex items-center gap-4 group">
-                <span className="h-12 w-12 rounded-full bg-brand-600 flex items-center justify-center text-xl">✉️</span>
+                <span className="h-12 w-12 rounded-full bg-brand-600 flex items-center justify-center text-white transition-colors group-hover:bg-brand-500">
+                  <Icon.Mail className="h-5 w-5" />
+                </span>
                 <div>
                   <div className="text-xs uppercase text-slate-400 tracking-widest">Имэйл</div>
                   <div className="text-xl font-bold group-hover:text-brand-300">fleex@mediapro.mn</div>
                 </div>
               </a>
               <a href="https://mediapro.mn" target="_blank" rel="noreferrer" className="flex items-center gap-4 group">
-                <span className="h-12 w-12 rounded-full bg-brand-600 flex items-center justify-center text-xl">🌐</span>
+                <span className="h-12 w-12 rounded-full bg-brand-600 flex items-center justify-center text-white transition-colors group-hover:bg-brand-500">
+                  <Icon.Globe className="h-5 w-5" />
+                </span>
                 <div>
                   <div className="text-xs uppercase text-slate-400 tracking-widest">Веб</div>
                   <div className="text-xl font-bold group-hover:text-brand-300">mediapro.mn</div>
@@ -769,11 +791,16 @@ export function Landing() {
   );
 }
 
-function Badge({ title, sub }: { title: string; sub: string }) {
+function Badge({ Icon: I, title, sub }: { Icon: IconType; title: string; sub: string }) {
   return (
-    <div className="rounded-lg bg-white/10 border border-white/10 p-3">
-      <div className="text-sm font-semibold">{title}</div>
-      <div className="text-xs text-brand-100/80 mt-0.5">{sub}</div>
+    <div className="rounded-lg bg-white/10 border border-white/10 p-3 flex items-center gap-2.5">
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-white/10 text-brand-200">
+        <I className="h-4 w-4" />
+      </span>
+      <div className="min-w-0">
+        <div className="text-sm font-semibold leading-tight truncate">{title}</div>
+        <div className="text-xs text-brand-100/80 truncate">{sub}</div>
+      </div>
     </div>
   );
 }
