@@ -2,7 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { ReactNode, useMemo } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../store/auth';
-import { Check, MapPin, Truck, BarChart, AlertTriangle, Gauge, Camera, ArrowRight } from '../components/icons';
+import { Check, MapPin, Truck, BarChart, AlertTriangle, Gauge, Camera, ArrowRight, Smartphone } from '../components/icons';
+import { setViewPref } from '../lib/viewMode';
 
 // Mining-flavored ops dashboard. Pulls live device + recent-event data
 // and projects a handful of fleet KPIs on top. Chartlets are pure SVG so
@@ -31,6 +32,17 @@ export function Dashboard() {
     queryFn: () => api.get('/device-health/status').then((r) => r.data),
     refetchInterval: 60_000,
   });
+  // Fleet distance driven today — one tenant-scoped roll-up (same endpoint the
+  // lightweight mobile page uses), folded into the header as a live KPI.
+  const summary = useQuery({
+    queryKey: ['positions-summary', 'today'],
+    queryFn: () => {
+      const now = new Date();
+      const from = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+      return api.get(`/positions/summary?from=${from}&to=${now.toISOString()}`).then((r) => r.data);
+    },
+    refetchInterval: 60_000,
+  });
 
   const list: any[] = devices.data ?? [];
   const evts: any[] = events.data ?? [];
@@ -40,6 +52,10 @@ export function Dashboard() {
   // Online but stationary — "idle" (engine may be on, not moving).
   const idle = list.filter((d) => d.online && (d.lastSpeed ?? 0) <= 1).length;
   const critical = evts.filter((e) => e.severity === 'CRITICAL').length;
+  const todayKm = useMemo(
+    () => (summary.data ?? []).reduce((a: number, r: any) => a + (r.distanceKm ?? 0), 0),
+    [summary.data],
+  );
   const loading = devices.isLoading;
 
   // Last-24h alert distribution by hour, used by the spark bar chart.
@@ -71,10 +87,23 @@ export function Dashboard() {
           <div className="flex flex-wrap items-center gap-2">
             <HeaderPill label="Онлайн" value={`${online}/${list.length || 0}`} tone="emerald" />
             <HeaderPill label="Хөдөлгөөнтэй" value={movingNow} tone="sky" />
+            <HeaderPill label="Өнөөдрийн зам" value={`${fmtKm(todayKm)} км`} tone="sky" />
             <HeaderPill label="Дохиолол" value={evts.length} tone={critical > 0 ? 'rose' : 'slate'} />
             <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs">
               <Dot color="emerald" /> Real-time
             </span>
+            {/* Switch to the lightweight phone view (sticky choice). */}
+            <a
+              href="/m"
+              onClick={() => setViewPref('lite')}
+              className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium transition hover:bg-white/20"
+              title="Хөнгөн харагдац руу шилжих"
+            >
+              <span className="h-3.5 w-3.5">
+                <Smartphone className="h-full w-full" />
+              </span>
+              Хөнгөн харагдац
+            </a>
           </div>
         </div>
       </header>
@@ -542,6 +571,11 @@ function greeting() {
   if (h < 12) return 'Өглөөний мэнд,';
   if (h < 18) return 'Өдрийн мэнд,';
   return 'Оройн мэнд,';
+}
+
+function fmtKm(n: number) {
+  if (!Number.isFinite(n)) return '0';
+  return n >= 100 ? Math.round(n).toLocaleString('en-US') : n.toFixed(1);
 }
 
 function buildHourlyHistogram(evts: any[]) {

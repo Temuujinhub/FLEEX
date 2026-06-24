@@ -1,7 +1,8 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
 import { Protected } from './components/Protected';
+import { preferLite } from './lib/viewMode';
 
 // Route-based code splitting: each page is its own chunk so the initial bundle
 // no longer ships all 27 screens up front. (Vendor `manualChunks` was avoided —
@@ -42,6 +43,14 @@ function RouteFallback() {
   );
 }
 
+// Index-route guard: send mobile-class clients (or anyone who picked the light
+// view) to the lightweight /m page instead of the heavy console dashboard.
+// Only guards the /app index — deep links like /app/history/:id are untouched.
+function LiteGate({ children }: { children: ReactNode }) {
+  if (preferLite()) return <Navigate to="/m" replace />;
+  return <>{children}</>;
+}
+
 export function App() {
   return (
     <Suspense fallback={<RouteFallback />}>
@@ -67,7 +76,14 @@ export function App() {
             </Protected>
           }
         >
-          <Route path="/app" element={<Dashboard />} />
+          <Route
+            path="/app"
+            element={
+              <LiteGate>
+                <Dashboard />
+              </LiteGate>
+            }
+          />
           <Route path="/app/map" element={<LiveMap />} />
           <Route path="/app/dispatch" element={<Dispatch />} />
           <Route path="/app/devices" element={<Devices />} />
