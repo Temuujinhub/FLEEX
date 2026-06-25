@@ -2,6 +2,7 @@ import { BadRequestException, Controller, Get, Param, Post, Query, Req, Res } fr
 import { Response } from 'express';
 import { Role } from '@prisma/client';
 import { Roles } from '../auth/roles.decorator';
+import { RequiresAllReports } from '../billing/plan.decorator';
 import { Audit } from '../audit/audit.decorator';
 import { ReportsService, REPORT_TEMPLATES, isReportTemplateId, type ReportTemplateId } from './reports.service';
 import { ScorecardCronService } from './scorecard-cron.service';
@@ -32,6 +33,7 @@ export class ReportsController {
 
   // Fuel analytics (R2): refuelling + drain/theft for a device over a window.
   @Get('fuel/:deviceId')
+  @RequiresAllReports()
   @Audit('report.fuel', { resourceType: 'device', resourceIdParam: 'deviceId' })
   fuelReport(@Param('deviceId') id: string, @Query('from') from: string, @Query('to') to: string, @Req() req: any) {
     const r = this.range(from, to);
@@ -123,6 +125,7 @@ export class ReportsController {
   }
 
   @Get('maintenance')
+  @RequiresAllReports()
   @Audit('report.maintenance')
   maintenance(@Query('from') from: string, @Query('to') to: string, @Req() req: any) {
     const r = this.range(from, to);
@@ -130,6 +133,7 @@ export class ReportsController {
   }
 
   @Get('maintenance/excel')
+  @RequiresAllReports()
   @Audit('report.maintenance.excel')
   async maintenanceExcel(@Query('from') from: string, @Query('to') to: string, @Req() req: any, @Res() res: Response) {
     const r = this.range(from, to);
@@ -137,6 +141,7 @@ export class ReportsController {
   }
 
   @Get('fleet-summary')
+  @RequiresAllReports()
   @Audit('report.fleet_summary')
   fleetSummary(@Query('from') from: string, @Query('to') to: string, @Req() req: any) {
     const r = this.range(from, to);
@@ -144,6 +149,7 @@ export class ReportsController {
   }
 
   @Get('fleet-summary/excel')
+  @RequiresAllReports()
   @Audit('report.fleet_summary.excel')
   async fleetSummaryExcel(@Query('from') from: string, @Query('to') to: string, @Req() req: any, @Res() res: Response) {
     const r = this.range(from, to);
@@ -151,6 +157,7 @@ export class ReportsController {
   }
 
   @Get('gprs')
+  @RequiresAllReports()
   @Audit('report.gprs')
   gprs(@Query('from') from: string, @Query('to') to: string, @Req() req: any) {
     const r = this.range(from, to);
@@ -158,6 +165,7 @@ export class ReportsController {
   }
 
   @Get('gprs/excel')
+  @RequiresAllReports()
   @Audit('report.gprs.excel')
   async gprsExcel(@Query('from') from: string, @Query('to') to: string, @Req() req: any, @Res() res: Response) {
     const r = this.range(from, to);
@@ -168,6 +176,7 @@ export class ReportsController {
   // raised to FLEET_MANAGER, matching the financial idle-billing floor.
   @Get('command-log')
   @Roles(Role.FLEET_MANAGER)
+  @RequiresAllReports()
   @Audit('report.command_log')
   commandLog(@Query('from') from: string, @Query('to') to: string, @Req() req: any) {
     const r = this.range(from, to);
@@ -176,6 +185,7 @@ export class ReportsController {
 
   @Get('command-log/excel')
   @Roles(Role.FLEET_MANAGER)
+  @RequiresAllReports()
   @Audit('report.command_log.excel')
   async commandLogExcel(@Query('from') from: string, @Query('to') to: string, @Req() req: any, @Res() res: Response) {
     const r = this.range(from, to);
@@ -239,6 +249,7 @@ export class ReportsController {
   // Eco-driving leaderboard. Weights are supplied as repeated `w=TYPE:NN`
   // query params so the GET stays cacheable; missing types default to 0.
   @Get('driver-scores')
+  @RequiresAllReports()
   @Audit('report.driver_scores')
   driverScores(
     @Query('from') from: string,
@@ -295,6 +306,7 @@ export class ReportsController {
   // and the incident-investigation workflow ("who was near the panic
   // event?"). Returns a per-device summary alongside the full hit list.
   @Get('proximity')
+  @RequiresAllReports()
   @Audit('report.proximity')
   proximity(
     @Query('lat') lat: string,
@@ -323,6 +335,7 @@ export class ReportsController {
   // this endpoint is what the v2 cron job will call internally, so
   // shipping it first means the UI feature is usable today.
   @Get('driver-scorecard/:driverId')
+  @RequiresAllReports()
   @Audit('report.driver_scorecard', { resourceType: 'driver', resourceIdParam: 'driverId' })
   driverScorecard(
     @Param('driverId') driverId: string,
@@ -335,6 +348,7 @@ export class ReportsController {
   }
 
   @Get('driver-scorecard/:driverId/pdf')
+  @RequiresAllReports()
   @Audit('report.driver_scorecard.pdf', { resourceType: 'driver', resourceIdParam: 'driverId' })
   async driverScorecardPdf(
     @Param('driverId') driverId: string,
@@ -352,6 +366,7 @@ export class ReportsController {
 
   @Get('idle-billing')
   @Roles(Role.FLEET_MANAGER)
+  @RequiresAllReports()
   @Audit('report.idle_billing')
   idleBilling(
     @Query('from') from: string,
@@ -368,6 +383,7 @@ export class ReportsController {
 
   @Get('idle-billing/excel')
   @Roles(Role.FLEET_MANAGER)
+  @RequiresAllReports()
   @Audit('report.idle_billing.excel')
   async idleBillingExcel(
     @Query('from') from: string,
@@ -387,6 +403,7 @@ export class ReportsController {
   }
 
   @Get('proximity/excel')
+  @RequiresAllReports()
   @Audit('report.proximity.excel')
   async proximityExcel(
     @Query('lat') lat: string,

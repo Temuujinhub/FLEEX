@@ -173,7 +173,11 @@ export class BillingService {
     actor: Actor, companyId: string,
     body: { planKey?: string; months: number; amount?: number; note?: string },
   ) {
-    this.requireSuperAdmin(actor);
+    // Self-serve: a COMPANY_ADMIN may issue an invoice for their OWN company
+    // (to renew/upgrade and get a number to pay by). SUPER_ADMIN may issue for
+    // any company. Marking PAID stays SUPER_ADMIN (bank reconciliation).
+    this.requireBillingAccess(actor, companyId);
+    const isSuper = actor.role === 'SUPER_ADMIN';
     const months = Math.floor(body.months);
     if (!ALLOWED_MONTHS.has(months)) {
       throw new BadRequestException('Хугацаа 1–11 сар эсвэл 1/2/3 жил байх ёстой.');
@@ -186,12 +190,19 @@ export class BillingService {
     const planKey = body.planKey && isPlanKey(body.planKey) ? body.planKey : sub?.planKey ?? suggestPlan(deviceCount).key;
     const plan = getPlan(planKey);
 
+    // Enterprise is a negotiated/contact plan — only an admin can issue its
+    // invoice (the price isn't in the catalogue). A self-serving COMPANY_ADMIN
+    // is steered to talk to sales instead of generating a 0₮ invoice.
+    if (plan.custom && !isSuper) {
+      throw new BadRequestException('Enterprise багцыг борлуулалтын багтай тохиролцоно уу — нэхэмжлэхийг админ үүсгэнэ.');
+    }
+
     const now = new Date();
     const periodStart = sub?.currentPeriodEnd && sub.currentPeriodEnd > now ? sub.currentPeriodEnd : now;
     const periodEnd = addMonths(periodStart, months);
-    // Custom/enterprise (or an explicit override) take the supplied amount;
-    // otherwise the flat monthly price × months.
-    const amount = body.amount != null && body.amount >= 0
+    // Amount: an admin may override (custom price / discount); a self-serving
+    // COMPANY_ADMIN always pays the catalogue price × months (override ignored).
+    const amount = isSuper && body.amount != null && body.amount >= 0
       ? body.amount
       : plan.custom ? 0 : plan.monthlyPrice * months;
 
@@ -265,6 +276,48 @@ export class BillingService {
 
   private requireSuperAdmin(actor: Actor) {
     if (actor.role !== 'SUPER_ADMIN') throw new ForbiddenException('SUPER_ADMIN only');
+  }
+
+  // SUPER_ADMIN may act on any company; a COMPANY_ADMIN only on their own.
+  private requireBillingAccess(actor: Actor, companyId: string) {
+    if (actor.role === 'SUPER_ADMIN') return;
+    if (actor.role === 'COMPANY_ADMIN' && actor.companyId === companyId) return;
+    throw new ForbiddenException('Энэ байгууллагын төлбөрийг удирдах эрхгүй байна.');
+  }
+
+  // ── Plan feature-gates (reports / notification channels) ──────
+  // Resolve the plan a company is on, or null when it's UNMANAGED (no
+  // subscription). Unmanaged tenants are grandfathered everywhere in billing —
+  // no device cap, no warnings — so feature-gates treat null as "ungated" too,
+  // and only start enforcing once an admin assigns (or the tenant self-serves
+  // onto) a plan. Live tracking is never blocked regardless.
+  private async planFor(companyId: string | null | undefined): Promise<PlanDef | null> {
+    if (!companyId) return null;
+    const sub = await this.prisma.subscription.findUnique({ where: { companyId } }).catch(() => null);
+    return sub ? getPlan(sub.planKey) : null;
+  }
+
+  // Notification channels this company's plan permits. The dispatcher intersects
+  // a rule's configured channels with this set. Returns null for unmanaged
+  // tenants → caller leaves the rule's channels untouched (no gating).
+  async allowedChannels(companyId: string | null | undefined): Promise<string[] | null> {
+    return (await this.planFor(companyId))?.channels ?? null;
+  }
+
+  // 'basic' vs 'all' — used to gate advanced report templates. null = unmanaged.
+  async reportsTier(companyId: string | null | undefined): Promise<'basic' | 'all' | null> {
+    return (await this.planFor(companyId))?.reports ?? null;
+  }
+
+  // Throw unless the actor's plan unlocks the full report suite. SUPER_ADMIN and
+  // unmanaged tenants (null tier) are always allowed; only a managed `basic`
+  // plan is blocked.
+  async assertReportsAll(actor: Actor): Promise<void> {
+    if (actor.role === 'SUPER_ADMIN') return;
+    const tier = await this.reportsTier(actor.companyId);
+    if (tier === 'basic') {
+      throw new ForbiddenException('Энэ тайлан зөвхөн Business+ багцад нээлттэй. Багцаа ахиулна уу.');
+    }
   }
 
   // ── Cron: lifecycle transitions ───────────────────────────────

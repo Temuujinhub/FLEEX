@@ -40,6 +40,7 @@ import { MediaModule } from './media/media.module';
 import { GeoModule } from './geo/geo.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
+import { PlanGuard } from './billing/plan.guard';
 import { AuditInterceptor } from './audit/audit.interceptor';
 import { TenantContextInterceptor } from './common/tenant-context.interceptor';
 import { BootstrapService } from './common/bootstrap.service';
@@ -112,6 +113,9 @@ function validateEnv(env: Record<string, any>): Record<string, any> {
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    // Plan feature-gate — runs after auth/roles populate req.user; no-op unless
+    // the handler is annotated with @RequiresAllReports().
+    { provide: APP_GUARD, useClass: PlanGuard },
     // Outermost interceptor: establish the tenant context for the whole
     // handler (and the Prisma guard) before anything else runs.
     { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },

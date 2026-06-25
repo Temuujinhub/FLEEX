@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { BillingModule } from '../billing/billing.module';
 import { EmailService } from './email.service';
 import { SmsService } from './sms.service';
 import { WebhookService } from './webhook.service';
@@ -16,6 +17,7 @@ import { LoneWorkerService } from './lone-worker.service';
 // RedisService come from the global CommonModule and PrismaModule wired in
 // AppModule.
 @Module({
+  imports: [BillingModule],
   providers: [
     IntegrationSettingsService,
     EmailService,

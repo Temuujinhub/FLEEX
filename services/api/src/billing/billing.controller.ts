@@ -54,6 +54,15 @@ export class BillingController {
     return this.svc.listInvoices(req.user, req.user.companyId);
   }
 
+  // Self-serve: a COMPANY_ADMIN issues an invoice for their OWN company (to
+  // renew/upgrade and get a number to pay by). The service forces the catalogue
+  // price and blocks the negotiated Enterprise plan for non-admins.
+  @Post('invoices')
+  @Audit('billing.invoice.self_create', { captureResult: true })
+  createMyInvoice(@Body() dto: CreateInvoiceDto, @Req() req: any) {
+    return this.svc.createInvoice(req.user, req.user.companyId, dto);
+  }
+
   // ── SUPER_ADMIN management ────────────────────────────────────
   @Get('companies/:id')
   @Roles(Role.SUPER_ADMIN)

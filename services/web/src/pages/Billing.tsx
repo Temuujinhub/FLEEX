@@ -52,7 +52,7 @@ export function Billing() {
         <p className="text-sm text-slate-500 mt-0.5">Захиалгын багц, ашиглалт, нэхэмжлэх ба дараагийн төлбөрийн огноо.</p>
       </header>
       <div className="p-4 md:p-6 space-y-6 max-w-5xl">
-        {isSuper ? <SuperAdminBilling plans={plans.data ?? []} /> : <CompanyBilling />}
+        {isSuper ? <SuperAdminBilling plans={plans.data ?? []} /> : <CompanyBilling plans={plans.data ?? []} />}
         <PlanComparison plans={plans.data ?? []} />
       </div>
     </div>
@@ -60,7 +60,7 @@ export function Billing() {
 }
 
 // ── Company admin's own view ──────────────────────────────────
-function CompanyBilling() {
+function CompanyBilling({ plans }: { plans: PlanView[] }) {
   const me = useQuery({ queryKey: ['billing', 'me'], queryFn: () => api.get<Summary>('/billing/me').then((r) => r.data) });
   const invoices = useQuery({ queryKey: ['billing', 'invoices'], queryFn: () => api.get<Invoice[]>('/billing/invoices').then((r) => r.data) });
   if (me.isLoading) return <Card><div className="text-sm text-slate-500">Татаж байна…</div></Card>;
@@ -68,8 +68,61 @@ function CompanyBilling() {
   return (
     <div className="space-y-6">
       <SummaryView s={me.data} />
+      <SelfInvoiceForm plans={plans} current={me.data} />
       <InvoiceList invoices={invoices.data ?? []} />
     </div>
+  );
+}
+
+// Self-serve invoice: the company admin picks a plan + duration and gets an
+// invoice number to pay by bank transfer. Price is the catalogue rate × months
+// (server-enforced — no override here); Enterprise is "contact sales", not
+// self-serve.
+function SelfInvoiceForm({ plans, current }: { plans: PlanView[]; current: Summary }) {
+  const qc = useQueryClient();
+  const selectable = plans.filter((p) => !p.custom);
+  const initial = current.planKey && selectable.some((p) => p.key === current.planKey)
+    ? current.planKey
+    : (current.suggestedPlan && selectable.some((p) => p.key === current.suggestedPlan) ? current.suggestedPlan : selectable[0]?.key ?? 'starter');
+  const [planKey, setPlanKey] = useState(initial);
+  const [months, setMonths] = useState('1');
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const create = useMutation({
+    mutationFn: () => api.post('/billing/invoices', { planKey, months: Number(months) }).then((r) => r.data),
+    onSuccess: (inv: any) => { setMsg(`✓ Нэхэмжлэх үүслээ: ${inv.invoiceNumber}. Гүйлгээний утга дээр энэ дугаарыг бичиж шилжүүлнэ үү.`); qc.invalidateQueries({ queryKey: ['billing'] }); },
+    onError: (e: any) => setMsg(e?.response?.data?.message ?? 'Алдаа гарлаа.'),
+  });
+
+  const selected = selectable.find((p) => p.key === planKey);
+  const estimate = selected ? selected.monthlyPrice * Number(months || 0) : 0;
+
+  return (
+    <Card>
+      <div className="text-sm font-semibold mb-1">Багц сунгах / шинэчлэх</div>
+      <p className="text-xs text-slate-500 mb-3">Багц, хугацаагаа сонгоод нэхэмжлэх үүсгэнэ. Дугаараар нь банкаар төлсний дараа админ баталгаажуулж, багц сунгагдана.</p>
+      <div className="grid sm:grid-cols-[1fr_8rem_auto] gap-2 items-end">
+        <div>
+          <label className="block text-[11px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">Багц</label>
+          <select value={planKey} onChange={(e) => setPlanKey(e.target.value)} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
+            {selectable.map((p) => <option key={p.key} value={p.key}>{p.name} — {fmt(p.monthlyPrice)}₮/сар</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-[11px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">Хугацаа</label>
+          <select value={months} onChange={(e) => setMonths(e.target.value)} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
+            {DURATIONS.map((d) => <option key={d.v} value={d.v}>{d.label}</option>)}
+          </select>
+        </div>
+        <button onClick={() => create.mutate()} disabled={create.isPending}
+          className="rounded-md bg-brand-600 hover:bg-brand-500 text-white text-sm py-2 px-4 disabled:opacity-50 whitespace-nowrap">
+          Нэхэмжлэх үүсгэх
+        </button>
+      </div>
+      <div className="mt-2 text-sm text-slate-600">Нийт дүн: <strong className="tabular-nums">{fmt(estimate)}₮</strong> <span className="text-xs text-slate-400">({months} сар × {fmt(selected?.monthlyPrice ?? 0)}₮)</span></div>
+      <p className="mt-2 text-[11px] text-slate-400">Enterprise багцыг борлуулалтын багтай тохиролцоно — <a href="/#contact" className="underline">холбоо барих</a>.</p>
+      {msg && <div className={clsx('mt-3 rounded-lg border px-3 py-2 text-sm', msg.startsWith('✓') ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800')}>{msg}</div>}
+    </Card>
   );
 }
 
