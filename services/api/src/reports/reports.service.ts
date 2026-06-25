@@ -53,6 +53,8 @@ export const REPORT_TEMPLATES = {
                filter: ['POWER_CUT', 'LOW_BATTERY'] },
   tamper:    { kind: 'events',   title: 'Хөндөлт (Tamper)',           fileStem: 'tamper',
                filter: ['TAMPER'] },
+  fuel:      { kind: 'events',   title: 'Түлш (цэнэглэлт/задрал)',     fileStem: 'fuel',
+               filter: ['FUEL_FILL', 'FUEL_DRAIN'] },
 } as const;
 
 export type ReportTemplateId = keyof typeof REPORT_TEMPLATES;

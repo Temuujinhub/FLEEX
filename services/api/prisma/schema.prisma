@@ -644,6 +644,10 @@ enum EventType {
   // 2h+ during a working shift. Fired by the LoneWorker safety service
   // so a manager can escalate manually.
   LONE_WORKER_RISK
+  // Fuel analytics (R2): a sudden rise in fuel level (refuelling) or a sudden
+  // drop (drain / possible theft), detected from the FUEL_LEVEL sensor series.
+  FUEL_FILL
+  FUEL_DRAIN
   CUSTOM
 }
 
