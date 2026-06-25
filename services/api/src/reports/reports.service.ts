@@ -5,9 +5,11 @@ import PDFDocument from 'pdfkit';
 import { Readable } from 'stream';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  buildDailySummary,
   buildEngineSessions,
   buildIdlePeriods,
   buildTripSegments,
+  computeFuelConsumption,
   type RawPosition,
 } from './report-builders';
 import {
@@ -15,12 +17,20 @@ import {
   engineSessionsPdf,
   eventsExcel,
   eventsPdf,
+  fuelConsumptionExcel,
+  fuelConsumptionPdf,
   hardenWorkbook,
   idlePeriodsExcel,
   idlePeriodsPdf,
+  mileageExcel,
+  mileagePdf,
   tripSegmentsExcel,
   tripSegmentsPdf,
+  utilizationExcel,
+  utilizationPdf,
+  type DailyTotals,
   type DeviceHeader,
+  type FuelConsumptionData,
   type ReportRange,
 } from './report-exporters';
 
@@ -34,6 +44,10 @@ export const REPORT_TEMPLATES = {
   trip:      { kind: 'trip',     title: 'Зорчилт',                    fileStem: 'trips' },
   idle:      { kind: 'idle',     title: 'Зогсолт',                    fileStem: 'idle-periods' },
   engine:    { kind: 'engine',   title: 'Мото цаг',                   fileStem: 'engine-hours' },
+  // Daily rollups (Wialon-parity): per-day distance, utilization, nominal fuel.
+  mileage:          { kind: 'mileage',          title: 'Гүйлт (өдрөөр)',              fileStem: 'mileage' },
+  utilization:      { kind: 'utilization',      title: 'Ашиглалт (өдрөөр)',           fileStem: 'utilization' },
+  fuel_consumption: { kind: 'fuel_consumption', title: 'Шатхууны зарцуулалт (норм)',  fileStem: 'fuel-consumption' },
   // Event family — same Event-table query, different filter.
   driver:    { kind: 'events',   title: 'Жолоочийн зан төлөв',        fileStem: 'driver-behaviour',
                filter: ['HARSH_ACCEL', 'HARSH_BRAKE', 'HARSH_CORNER'] },
@@ -202,6 +216,52 @@ export class ReportsService {
     };
   }
 
+  // Daily summary: one row per UTC day with distance / engine-on / moving /
+  // idle. Backs both the Mileage and Utilization reports (and feeds the
+  // nominal fuel-consumption estimate) — Wialon's most-used "per day" tables.
+  async dailySummaryReport(deviceId: string, from: Date, to: Date, actor: any) {
+    const dev = await this.ensureDeviceAccess(deviceId, actor);
+    const rows = await this.fetchPositionsWindow(deviceId, from, to);
+    const { days, hasIgnition } = buildDailySummary(rows);
+    const totals: DailyTotals = days.reduce(
+      (acc, d) => {
+        acc.distanceKm += d.distanceKm;
+        acc.movingMin += d.movingMin;
+        acc.idleMin += d.idleMin;
+        acc.engineOnMin += d.engineOnMin;
+        acc.maxSpeed = Math.max(acc.maxSpeed, d.maxSpeed);
+        return acc;
+      },
+      { distanceKm: 0, movingMin: 0, idleMin: 0, engineOnMin: 0, maxSpeed: 0 } as DailyTotals,
+    );
+    return {
+      device: { id: dev.id, name: dev.name, plateNumber: dev.plateNumber, imei: dev.imei },
+      from, to, hasIgnition, totals, days,
+    };
+  }
+
+  // Nominal fuel consumption: distance × the device's configured L/100km. Needs
+  // no fuel sensor (that's the `fuel` template / R2 analytics) — it estimates
+  // burn from the catalogue rate so every vehicle gets a fuel figure.
+  async fuelConsumptionReport(deviceId: string, from: Date, to: Date, actor: any) {
+    const dev = await this.ensureDeviceAccess(deviceId, actor);
+    const rate = Number(dev.fuelConsumptionL100Km ?? 0);
+    const rows = await this.fetchPositionsWindow(deviceId, from, to);
+    const { days } = buildDailySummary(rows);
+    const calc = computeFuelConsumption(
+      days.map((d) => ({ date: d.date, distanceKm: d.distanceKm })),
+      rate,
+    );
+    return {
+      device: { id: dev.id, name: dev.name, plateNumber: dev.plateNumber, imei: dev.imei },
+      from, to,
+      rateL100Km: rate,
+      tankCapacityL: dev.tankCapacityL != null ? Number(dev.tankCapacityL) : null,
+      totals: { distanceKm: calc.totalDistanceKm, estLiters: calc.totalEstLiters, avgRateL100Km: rate },
+      days: calc.rows,
+    };
+  }
+
   async eventsReport(deviceId: string, from: Date, to: Date, actor: any, types?: string[]) {
     await this.ensureDeviceAccess(deviceId, actor);
     const where: any = { deviceId, occurredAt: { gte: from, lte: to } };
@@ -257,6 +317,27 @@ export class ReportsService {
       buffer = format === 'excel'
         ? await idlePeriodsExcel(device, range, data.periods, data.totals)
         : await idlePeriodsPdf(device, range, data.periods, data.totals);
+    } else if (tpl.kind === 'mileage') {
+      const data = await this.dailySummaryReport(deviceId, from, to, actor);
+      buffer = format === 'excel'
+        ? await mileageExcel(device, range, data.days, data.totals)
+        : await mileagePdf(device, range, data.days, data.totals);
+    } else if (tpl.kind === 'utilization') {
+      const data = await this.dailySummaryReport(deviceId, from, to, actor);
+      buffer = format === 'excel'
+        ? await utilizationExcel(device, range, data.days, data.totals, data.hasIgnition)
+        : await utilizationPdf(device, range, data.days, data.totals, data.hasIgnition);
+    } else if (tpl.kind === 'fuel_consumption') {
+      const data = await this.fuelConsumptionReport(deviceId, from, to, actor);
+      const fc: FuelConsumptionData = {
+        rateL100Km: data.rateL100Km,
+        tankCapacityL: data.tankCapacityL,
+        totals: { distanceKm: data.totals.distanceKm, estLiters: data.totals.estLiters },
+        days: data.days,
+      };
+      buffer = format === 'excel'
+        ? await fuelConsumptionExcel(device, range, fc)
+        : await fuelConsumptionPdf(device, range, fc);
     } else {
       // events kind — covers driver, overspeed, panic, geofence, safety,
       // ignition, offline, power, tamper. tpl.filter narrows the type set;

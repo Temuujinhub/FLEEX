@@ -10,7 +10,7 @@ import { api, API_BASE, getToken } from '../lib/api';
 // derived from those (event filters, idle / engine slices of trip) or
 // flagged "удахгүй" so we don't pretend something is wired up.
 
-type Kind = 'trip' | 'trip-idle' | 'trip-engine' | 'events' | 'idle-billing' | 'coming-soon';
+type Kind = 'trip' | 'trip-idle' | 'trip-engine' | 'events' | 'idle-billing' | 'mileage' | 'utilization' | 'fuel-consumption' | 'coming-soon';
 
 interface Template {
   id: string;
@@ -46,6 +46,8 @@ const I = {
   Signal:   () => svg(<><path d="M5 12.5a10 10 0 0114 0" /><path d="M8 15.5a6 6 0 018 0" /><circle cx="12" cy="18.5" r="1.5" /></>),
   Battery:  () => svg(<><rect x="3" y="7" width="16" height="10" rx="1.5" /><rect x="20" y="10" width="2" height="4" rx="0.5" /><path d="M6 12h8" /></>),
   Lock:     () => svg(<><rect x="5" y="11" width="14" height="9" rx="1.5" /><path d="M8 11V8a4 4 0 018 0v3" /></>),
+  Calendar: () => svg(<><rect x="4" y="5" width="16" height="16" rx="2" /><path d="M4 9h16M8 3v4M16 3v4" /></>),
+  Chart:    () => svg(<><path d="M4 20V4M4 20h16" /><rect x="7" y="12" width="3" height="5" /><rect x="12" y="9" width="3" height="8" /><rect x="17" y="6" width="3" height="11" /></>),
 };
 
 const TEMPLATES: Template[] = [
@@ -75,12 +77,21 @@ const TEMPLATES: Template[] = [
     kind: 'events', icon: <I.AlertList /> },
 
   // ── Ашиглалт ─────────────────────────────────────────────
+  { id: 'mileage', cat: 'Ашиглалт',   name: 'Гүйлт (өдрөөр)',
+    description: 'Өдөр бүрийн туулсан зам, хөдөлгөөнтэй цаг, дээд хурд.',
+    kind: 'mileage', icon: <I.Calendar /> },
+  { id: 'utilization', cat: 'Ашиглалт', name: 'Ашиглалт (өдрөөр)',
+    description: 'Хөдөлгүүр асаалттай / хөдөлгөөнд / сул зогссон цаг ба ашиглалтын %.',
+    kind: 'utilization', icon: <I.Chart /> },
   { id: 'engine',  cat: 'Ашиглалт',   name: 'Мото цаг',
     description: 'Хөдөлгүүрийн ажилласан цаг.',
     kind: 'trip-engine', icon: <I.Engine /> },
-  { id: 'fuel',    cat: 'Ашиглалт',   name: 'Шатхууны зарцуулалт',
-    description: 'Цэнэглэлт, хэрэглээ, гэнэтийн алдагдал.',
-    kind: 'coming-soon', icon: <I.Fuel /> },
+  { id: 'fuel',    cat: 'Ашиглалт',   name: 'Түлш — цэнэглэлт/хулгай',
+    description: 'Fuel-level мэдрэгчээс цэнэглэлт ба гэнэтийн алдагдал (хулгай).',
+    kind: 'events', filter: ['FUEL_FILL', 'FUEL_DRAIN'], icon: <I.Fuel /> },
+  { id: 'fuel_consumption', cat: 'Ашиглалт', name: 'Шатхууны зарцуулалт (норм)',
+    description: 'Туулсан зам × машины L/100км нормоор тооцсон зарцуулалт. Мэдрэгч шаардахгүй.',
+    kind: 'fuel-consumption', icon: <I.Fuel /> },
   { id: 'idle-billing', cat: 'Ашиглалт', name: 'Idle нэхэмжлэл',
     description: 'Жолооч тус бүрийн зогссон цаг × тарифаар тооцсон дүн.',
     kind: 'idle-billing', icon: <I.Pause /> },
@@ -504,6 +515,10 @@ function ReportResult(props: {
   const isEngine = props.tpl.kind === 'trip-engine';
   const isTrip = props.tpl.kind === 'trip';
   const isIdle = props.tpl.kind === 'trip-idle';
+  const isMileage = props.tpl.kind === 'mileage';
+  const isUtilization = props.tpl.kind === 'utilization';
+  const isDaily = isMileage || isUtilization;
+  const isFuelConsumption = props.tpl.kind === 'fuel-consumption';
   const fromIso = new Date(props.from).toISOString();
   const toIso = new Date(props.to).toISOString();
 
@@ -540,6 +555,18 @@ function ReportResult(props: {
       api.get(`/reports/events/${props.deviceId}?from=${fromIso}&to=${toIso}`).then((r) => r.data),
     enabled: isEvents,
   });
+  const daily = useQuery({
+    queryKey: ['reports', 'daily-summary', props.deviceId, props.from, props.to],
+    queryFn: () =>
+      api.get(`/reports/daily-summary/${props.deviceId}?from=${fromIso}&to=${toIso}`).then((r) => r.data),
+    enabled: isDaily,
+  });
+  const fuelCons = useQuery({
+    queryKey: ['reports', 'fuel-consumption', props.deviceId, props.from, props.to],
+    queryFn: () =>
+      api.get(`/reports/fuel-consumption/${props.deviceId}?from=${fromIso}&to=${toIso}`).then((r) => r.data),
+    enabled: isFuelConsumption,
+  });
 
   const loading = isEvents
     ? events.isLoading
@@ -549,7 +576,11 @@ function ReportResult(props: {
         ? segments.isLoading || trip.isLoading
         : isIdle
           ? idle.isLoading || trip.isLoading
-          : trip.isLoading;
+          : isDaily
+            ? daily.isLoading
+            : isFuelConsumption
+              ? fuelCons.isLoading
+              : trip.isLoading;
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -585,6 +616,15 @@ function ReportResult(props: {
         )}
         {!loading && isIdle && idle.data && (
           <IdleResult idle={idle.data} />
+        )}
+        {!loading && isMileage && daily.data && (
+          <MileageResult data={daily.data} />
+        )}
+        {!loading && isUtilization && daily.data && (
+          <UtilizationResult data={daily.data} />
+        )}
+        {!loading && isFuelConsumption && fuelCons.data && (
+          <FuelConsumptionResult data={fuelCons.data} />
         )}
       </div>
     </div>
@@ -783,6 +823,151 @@ function IdleResult({ idle }: { idle: any }) {
               ))}
               {rows.length === 0 && (
                 <tr><td colSpan={7} className="px-3 py-10 text-center text-sm text-slate-400">Хоосон</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </>
+  );
+}
+
+// ── Mileage (Гүйлт — өдрөөр) ──────────────────────────────────
+function MileageResult({ data }: { data: any }) {
+  const t = data.totals ?? {};
+  const days: any[] = data.days ?? [];
+  const activeDays = days.filter((d) => (d.distanceKm ?? 0) >= 0.1).length;
+  return (
+    <>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Kpi label="Нийт зам"         value={km(t.distanceKm)} accent="brand" />
+        <Kpi label="Хөдөлгөөнтэй цаг" value={hours((t.movingMin ?? 0) / 60)} accent="emerald" />
+        <Kpi label="Дээд хурд"        value={`${(t.maxSpeed ?? 0).toFixed(0)} км/ц`} accent="rose" />
+        <Kpi label="Идэвхтэй өдөр"    value={`${activeDays} / ${days.length}`} accent="slate" />
+      </div>
+      <Panel title="Өдрийн задаргаа" subtitle={days.length === 0 ? 'Сонгосон хугацаанд мэдээ алга' : `Нийт ${days.length} өдөр`}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-xs uppercase tracking-widest text-slate-500 border-b border-slate-100">
+              <tr>
+                <th className="text-left px-3 py-2">Огноо</th>
+                <th className="text-right px-3 py-2">Зам (км)</th>
+                <th className="text-right px-3 py-2">Хөдөлгөөнд</th>
+                <th className="text-right px-3 py-2">Дээд хурд</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {days.map((d) => (
+                <tr key={d.date} className="hover:bg-slate-50">
+                  <td className="px-3 py-2 whitespace-nowrap">{d.date}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{(d.distanceKm ?? 0).toFixed(1)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{fmtMin(d.movingMin)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{(d.maxSpeed ?? 0).toFixed(0)} км/ц</td>
+                </tr>
+              ))}
+              {days.length === 0 && (
+                <tr><td colSpan={4} className="px-3 py-10 text-center text-sm text-slate-400">Хоосон</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </>
+  );
+}
+
+// ── Utilization (Ашиглалт — өдрөөр) ───────────────────────────
+function UtilizationResult({ data }: { data: any }) {
+  const t = data.totals ?? {};
+  const days: any[] = data.days ?? [];
+  const utilPct = (engineOnMin: number, movingMin: number) =>
+    engineOnMin > 0 ? Math.round((movingMin / engineOnMin) * 100) : 0;
+  return (
+    <>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Kpi label="Асаалттай"   value={hours((t.engineOnMin ?? 0) / 60)} accent="emerald" />
+        <Kpi label="Хөдөлгөөнд"  value={hours((t.movingMin ?? 0) / 60)} accent="brand" />
+        <Kpi label="Сул зогсолт" value={hours((t.idleMin ?? 0) / 60)} accent="amber" />
+        <Kpi label="Ашиглалт"    value={`${utilPct(t.engineOnMin ?? 0, t.movingMin ?? 0)}%`} accent="slate" />
+      </div>
+      {data.hasIgnition === false && (
+        <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+          Анхаар: энэ төхөөрөмж <strong>ignition signal илгээгээгүй</strong> тул сул зогсолтыг тооцоогүй
+          (ашиглалт ойролцоогоор 100% харагдана).
+        </div>
+      )}
+      <Panel title="Өдрийн задаргаа" subtitle={days.length === 0 ? 'Сонгосон хугацаанд мэдээ алга' : `Нийт ${days.length} өдөр`}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-xs uppercase tracking-widest text-slate-500 border-b border-slate-100">
+              <tr>
+                <th className="text-left px-3 py-2">Огноо</th>
+                <th className="text-right px-3 py-2">Асаалттай</th>
+                <th className="text-right px-3 py-2">Хөдөлгөөнд</th>
+                <th className="text-right px-3 py-2">Сул</th>
+                <th className="text-right px-3 py-2">Ашиглалт %</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {days.map((d) => (
+                <tr key={d.date} className="hover:bg-slate-50">
+                  <td className="px-3 py-2 whitespace-nowrap">{d.date}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{fmtMin(d.engineOnMin)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{fmtMin(d.movingMin)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{fmtMin(d.idleMin)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{utilPct(d.engineOnMin ?? 0, d.movingMin ?? 0)}%</td>
+                </tr>
+              ))}
+              {days.length === 0 && (
+                <tr><td colSpan={5} className="px-3 py-10 text-center text-sm text-slate-400">Хоосон</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </>
+  );
+}
+
+// ── Fuel consumption (Шатхууны зарцуулалт — нормоор) ──────────
+function FuelConsumptionResult({ data }: { data: any }) {
+  const t = data.totals ?? {};
+  const days: any[] = data.days ?? [];
+  const rate = data.rateL100Km ?? 0;
+  return (
+    <>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Kpi label="Норм (L/100км)" value={rate > 0 ? rate.toFixed(1) : '—'} accent="slate" />
+        <Kpi label="Нийт зам"       value={km(t.distanceKm)} accent="brand" />
+        <Kpi label="Тооцоолсон"     value={`${(t.estLiters ?? 0).toFixed(1)} L`} accent="amber" />
+        <Kpi label="Багтаамж (L)"   value={data.tankCapacityL != null ? String(data.tankCapacityL) : '—'} accent="emerald" />
+      </div>
+      {rate <= 0 && (
+        <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+          Машины <strong>"Шатахууны зарцуулалт (L/100км)"</strong> талбар хоосон тул тооцоо 0 байна.
+          "Машин · Төхөөрөмж"-ийн засварлах цонхны Түлш хэсэгт нормоо оруулна уу.
+        </div>
+      )}
+      <Panel title="Өдрийн задаргаа" subtitle={days.length === 0 ? 'Сонгосон хугацаанд мэдээ алга' : `Нийт ${days.length} өдөр`}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-xs uppercase tracking-widest text-slate-500 border-b border-slate-100">
+              <tr>
+                <th className="text-left px-3 py-2">Огноо</th>
+                <th className="text-right px-3 py-2">Зам (км)</th>
+                <th className="text-right px-3 py-2">Тооцоолсон (L)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {days.map((d) => (
+                <tr key={d.date} className="hover:bg-slate-50">
+                  <td className="px-3 py-2 whitespace-nowrap">{d.date}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{(d.distanceKm ?? 0).toFixed(1)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{(d.estLiters ?? 0).toFixed(1)}</td>
+                </tr>
+              ))}
+              {days.length === 0 && (
+                <tr><td colSpan={3} className="px-3 py-10 text-center text-sm text-slate-400">Хоосон</td></tr>
               )}
             </tbody>
           </table>
@@ -993,6 +1178,8 @@ function eventLabel(t: string) {
     DEVICE_OFFLINE: 'Төхөөрөмж офлайн',
     DEVICE_ONLINE: 'Төхөөрөмж онлайн',
     TAMPER: 'Хөндөлт',
+    FUEL_FILL: 'Түлш цэнэглэв',
+    FUEL_DRAIN: 'Түлш буурлаа / хулгай',
   };
   return m[t] ?? t;
 }
