@@ -87,6 +87,8 @@
     "password": "Password",
     "signIn": "Sign in",
     "signingIn": "Signing in…",
+    "noAccount": "No account?",
+    "signUp": "Create an account",
     "error": "Sign-in failed",
     "capRealtime": "Real-time",
     "capRetention": "Data retention",

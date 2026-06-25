@@ -117,6 +117,11 @@ export function Login() {
             </button>
           </form>
 
+          <p className="mt-4 text-sm text-slate-400">
+            {t('login.noAccount')}{' '}
+            <a href="/signup" className="text-brand-300 font-semibold hover:text-brand-200">{t('login.signUp')}</a>
+          </p>
+
           <div className="mt-8 grid grid-cols-3 gap-3 text-center">
             <Capability label={t('login.capRealtime')} value="<1s" />
             <Capability label={t('login.capRetention')} value={t('login.capRetentionValue')} />

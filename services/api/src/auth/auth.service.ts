@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -53,6 +54,73 @@ export class AuthService {
     }
     await this.redis.client.set(`ws:ticket:${ticket}`, JSON.stringify(payload), 'EX', expiresIn);
     return { ticket, expiresIn };
+  }
+
+  // Self-serve signup: provisions a new tenant (Company + COMPANY_ADMIN user +
+  // a 14-day Starter trial) and logs the user straight in. Public funnel — no
+  // SUPER_ADMIN involvement — so it's rate-limited and the caller must accept
+  // the terms (enforced in the DTO). Email uniqueness is global.
+  private static readonly TRIAL_DAYS = 14;
+
+  async registerCompany(
+    input: { companyName: string; fullName: string; email: string; password: string; phone?: string },
+    ip?: string,
+    userAgent?: string,
+  ) {
+    const email = input.email.toLowerCase().trim();
+    const existing = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
+    if (existing) throw new ConflictException('Энэ имэйл аль хэдийн бүртгэлтэй байна.');
+
+    const passwordHash = await argon2.hash(input.password, { type: argon2.argon2id });
+    const slug = await this.uniqueSlug(input.companyName);
+    const now = new Date();
+    const trialEnd = new Date(now.getTime() + AuthService.TRIAL_DAYS * 86_400_000);
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      const company = await tx.company.create({ data: { name: input.companyName.trim(), slug } });
+      const user = await tx.user.create({
+        data: {
+          companyId: company.id, email, passwordHash,
+          fullName: input.fullName.trim(), phone: input.phone?.trim() || null,
+          role: 'COMPANY_ADMIN', status: 'ACTIVE',
+        },
+      });
+      // Auto-trial: Starter plan, TRIAL status, 14-day window.
+      await tx.subscription.create({
+        data: {
+          companyId: company.id, planKey: 'starter', status: 'TRIAL',
+          startedAt: now, trialEndsAt: trialEnd, currentPeriodEnd: trialEnd,
+        },
+      });
+      return { company, user };
+    });
+
+    await this.audit.record({
+      actorId: created.user.id, actorEmail: email, companyId: created.company.id,
+      action: 'company.register', outcome: 'success', ipAddress: ip, userAgent,
+    });
+
+    const tokens = await this.issueTokens(created.user.id, email, 'COMPANY_ADMIN', created.company.id, null, ip, userAgent);
+    return {
+      ...tokens,
+      user: {
+        id: created.user.id, email, fullName: created.user.fullName, phone: created.user.phone,
+        role: 'COMPANY_ADMIN', companyId: created.company.id,
+        company: { id: created.company.id, name: created.company.name, slug: created.company.slug },
+      },
+    };
+  }
+
+  // Derives a unique URL-safe slug from the company name; ASCII-only (Cyrillic
+  // names fall back to "co"), with a random suffix on collision.
+  private async uniqueSlug(name: string): Promise<string> {
+    const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'co';
+    for (let i = 0; i < 6; i++) {
+      const candidate = i === 0 ? base : `${base}-${randomBytes(2).toString('hex')}`;
+      const taken = await this.prisma.company.findUnique({ where: { slug: candidate }, select: { id: true } });
+      if (!taken) return candidate;
+    }
+    return `${base}-${randomBytes(4).toString('hex')}`;
   }
 
   async login(email: string, password: string, ip?: string, userAgent?: string) {

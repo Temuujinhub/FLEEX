@@ -9,6 +9,8 @@ import { preferLite } from './lib/viewMode';
 // it caused a react-leaflet TDZ; per-route lazy() doesn't.)
 const Landing = lazy(() => import('./pages/Landing').then((m) => ({ default: m.Landing })));
 const Login = lazy(() => import('./pages/Login').then((m) => ({ default: m.Login })));
+const Signup = lazy(() => import('./pages/Signup').then((m) => ({ default: m.Signup })));
+const Legal = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Legal })));
 const Dashboard = lazy(() => import('./pages/Dashboard').then((m) => ({ default: m.Dashboard })));
 const MobileSummary = lazy(() => import('./pages/MobileSummary').then((m) => ({ default: m.MobileSummary })));
 const Devices = lazy(() => import('./pages/Devices').then((m) => ({ default: m.Devices })));
@@ -58,6 +60,9 @@ export function App() {
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
+        <Route path="/legal/:doc" element={<Legal />} />
+        <Route path="/legal" element={<Navigate to="/legal/terms" replace />} />
         {/* Standalone lightweight mobile view — no sidebar chrome. */}
         <Route
           path="/m"
