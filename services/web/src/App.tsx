@@ -31,6 +31,7 @@ const SupportTickets = lazy(() => import('./pages/SupportTickets').then((m) => (
 const Audit = lazy(() => import('./pages/Audit').then((m) => ({ default: m.Audit })));
 const SystemHealth = lazy(() => import('./pages/SystemHealth').then((m) => ({ default: m.SystemHealth })));
 const Users = lazy(() => import('./pages/Users').then((m) => ({ default: m.Users })));
+const Billing = lazy(() => import('./pages/Billing').then((m) => ({ default: m.Billing })));
 const Companies = lazy(() => import('./pages/Companies').then((m) => ({ default: m.Companies })));
 const Groups = lazy(() => import('./pages/Groups').then((m) => ({ default: m.Groups })));
 const Profile = lazy(() => import('./pages/Profile').then((m) => ({ default: m.Profile })));
@@ -106,6 +107,7 @@ export function App() {
           <Route path="/app/proximity" element={<ProximityReport />} />
           <Route path="/app/support" element={<SupportTickets />} />
           <Route path="/app/users" element={<Users />} />
+          <Route path="/app/billing" element={<Billing />} />
           <Route path="/app/companies" element={<Companies />} />
           <Route path="/app/profile" element={<Profile />} />
           <Route path="/app/audit" element={<Audit />} />

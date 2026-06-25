@@ -35,6 +35,7 @@ import { SupportTicketsModule } from './support-tickets/support-tickets.module';
 import { CustomFieldsModule } from './custom-fields/custom-fields.module';
 import { EcoModule } from './eco/eco.module';
 import { GprsModule } from './gprs/gprs.module';
+import { BillingModule } from './billing/billing.module';
 import { MediaModule } from './media/media.module';
 import { GeoModule } from './geo/geo.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
@@ -96,6 +97,7 @@ function validateEnv(env: Record<string, any>): Record<string, any> {
     CustomFieldsModule,
     EcoModule,
     GprsModule,
+    BillingModule,
     MediaModule,
     GeoModule,
     WebsocketModule,

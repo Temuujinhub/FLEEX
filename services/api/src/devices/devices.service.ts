@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../common/redis.service';
 import { Actor, applyActorScope, driverMayAccess } from '../auth/actor-scope';
 import { hardenWorkbook } from '../reports/report-exporters';
+import { BillingService } from '../billing/billing.service';
 
 // Cap rows processed from an uploaded import so a zip-bomb / huge sheet can't
 // monopolise the event loop + a DB connection (audit M3).
@@ -13,7 +14,11 @@ const MAX_IMPORT_ROWS = 5000;
 
 @Injectable()
 export class DevicesService {
-  constructor(private readonly prisma: PrismaService, private readonly redis: RedisService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+    private readonly billing: BillingService,
+  ) {}
 
   async list(
     actor: Actor,
@@ -90,6 +95,11 @@ export class DevicesService {
   ) {
     const companyId = actor.role === 'SUPER_ADMIN' ? dto.companyId ?? actor.companyId : actor.companyId;
     if (!companyId) throw new ForbiddenException('No company context');
+
+    // Subscription plan device-cap enforcement (billing phase 2). No-op for
+    // unmanaged companies; throws ForbiddenException at the cap or when the
+    // subscription is suspended.
+    await this.billing.assertCanAddDevice(companyId);
 
     await this.ensureChildOwnership(actor, companyId, { groupId: dto.groupId, garageId: dto.garageId });
 

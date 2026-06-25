@@ -55,6 +55,7 @@ const SECTIONS: {
       { to: '/app/health-rules',       labelKey: 'nav.healthRules',       min: 'FLEET_MANAGER', icon: <IconShield /> },
       { to: '/app/org',                labelKey: 'nav.org',               min: 'FLEET_MANAGER', icon: <IconLayers /> },
       { to: '/app/users',              labelKey: 'nav.users',             min: 'COMPANY_ADMIN', icon: <IconUsers /> },
+      { to: '/app/billing',            labelKey: 'nav.billing',           min: 'COMPANY_ADMIN', icon: <IconBuilding /> },
       { to: '/app/support',            labelKey: 'nav.support',           min: 'COMPANY_ADMIN', icon: <IconLifeRing /> },
       { to: '/app/audit',              labelKey: 'nav.audit',             min: 'COMPANY_ADMIN', icon: <IconAudit /> },
       { to: '/app/companies',          labelKey: 'nav.companies',         min: 'SUPER_ADMIN',   icon: <IconBuilding /> },
