@@ -2,7 +2,8 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Role, Subscription } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { getPlan, isPlanKey, isUnlimited, PLAN_CATALOG, suggestPlan, type PlanDef } from './plan-catalog';
+import { UsageMeterService } from './usage-meter.service';
+import { getPlan, isPlanKey, isUnlimited, PLAN_CATALOG, suggestPlan, UNLIMITED, type PlanDef } from './plan-catalog';
 
 type Actor = { id?: string; role: Role; companyId: string | null };
 
@@ -23,7 +24,10 @@ export interface BillingWarning {
 export class BillingService {
   private readonly logger = new Logger(BillingService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly meter: UsageMeterService,
+  ) {}
 
   // ── Reads ─────────────────────────────────────────────────────
   async summary(actor: Actor) {
@@ -59,6 +63,10 @@ export class BillingService {
     const now = new Date();
     const dueAt = sub.currentPeriodEnd ?? sub.trialEndsAt ?? null;
     const daysUntilDue = dueAt ? Math.ceil((dueAt.getTime() - now.getTime()) / DAY_MS) : null;
+    const smsUsed = plan.monthlySmsQuota !== 0 ? await this.meter.smsUsed(companyId) : 0;
+
+    const warnings = this.warnings(sub, plan, deviceLimit, devices, users, daysUntilDue);
+    this.appendSmsWarning(warnings, plan, smsUsed);
 
     return {
       managed: true,
@@ -73,9 +81,22 @@ export class BillingService {
       usage: {
         devices, users, deviceLimit, userLimit: plan.maxUsers,
         devicePct: pctOf(devices, deviceLimit), userPct: pctOf(users, plan.maxUsers),
+        smsUsed, smsQuota: plan.monthlySmsQuota, smsPct: pctOf(smsUsed, plan.monthlySmsQuota),
       },
-      warnings: this.warnings(sub, plan, deviceLimit, devices, users, daysUntilDue),
+      warnings,
     };
+  }
+
+  // SMS quota banner: warn near the cap, critical once reached. Skipped for
+  // plans with no SMS channel (quota 0) or unlimited.
+  private appendSmsWarning(out: BillingWarning[], plan: PlanDef, used: number) {
+    const quota = plan.monthlySmsQuota;
+    if (quota <= 0) return; // 0 = no SMS channel, -1 = unlimited
+    if (used >= quota) {
+      out.push({ level: 'critical', code: 'sms_over', message: `Энэ сарын SMS эрх дууссан (${used}/${quota}). Нэмэлт мэдэгдэл SMS-ээр явахгүй.` });
+    } else if (used >= quota * NEAR_CAP_RATIO) {
+      out.push({ level: 'warning', code: 'sms_near', message: `SMS эрх дуусахад ойрхон (${used}/${quota}).` });
+    }
   }
 
   listPlans() {
@@ -87,6 +108,7 @@ export class BillingService {
       key: p.key, name: p.name, deviceBand: p.deviceBand, blurb: p.blurb,
       maxDevices: deviceLimit, maxUsers: p.maxUsers, retentionDays: p.retentionDays,
       reports: p.reports, scheduledReports: p.scheduledReports, channels: p.channels,
+      monthlySmsQuota: p.monthlySmsQuota,
       multiProtocol: p.multiProtocol, monthlyPrice: p.monthlyPrice, custom: p.custom,
     };
   }
@@ -318,6 +340,37 @@ export class BillingService {
     if (tier === 'basic') {
       throw new ForbiddenException('Энэ тайлан зөвхөн Business+ багцад нээлттэй. Багцаа ахиулна уу.');
     }
+  }
+
+  // ── SMS metering + quota ──────────────────────────────────────
+  // SMS is a real-cost resource, so each plan caps the monthly send count.
+  // Usage is a per-company Redis counter (UsageMeterService). Unmanaged tenants
+  // have no quota (null plan) → unlimited/ungated.
+  async smsUsage(companyId: string): Promise<{ used: number; quota: number; pct: number | null }> {
+    const plan = await this.planFor(companyId);
+    const quota = plan ? plan.monthlySmsQuota : UNLIMITED;
+    const used = await this.meter.smsUsed(companyId);
+    return { used, quota, pct: pctOf(used, quota) };
+  }
+
+  // Called by the notification dispatcher before fanning out SMS. Meters the
+  // send and returns false (block) once a managed plan's monthly quota is hit.
+  // Unlimited / unmanaged always pass. Safety paths (PANIC) bypass this.
+  async consumeSmsQuota(companyId: string, n: number): Promise<boolean> {
+    if (n <= 0) return true;
+    const plan = await this.planFor(companyId);
+    const quota = plan ? plan.monthlySmsQuota : UNLIMITED;
+    if (isUnlimited(quota)) {
+      await this.meter.addSms(companyId, n);
+      return true;
+    }
+    const used = await this.meter.smsUsed(companyId);
+    if (used >= quota) {
+      this.logger.warn(`SMS quota reached for company=${companyId} (${used}/${quota}) — skipping ${n} message(s)`);
+      return false;
+    }
+    await this.meter.addSms(companyId, n);
+    return true;
   }
 
   // ── Cron: lifecycle transitions ───────────────────────────────

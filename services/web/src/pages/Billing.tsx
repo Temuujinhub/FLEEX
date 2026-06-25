@@ -13,7 +13,7 @@ interface PlanView {
   key: string; name: string; deviceBand: string; blurb: string;
   maxDevices: number; maxUsers: number; retentionDays: number;
   reports: 'basic' | 'all'; scheduledReports: boolean; channels: string[];
-  multiProtocol: boolean; monthlyPrice: number; custom: boolean;
+  monthlySmsQuota: number; multiProtocol: boolean; monthlyPrice: number; custom: boolean;
 }
 interface Warning { level: 'info' | 'warning' | 'critical'; code: string; message: string }
 interface Summary {
@@ -21,7 +21,7 @@ interface Summary {
   planKey: string | null; planName?: string; status: string | null;
   currentPeriodEnd?: string | null; daysUntilDue?: number | null; suggestedPlan?: string;
   plan?: PlanView;
-  usage: { devices: number; users: number; deviceLimit?: number; userLimit?: number; devicePct?: number | null; userPct?: number | null };
+  usage: { devices: number; users: number; deviceLimit?: number; userLimit?: number; devicePct?: number | null; userPct?: number | null; smsUsed?: number; smsQuota?: number; smsPct?: number | null };
   warnings: Warning[];
 }
 interface Invoice {
@@ -152,6 +152,9 @@ function SummaryView({ s }: { s: Summary }) {
         <div className="mt-5 grid sm:grid-cols-2 gap-4">
           <UsageBar label="Машин" used={s.usage.devices} limit={s.usage.deviceLimit} pct={s.usage.devicePct ?? null} />
           <UsageBar label="Хэрэглэгч" used={s.usage.users} limit={s.usage.userLimit} pct={s.usage.userPct ?? null} />
+          {s.usage.smsQuota != null && s.usage.smsQuota !== 0 && (
+            <UsageBar label="SMS (энэ сар)" used={s.usage.smsUsed ?? 0} limit={s.usage.smsQuota} pct={s.usage.smsPct ?? null} />
+          )}
         </div>
         {!s.managed && (
           <p className="mt-4 text-xs text-slate-500">
@@ -281,6 +284,7 @@ function PlanComparison({ plans }: { plans: PlanView[] }) {
               <th className="text-left px-3 py-2">Машин</th>
               <th className="text-right px-3 py-2">Үнэ/сар</th>
               <th className="text-right px-3 py-2">Хадгалалт</th>
+              <th className="text-right px-3 py-2">SMS/сар</th>
               <th className="text-left px-3 py-2">Тайлан</th>
             </tr>
           </thead>
@@ -291,6 +295,7 @@ function PlanComparison({ plans }: { plans: PlanView[] }) {
                 <td className="px-3 py-2">{p.deviceBand}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{p.custom ? 'Тусгай' : `${fmt(p.monthlyPrice)}₮`}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{p.retentionDays} хон.</td>
+                <td className="px-3 py-2 text-right tabular-nums">{p.monthlySmsQuota < 0 ? '∞' : p.monthlySmsQuota === 0 ? '—' : fmt(p.monthlySmsQuota)}</td>
                 <td className="px-3 py-2">{p.reports === 'all' ? 'Бүх тайлан' : 'Үндсэн'}{p.scheduledReports ? ' + имэйл' : ''}</td>
               </tr>
             ))}

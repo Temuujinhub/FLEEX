@@ -201,7 +201,11 @@ export class NotificationDispatcherService implements OnModuleInit, OnModuleDest
           jobs.push(this.email.send(rule.recipientEmails, subject, message));
         }
         if (channels.has(NotificationChannel.SMS) && rule.recipientPhones.length > 0) {
-          jobs.push(this.sms.send(rule.recipientPhones, message));
+          // Meter + cap: blocks once the company's monthly SMS quota is hit
+          // (other channels still fire). PANIC broadcast bypasses this.
+          if (await this.billing.consumeSmsQuota(ev.companyId, rule.recipientPhones.length)) {
+            jobs.push(this.sms.send(rule.recipientPhones, message));
+          }
         }
         if (channels.has(NotificationChannel.WEBHOOK) && rule.webhookUrl) {
           jobs.push(this.webhook.send(rule.webhookUrl, ev, message));
