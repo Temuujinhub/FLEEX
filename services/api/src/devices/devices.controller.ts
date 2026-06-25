@@ -18,6 +18,7 @@ import { Response } from 'express';
 import {
   IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -27,6 +28,10 @@ import {
   Matches,
   Min,
 } from 'class-validator';
+
+// Device protocols with a registered ingestor decoder. Keep in sync with the
+// gps-ingestor `protocol` registry (Teltonika, Queclink).
+const SUPPORTED_PROTOCOLS = ['teltonika', 'queclink'];
 import { DeviceStatus, FuelType, Role, VehicleType } from '@prisma/client';
 import { Roles } from '../auth/roles.decorator';
 import { Audit } from '../audit/audit.decorator';
@@ -46,6 +51,9 @@ class CreateDeviceDto {
 
   // Basic identity
   @IsOptional() @IsString() model?: string;
+  // Device protocol → which ingestor decoder/port the device speaks. Defaults
+  // to teltonika at the DB layer when omitted.
+  @IsOptional() @IsIn(SUPPORTED_PROTOCOLS) protocol?: string;
   @IsOptional() @IsString() simNumber?: string;
   @IsOptional() @IsString() plateNumber?: string;
   @IsOptional() @IsString() vin?: string;
@@ -93,6 +101,7 @@ class UpdateDeviceDto {
   @IsOptional() @IsUUID() garageId?: string;
   @IsOptional() @IsEnum(DeviceStatus) status?: DeviceStatus;
   @IsOptional() @IsString() model?: string;
+  @IsOptional() @IsIn(SUPPORTED_PROTOCOLS) protocol?: string;
   @IsOptional() @IsString() simNumber?: string;
   @IsOptional() @IsString() plateNumber?: string;
   @IsOptional() @IsString() vin?: string;

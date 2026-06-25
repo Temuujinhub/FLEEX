@@ -403,6 +403,7 @@ type FormState = {
   groupId: string; garageId: string; driverId: string;
   plateNumber: string; vin: string; color: string;
   vehicleType: VehicleTypeValue | ''; vehicleSubtype: string; model: string;
+  protocol: string;
   simNumber: string;
   chassisLengthMm: string; chassisWidthMm: string; chassisHeightMm: string;
   payloadKg: string; grossWeightKg: string; seatCount: string;
@@ -417,6 +418,7 @@ const EMPTY_FORM: FormState = {
   imei: '', name: '', groupId: '', garageId: '', driverId: '',
   plateNumber: '', vin: '', color: '#1670f1',
   vehicleType: 'HAUL_TRUCK', vehicleSubtype: '', model: '',
+  protocol: 'teltonika',
   simNumber: '',
   chassisLengthMm: '', chassisWidthMm: '', chassisHeightMm: '',
   payloadKg: '', grossWeightKg: '', seatCount: '',
@@ -490,7 +492,7 @@ function AddVehicleModal({
     const payload: Record<string, any> = { name: form.name.trim() };
     if (!isEdit) payload.imei = form.imei.trim();
     const strKeys: (keyof FormState)[] = [
-      'plateNumber', 'vin', 'color', 'vehicleSubtype', 'model', 'simNumber',
+      'plateNumber', 'vin', 'color', 'vehicleSubtype', 'model', 'protocol', 'simNumber',
       'wheelSize', 'trailerPlate', 'fuelGrade',
       'insuranceContract1', 'insuranceContract2',
     ];
@@ -709,6 +711,12 @@ function AddVehicleModal({
                 </Field>
                 <Field label="Модель" hint="GPS төхөөрөмжийн загвар. Жнь: FMC650, FMB920, GH5200." tooltip="Энэ нь GPS box-ын брэнд+загвар. Машины брэнд биш. Дэмжигдсэн загварууд: Teltonika (FMx цуврал), Queclink, Concox, Ruptela.">
                   <input value={form.model} onChange={(e) => set('model', e.target.value)} placeholder="FMC650 / Teltonika..." className={input} />
+                </Field>
+                <Field label="Протокол" hint="Төхөөрөмжийн протокол — аль ingest порт руу холбогдохыг тодорхойлно." tooltip="Teltonika нь :5027, Queclink (@Track, GV350CEU) нь :5028 порт руу холбогдоно. Загвартаа тохирох протоколоо сонгоно уу.">
+                  <select value={form.protocol} onChange={(e) => set('protocol', e.target.value)} className={input}>
+                    <option value="teltonika">Teltonika (Codec 8/8E · :5027)</option>
+                    <option value="queclink">Queclink @Track (:5028)</option>
+                  </select>
                 </Field>
                 <Field label="SIM-ийн дугаар" hint="GPS төхөөрөмжид суусан SIM-ийн утасны дугаар." tooltip="SMS-р тохиргоо илгээх (жнь: APN, серверийн хаяг) болон асуудал гарвал утсаар хянахад ашиглагдана." className="md:col-span-2">
                   <input value={form.simNumber} onChange={(e) => set('simNumber', e.target.value)} placeholder="+97699112233" className={input} />
@@ -1427,6 +1435,7 @@ function deviceToForm(d: any): FormState {
     driverId: s(d.driverId ?? d.driver?.id),
     plateNumber: s(d.plateNumber), vin: s(d.vin), color: s(d.color) || '#1670f1',
     vehicleType: (d.vehicleType ?? '') as any, vehicleSubtype: s(d.vehicleSubtype), model: s(d.model),
+    protocol: s(d.protocol) || 'teltonika',
     simNumber: s(d.simNumber),
     chassisLengthMm: s(d.chassisLengthMm), chassisWidthMm: s(d.chassisWidthMm), chassisHeightMm: s(d.chassisHeightMm),
     payloadKg: s(d.payloadKg), grossWeightKg: s(d.grossWeightKg), seatCount: s(d.seatCount),

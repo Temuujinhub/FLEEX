@@ -6,6 +6,10 @@ import { RedisService } from '../common/redis.service';
 import { EmailService } from './email.service';
 import { SmsService } from './sms.service';
 import { WebhookService } from './webhook.service';
+import { TelegramService } from './telegram.service';
+import { PushService } from './push.service';
+import { WhatsAppService } from './whatsapp.service';
+import { ViberService } from './viber.service';
 import { renderTemplate } from './template';
 import type { EventEnvelope } from './types';
 
@@ -50,6 +54,10 @@ export class NotificationDispatcherService implements OnModuleInit, OnModuleDest
     private readonly email: EmailService,
     private readonly sms: SmsService,
     private readonly webhook: WebhookService,
+    private readonly telegram: TelegramService,
+    private readonly push: PushService,
+    private readonly whatsapp: WhatsAppService,
+    private readonly viber: ViberService,
   ) {}
 
   async onModuleInit() {
@@ -173,6 +181,21 @@ export class NotificationDispatcherService implements OnModuleInit, OnModuleDest
         }
         if (channels.has(NotificationChannel.WEBHOOK) && rule.webhookUrl) {
           jobs.push(this.webhook.send(rule.webhookUrl, ev, message));
+        }
+        // Chat / push channels (R4). Each is config-driven: send() is a no-op
+        // when the vendor credentials aren't set, so an enabled channel with no
+        // token simply does nothing rather than erroring.
+        if (channels.has(NotificationChannel.TELEGRAM) && rule.recipientTelegram.length > 0) {
+          jobs.push(this.telegram.send(rule.recipientTelegram, message));
+        }
+        if (channels.has(NotificationChannel.PUSH) && rule.recipientPush.length > 0) {
+          jobs.push(this.push.send(rule.recipientPush, message, subject));
+        }
+        if (channels.has(NotificationChannel.WHATSAPP) && rule.recipientWhatsapp.length > 0) {
+          jobs.push(this.whatsapp.send(rule.recipientWhatsapp, message));
+        }
+        if (channels.has(NotificationChannel.VIBER) && rule.recipientViber.length > 0) {
+          jobs.push(this.viber.send(rule.recipientViber, message));
         }
         await Promise.allSettled(jobs);
       }),

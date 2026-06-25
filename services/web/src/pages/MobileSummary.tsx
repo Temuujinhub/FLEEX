@@ -491,6 +491,8 @@ function prettyEventType(tp: string) {
     DEVICE_OFFLINE: 'Офлайн боллоо',
     DEVICE_ONLINE: 'Онлайн боллоо',
     TAMPER: 'Tamper · хөндөлт',
+    FUEL_FILL: 'Түлш цэнэглэлт',
+    FUEL_DRAIN: 'Түлш задрал/хулгай',
   };
   return m[tp] ?? tp;
 }

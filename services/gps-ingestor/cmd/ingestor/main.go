@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -20,8 +21,13 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/temuujinhub/fleex/services/gps-ingestor/internal/config"
+	"github.com/temuujinhub/fleex/services/gps-ingestor/internal/protocol"
 	"github.com/temuujinhub/fleex/services/gps-ingestor/internal/store"
-	"github.com/temuujinhub/fleex/services/gps-ingestor/internal/teltonika"
+
+	// Decoders self-register their protocol.Factory in init(); blank-import
+	// them so per-port routing can resolve "teltonika"/"queclink" by name.
+	_ "github.com/temuujinhub/fleex/services/gps-ingestor/internal/queclink"
+	_ "github.com/temuujinhub/fleex/services/gps-ingestor/internal/teltonika"
 )
 
 func main() {
@@ -68,45 +74,83 @@ func main() {
 }
 
 type server struct {
-	cfg         *config.Config
-	store       *store.Store
-	activeConns atomic.Int64
-	totalConns  atomic.Uint64
+	cfg           *config.Config
+	store         *store.Store
+	activeConns   atomic.Int64
+	totalConns    atomic.Uint64
 	totalMsgs     atomic.Uint64
 	parseErrors   atomic.Uint64
 	crcErrors     atomic.Uint64
 	rejectedConns atomic.Uint64
 }
 
+// runTCP opens one listener per configured protocol (per-port routing) and
+// serves them concurrently. All listeners are bound up front so a port clash
+// fails startup immediately rather than after some are already serving.
 func (s *server) runTCP(ctx context.Context) error {
-	addr := fmt.Sprintf(":%d", s.cfg.TCPPort)
-	lc := net.ListenConfig{KeepAlive: 30 * time.Second}
-	l, err := lc.Listen(ctx, "tcp", addr)
-	if err != nil {
-		return fmt.Errorf("listen %s: %w", addr, err)
+	type listener struct {
+		name    string
+		l       net.Listener
+		factory protocol.Factory
 	}
-	defer l.Close()
-	log.Info().Str("addr", addr).Msg("teltonika tcp listening")
+	lc := net.ListenConfig{KeepAlive: 30 * time.Second}
+	var listeners []listener
+	closeAll := func() {
+		for _, x := range listeners {
+			_ = x.l.Close()
+		}
+	}
+
+	for name, port := range s.cfg.ProtocolPorts {
+		factory, ok := protocol.ByName(name)
+		if !ok {
+			closeAll()
+			return fmt.Errorf("no decoder registered for protocol %q", name)
+		}
+		addr := fmt.Sprintf(":%d", port)
+		l, err := lc.Listen(ctx, "tcp", addr)
+		if err != nil {
+			closeAll()
+			return fmt.Errorf("listen %s (%s): %w", addr, name, err)
+		}
+		listeners = append(listeners, listener{name: name, l: l, factory: factory})
+		log.Info().Str("addr", addr).Str("protocol", name).Msg("tcp listening")
+	}
 
 	go func() {
 		<-ctx.Done()
-		_ = l.Close()
+		closeAll()
 	}()
 
+	var wg sync.WaitGroup
+	for _, x := range listeners {
+		wg.Add(1)
+		go func(x listener) {
+			defer wg.Done()
+			s.acceptLoop(ctx, x.name, x.l, x.factory)
+		}(x)
+	}
+	wg.Wait()
+	return ctx.Err()
+}
+
+// acceptLoop accepts connections on one protocol's listener and hands each to
+// handle() with that protocol's decoder factory.
+func (s *server) acceptLoop(ctx context.Context, name string, l net.Listener, factory protocol.Factory) {
 	for {
 		conn, err := l.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
-				return ctx.Err()
+				return
 			}
-			log.Warn().Err(err).Msg("accept")
+			log.Warn().Err(err).Str("protocol", name).Msg("accept")
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 
-		// Reject if we're already at the configured connection ceiling. This
-		// prevents OOM under SIM-pool storms and gives the device a clean
-		// reconnect signal rather than a half-open hang.
+		// Reject if we're already at the configured connection ceiling (shared
+		// across all protocols). This prevents OOM under SIM-pool storms and
+		// gives the device a clean reconnect signal rather than a half-open hang.
 		if s.activeConns.Load() >= int64(s.cfg.MaxConnections) {
 			log.Warn().Str("remote", conn.RemoteAddr().String()).Msg("max connections reached, refusing")
 			_ = conn.Close()
@@ -115,11 +159,11 @@ func (s *server) runTCP(ctx context.Context) error {
 
 		s.totalConns.Add(1)
 		s.activeConns.Add(1)
-		go s.handle(ctx, conn)
+		go s.handle(ctx, conn, factory)
 	}
 }
 
-func (s *server) handle(parent context.Context, conn net.Conn) {
+func (s *server) handle(parent context.Context, conn net.Conn, factory protocol.Factory) {
 	defer s.activeConns.Add(-1)
 	defer conn.Close()
 	// A single malformed frame must never take down the whole process (and
@@ -137,31 +181,34 @@ func (s *server) handle(parent context.Context, conn net.Conn) {
 	defer cancel()
 
 	remote := conn.RemoteAddr().String()
-	logger := log.With().Str("remote", remote).Logger()
+	dec := factory(conn, protocol.Opts{
+		ReadTimeout:  s.cfg.ReadTimeout,
+		WriteTimeout: s.cfg.WriteTimeout,
+		VerifyCRC:    s.cfg.VerifyCRC,
+		CRCErrors:    &s.crcErrors,
+	})
+	logger := log.With().Str("remote", remote).Str("protocol", dec.Name()).Logger()
 
-	session := teltonika.NewSession(conn, s.cfg.ReadTimeout, s.cfg.WriteTimeout)
-	imei, err := session.ReadIMEI()
+	// Handshake reads the device identity and gates it on the registration
+	// allowlist (audit P4) via this callback: an unknown IMEI is rejected so a
+	// spoofed identity can't hold a connection or probe the fleet.
+	// AcceptHandshake fails open on a DB lookup error so a database blip can't
+	// lock out the whole fleet; telemetry for a truly unknown IMEI is still
+	// dropped downstream by the store.
+	accept := func(imei string) bool {
+		return !s.cfg.RequireRegisteredDevice || s.store.AcceptHandshake(ctx, imei)
+	}
+	imei, err := dec.Handshake(ctx, accept)
 	if err != nil {
-		logger.Warn().Err(err).Msg("handshake")
+		if errors.Is(err, protocol.ErrRejected) {
+			s.rejectedConns.Add(1)
+			logger.Warn().Msg("rejected unregistered device")
+		} else {
+			logger.Warn().Err(err).Msg("handshake")
+		}
 		return
 	}
 	logger = logger.With().Str("imei", imei).Logger()
-
-	// Allowlist (audit R-4): only registered devices get the accept byte, so a
-	// spoofed or unknown IMEI can't hold the connection or probe the fleet.
-	// AcceptHandshake fails open on a DB lookup error so a database blip can't
-	// lock out the whole fleet; telemetry for a truly unknown IMEI is still
-	// dropped downstream.
-	if s.cfg.RequireRegisteredDevice && !s.store.AcceptHandshake(ctx, imei) {
-		_ = session.RejectIMEI()
-		s.rejectedConns.Add(1)
-		logger.Warn().Msg("rejected unregistered device")
-		return
-	}
-	if err := session.AcceptIMEI(); err != nil {
-		logger.Warn().Err(err).Msg("imei ack")
-		return
-	}
 	logger.Info().Msg("device connected")
 	defer logger.Info().Msg("device disconnected")
 
@@ -171,45 +218,38 @@ func (s *server) handle(parent context.Context, conn net.Conn) {
 
 	// Sibling goroutine that delivers operator-issued commands onto this
 	// session's TCP socket. Lifetime is bounded by `ctx` — when the device
-	// disconnects we cancel and the BLPOP returns.
-	go s.runCommandLoop(ctx, imei, session)
+	// disconnects we cancel and the command pop returns.
+	go s.runCommandLoop(ctx, imei, dec)
 
 	for {
 		if ctx.Err() != nil {
 			return
 		}
-		records, err := session.ReadAVL()
+		records, frameLen, ackable, err := dec.ReadBatch(ctx)
 		if err != nil {
 			if !errors.Is(err, net.ErrClosed) {
-				logger.Debug().Err(err).Msg("read avl")
+				logger.Debug().Err(err).Msg("read batch")
 				s.parseErrors.Add(1)
 			}
 			return
 		}
 		if len(records) == 0 {
+			// Empty but no error: a heartbeat the decoder already answered, or a
+			// frame dropped on CRC. Nothing to persist or ack.
 			continue
-		}
-		// CRC-16/IBM check. Always counted; only drops the frame when
-		// INGESTOR_VERIFY_CRC is enabled (the device re-sends un-acked data,
-		// so dropping is lossless). Keeps a corrupted-on-wire frame from
-		// silently landing in positions once enforcement is turned on.
-		if !session.LastCRCOK() {
-			s.crcErrors.Add(1)
-			if s.cfg.VerifyCRC {
-				logger.Debug().Msg("crc mismatch — dropping frame (device will re-send)")
-				continue
-			}
 		}
 		s.totalMsgs.Add(uint64(len(records)))
 
-		if err := s.store.Enqueue(ctx, imei, records, session.LastFrameLen()); err != nil {
+		if err := s.store.Enqueue(ctx, imei, dec.Name(), records, frameLen); err != nil {
 			logger.Error().Err(err).Msg("enqueue")
 			return
 		}
 
-		if err := session.AckRecords(len(records)); err != nil {
-			logger.Debug().Err(err).Msg("ack")
-			return
+		if ackable {
+			if err := dec.Ack(len(records)); err != nil {
+				logger.Debug().Err(err).Msg("ack")
+				return
+			}
 		}
 
 		_ = s.store.MarkOnline(ctx, imei)
@@ -217,12 +257,11 @@ func (s *server) handle(parent context.Context, conn net.Conn) {
 }
 
 // runCommandLoop drains the device's Redis command queue and writes each
-// command onto the open TCP socket via Codec 12. We block up to 5 s in
-// BLPOP per iteration so a graceful disconnect (ctx cancel) returns
-// promptly. The goroutine is tied to a single session — when the device
-// reconnects, a fresh loop is spawned and the new session picks up any
-// commands that landed in the meantime.
-func (s *server) runCommandLoop(ctx context.Context, imei string, session *teltonika.Session) {
+// command onto the open TCP socket via the protocol's encoder. We block up to
+// 5 s per iteration so a graceful disconnect (ctx cancel) returns promptly.
+// The goroutine is tied to a single connection — when the device reconnects, a
+// fresh loop is spawned and picks up any commands that landed meanwhile.
+func (s *server) runCommandLoop(ctx context.Context, imei string, dec protocol.Decoder) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error().Interface("panic", r).Str("imei", imei).
@@ -243,14 +282,21 @@ func (s *server) runCommandLoop(ctx context.Context, imei string, session *telto
 		if cmd == nil {
 			continue
 		}
-		text := store.CommandToText(cmd)
-		if err := session.SendCommand(text); err != nil {
-			log.Warn().Err(err).Str("imei", imei).Str("cmd", text).Msg("send command")
+		if err := dec.EncodeAndSend(cmd.ToProtocol()); err != nil {
+			// An unsupported/empty command is a bad envelope, not a transport
+			// failure: mark it failed and keep the connection (and its other
+			// queued commands) alive. Only a real write error drops the loop.
+			if errors.Is(err, protocol.ErrUnsupported) {
+				log.Warn().Str("imei", imei).Str("type", cmd.Type).Msg("command unsupported by protocol")
+				s.store.MarkCommandFailed(ctx, cmd.ID, "unsupported by device protocol")
+				continue
+			}
+			log.Warn().Err(err).Str("imei", imei).Str("type", cmd.Type).Msg("send command")
 			s.store.MarkCommandFailed(ctx, cmd.ID, err.Error())
 			return
 		}
 		s.store.MarkCommandSent(ctx, cmd.ID)
-		log.Info().Str("imei", imei).Str("cmd", text).Msg("command delivered")
+		log.Info().Str("imei", imei).Str("type", cmd.Type).Msg("command delivered")
 	}
 }
 

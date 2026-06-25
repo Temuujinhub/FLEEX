@@ -552,6 +552,8 @@ function prettyEventType(t: string) {
     DEVICE_OFFLINE: 'Төхөөрөмж офлайн',
     DEVICE_ONLINE: 'Төхөөрөмж онлайн',
     TAMPER: 'Tamper · хөндөлт',
+    FUEL_FILL: 'Түлш цэнэглэлт',
+    FUEL_DRAIN: 'Түлш задрал/хулгай',
   };
   return m[t] ?? t;
 }

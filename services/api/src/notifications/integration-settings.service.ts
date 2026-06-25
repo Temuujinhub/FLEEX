@@ -13,13 +13,25 @@ import { PrismaService } from '../prisma/prisma.service';
 // API rotation meant filing a deploy ticket. With this table the
 // rotation is a form submission.
 
-export type IntegrationKey = 'brevo_api_key' | 'sms_api_key';
+export type IntegrationKey =
+  | 'brevo_api_key'
+  | 'sms_api_key'
+  | 'telegram_bot_token'
+  | 'fcm_server_key'
+  | 'whatsapp_token'
+  | 'whatsapp_phone_id'
+  | 'viber_bot_token';
 
 // Maps each DB key to the env var that historically held the same
 // secret. Keep this exhaustive — the UI iterates this list.
 export const INTEGRATION_ENV: Record<IntegrationKey, string> = {
   brevo_api_key: 'BREVO_API_KEY',
   sms_api_key: 'SMS_API_KEY',
+  telegram_bot_token: 'TELEGRAM_BOT_TOKEN',
+  fcm_server_key: 'FCM_SERVER_KEY',
+  whatsapp_token: 'WHATSAPP_TOKEN',
+  whatsapp_phone_id: 'WHATSAPP_PHONE_ID',
+  viber_bot_token: 'VIBER_BOT_TOKEN',
 };
 
 export interface IntegrationStatus {

@@ -31,10 +31,14 @@ const EVENT_TYPES = [
 ];
 
 const CHANNELS = [
-  { value: 'IN_APP',  label: 'Системд (хонх)' },
-  { value: 'EMAIL',   label: 'Имэйл' },
-  { value: 'SMS',     label: 'SMS' },
-  { value: 'WEBHOOK', label: 'Webhook' },
+  { value: 'IN_APP',   label: 'Системд (хонх)' },
+  { value: 'EMAIL',    label: 'Имэйл' },
+  { value: 'SMS',      label: 'SMS' },
+  { value: 'TELEGRAM', label: 'Telegram' },
+  { value: 'PUSH',     label: 'Push (апп)' },
+  { value: 'WHATSAPP', label: 'WhatsApp' },
+  { value: 'VIBER',    label: 'Viber' },
+  { value: 'WEBHOOK',  label: 'Webhook' },
 ];
 
 const input = 'w-full rounded-md border border-slate-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500';
@@ -140,6 +144,10 @@ function RuleForm({ existing, onDone }: { existing: any | null; onDone: () => vo
   const [channels, setChannels] = useState<string[]>(existing?.channels ?? ['IN_APP']);
   const [recipientEmails, setRecipientEmails] = useState((existing?.recipientEmails ?? []).join(', '));
   const [recipientPhones, setRecipientPhones] = useState((existing?.recipientPhones ?? []).join(', '));
+  const [recipientTelegram, setRecipientTelegram] = useState((existing?.recipientTelegram ?? []).join(', '));
+  const [recipientPush, setRecipientPush] = useState((existing?.recipientPush ?? []).join(', '));
+  const [recipientWhatsapp, setRecipientWhatsapp] = useState((existing?.recipientWhatsapp ?? []).join(', '));
+  const [recipientViber, setRecipientViber] = useState((existing?.recipientViber ?? []).join(', '));
   const [webhookUrl, setWebhookUrl] = useState(existing?.webhookUrl ?? '');
   const [placeIds, setPlaceIds] = useState<string[]>(existing?.placeIds ?? []);
   const [template, setTemplate] = useState(existing?.template ?? '{DEVICE}: {TYPE} ({LOCATION})');
@@ -251,6 +259,34 @@ function RuleForm({ existing, onDone }: { existing: any | null; onDone: () => vo
           )}
         </div>
       )}
+      {channels.includes('TELEGRAM') && (
+        <div>
+          <label className="block text-[11px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">Telegram chat ID-ууд (таслалаар)</label>
+          <input value={recipientTelegram} onChange={(e) => setRecipientTelegram(e.target.value)} placeholder="123456789, -1001122334455" className={input} />
+          <div className="mt-1 text-xs text-slate-400">Бот үүсгэх (@BotFather) ба token-ийг System Health-д тавина. Хэрэглэгч/групп бот руу /start бичсэн байх ёстой.</div>
+        </div>
+      )}
+      {channels.includes('PUSH') && (
+        <div>
+          <label className="block text-[11px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">Push token-ууд (таслалаар)</label>
+          <input value={recipientPush} onChange={(e) => setRecipientPush(e.target.value)} placeholder="fcm-device-token-1, fcm-device-token-2" className={input} />
+          <div className="mt-1 text-xs text-slate-400">Мобайл аппын FCM төхөөрөмжийн token. Push server key-г System Health-д тавина.</div>
+        </div>
+      )}
+      {channels.includes('WHATSAPP') && (
+        <div>
+          <label className="block text-[11px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">WhatsApp дугаарууд (таслалаар)</label>
+          <input value={recipientWhatsapp} onChange={(e) => setRecipientWhatsapp(e.target.value)} placeholder="+97699112233, +97688220011" className={input} />
+          <div className="mt-1 text-xs text-slate-400">WhatsApp Cloud API token + phone-number ID-г System Health-д тавина.</div>
+        </div>
+      )}
+      {channels.includes('VIBER') && (
+        <div>
+          <label className="block text-[11px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">Viber receiver ID-ууд (таслалаар)</label>
+          <input value={recipientViber} onChange={(e) => setRecipientViber(e.target.value)} placeholder="01a2b3c4d5e6f7g8=" className={input} />
+          <div className="mt-1 text-xs text-slate-400">Хэрэглэгч public account-д бүртгүүлсэн байх ёстой. Bot token-ийг System Health-д тавина.</div>
+        </div>
+      )}
       {channels.includes('WEBHOOK') && (
         <div>
           <div className="mb-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
@@ -326,6 +362,10 @@ function RuleForm({ existing, onDone }: { existing: any | null; onDone: () => vo
               channels,
               recipientEmails: recipientEmails.split(',').map((s: string) => s.trim()).filter(Boolean),
               recipientPhones: recipientPhones.split(',').map((s: string) => s.trim()).filter(Boolean),
+              recipientTelegram: recipientTelegram.split(',').map((s: string) => s.trim()).filter(Boolean),
+              recipientPush: recipientPush.split(',').map((s: string) => s.trim()).filter(Boolean),
+              recipientWhatsapp: recipientWhatsapp.split(',').map((s: string) => s.trim()).filter(Boolean),
+              recipientViber: recipientViber.split(',').map((s: string) => s.trim()).filter(Boolean),
               webhookUrl: webhookUrl || undefined,
               placeIds: placeFilterApplies ? placeIds : [],
               template,

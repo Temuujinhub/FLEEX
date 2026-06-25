@@ -15,10 +15,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog/log"
+
+	"github.com/temuujinhub/fleex/services/gps-ingestor/internal/protocol"
 )
 
 // QueuedCommand mirrors the JSON envelope the API pushes onto Redis. The
@@ -93,31 +96,20 @@ func (s *Store) MarkCommandFailed(ctx context.Context, idStr, reason string) {
 	}
 }
 
-// CommandToText turns a queued command envelope into a Teltonika-text
-// command suitable for Codec 12. The mapping is deliberately permissive:
-// callers that already pass a literal text command (under `text` payload
-// key) bypass the type-based translation.
-func CommandToText(cmd *QueuedCommand) string {
-	if cmd.Payload != nil {
-		if v, ok := cmd.Payload["text"].(string); ok && v != "" {
-			return v
+// ToProtocol converts the queued envelope into a protocol-neutral Command.
+// Each decoder maps it to its own wire format (Teltonika Codec 12 text,
+// Queclink AT+GT…). A literal `text` payload becomes RawText — the
+// SUPER_ADMIN escape hatch the API gates — and bypasses type translation in
+// every decoder.
+func (cmd *QueuedCommand) ToProtocol() protocol.Command {
+	params := make(map[string]string, len(cmd.Payload))
+	raw := ""
+	for k, v := range cmd.Payload {
+		str := fmt.Sprint(v)
+		params[k] = str
+		if k == "text" {
+			raw = str
 		}
 	}
-	switch cmd.Type {
-	case "engine_block":
-		return "setdigout 1?? 1 0 0"
-	case "engine_unblock":
-		return "setdigout 0?? 1 0 0"
-	case "request_info":
-		return "getinfo"
-	case "request_status":
-		return "getstatus"
-	case "reset":
-		return "cpureset"
-	default:
-		// Unknown type with no explicit text → send nothing. The API is the
-		// authority on who may issue what (raw text + arbitrary types are
-		// SUPER_ADMIN-only); this is defense-in-depth against a bad envelope.
-		return ""
-	}
+	return protocol.Command{Type: cmd.Type, Params: params, RawText: raw}
 }

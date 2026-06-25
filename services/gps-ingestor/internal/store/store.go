@@ -30,7 +30,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/temuujinhub/fleex/services/gps-ingestor/internal/config"
-	"github.com/temuujinhub/fleex/services/gps-ingestor/internal/teltonika"
+	"github.com/temuujinhub/fleex/services/gps-ingestor/internal/protocol"
 )
 
 const (
@@ -63,9 +63,9 @@ type Row struct {
 	RFID        string
 	// VIN is harvested from Codec 8E variable IO 256 (VIN auto-detect
 	// over OBD). Empty for devices without an OBD adapter.
-	VIN         string
-	Valid       bool
-	Attributes  []byte
+	VIN        string
+	Valid      bool
+	Attributes []byte
 }
 
 type Store struct {
@@ -88,7 +88,8 @@ type Store struct {
 
 type deviceBatch struct {
 	imei     string
-	records  []teltonika.Record
+	proto    string // protocol name (raw_messages.protocol)
+	records  []protocol.Record
 	frameLen int // bytes-on-wire of the AVL packet that carried these records
 }
 
@@ -154,15 +155,16 @@ func (s *Store) Close() {
 // Enqueue pushes a batch onto the ingest queue. If the queue is full we
 // block briefly; the device will then either back off (TCP backpressure)
 // or be disconnected by the caller's write deadline. `frameLen` is the
-// on-wire packet size, used to credit the GPRS counter.
-func (s *Store) Enqueue(ctx context.Context, imei string, records []teltonika.Record, frameLen int) error {
+// on-wire packet size, used to credit the GPRS counter. `proto` is the
+// device protocol name, stamped onto raw_messages.
+func (s *Store) Enqueue(ctx context.Context, imei, proto string, records []protocol.Record, frameLen int) error {
 	if len(records) == 0 {
 		return nil
 	}
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
 	select {
-	case s.queue <- deviceBatch{imei: imei, records: records, frameLen: frameLen}:
+	case s.queue <- deviceBatch{imei: imei, proto: proto, records: records, frameLen: frameLen}:
 		s.queueDepth.Add(int64(len(records)))
 		return nil
 	case <-ctx.Done():
@@ -277,11 +279,8 @@ func (s *Store) Run(ctx context.Context) {
 			if !isPlausible(rec) {
 				continue
 			}
-			ig := teltonika.PickIgnition(rec)
-			odo := teltonika.PickOdometerKm(rec)
-			hrs := teltonika.PickEngineHours(rec)
-			bat := teltonika.PickBatteryVolt(rec)
-			rfid := teltonika.PickRFID(rec)
+			// Telemetry is already normalised by the protocol decoder, so the
+			// store stays vendor-neutral: it never calls teltonika.Pick*.
 			attrs := buildAttributes(rec)
 
 			// Raw debug capture — keeps the same JSON as `attributes`
@@ -293,38 +292,30 @@ func (s *Store) Run(ctx context.Context) {
 				rawMsgs = append(rawMsgs, rawMessageRow{
 					DeviceID:   dev.ID,
 					ReceivedAt: rec.Timestamp,
-					Protocol:   "teltonika",
+					Protocol:   batch.proto,
 					Lat:        rec.Lat,
 					Lng:        rec.Lng,
-					Speed:      teltonika.PickSpeedKmh(rec),
-					Ignition:   ig,
+					Speed:      rec.SpeedKmh,
+					Ignition:   rec.Ignition,
 					Payload:    attrs,
 					ByteSize:   batch.frameLen / max(len(batch.records), 1),
 				})
 			}
 
-			// VIN auto-detect: Teltonika OBD adapter delivers the
-			// VIN as a printable-ASCII variable IO (id 256). We pass
-			// it through the row so flushSnapshots can opportunistically
-			// persist it to devices.vin when the field is null.
-			vin := ""
-			if rec.IOStrings != nil {
-				if v, ok := rec.IOStrings[256]; ok {
-					vin = v
-				}
-			}
-
 			rows = append(rows, Row{
 				Time: rec.Timestamp, DeviceID: dev.ID, CompanyID: dev.CompanyID,
 				Latitude: rec.Lat, Longitude: rec.Lng,
-				Speed:      float32(teltonika.PickSpeedKmh(rec)),
-				Course:     float32(rec.Angle),
+				Speed:      float32(rec.SpeedKmh),
+				Course:     float32(rec.Course),
 				Altitude:   float32(rec.Altitude),
 				Satellites: int16(rec.Satellites),
-				Ignition:   ig, OdometerKm: odo, EngineHrs: hrs, BatteryVolt: bat,
-				RFID:       rfid,
-				VIN:        vin,
-				Valid:      rec.Satellites >= 3,
+				Ignition:   rec.Ignition, OdometerKm: rec.OdometerKm,
+				EngineHrs: rec.EngineHours, BatteryVolt: rec.BatteryVolt,
+				RFID: rec.RFID,
+				// VIN auto-detect (Teltonika OBD adapter); passed through so
+				// flushSnapshots can populate devices.vin when it's null.
+				VIN:        rec.VIN,
+				Valid:      rec.Valid,
 				Attributes: attrs,
 			})
 			ioMap := make(map[string]int64, len(rec.IO))
@@ -333,12 +324,12 @@ func (s *Store) Run(ctx context.Context) {
 			}
 			live = append(live, livePayload{
 				DeviceID: dev.ID, CompanyID: dev.CompanyID,
-				Imei:     batch.imei,
-				Lat:      rec.Lat, Lng: rec.Lng,
-				Speed:    float64(teltonika.PickSpeedKmh(rec)),
-				Course:   float64(rec.Angle), Altitude: float64(rec.Altitude),
+				Imei: batch.imei,
+				Lat:  rec.Lat, Lng: rec.Lng,
+				Speed:  rec.SpeedKmh,
+				Course: rec.Course, Altitude: rec.Altitude,
 				Time:     rec.Timestamp.UnixMilli(),
-				Ignition: ig,
+				Ignition: rec.Ignition,
 				EventIO:  rec.EventIO,
 				IO:       ioMap,
 			})
@@ -378,21 +369,21 @@ func (s *Store) Run(ctx context.Context) {
 }
 
 type livePayload struct {
-	DeviceID  string           `json:"deviceId"`
-	CompanyID string           `json:"companyId"`
-	Imei      string           `json:"imei"`
-	Lat       float64          `json:"lat"`
-	Lng       float64          `json:"lng"`
-	Speed     float64          `json:"speed"`
-	Course    float64          `json:"course"`
-	Altitude  float64          `json:"altitude"`
-	Time      int64            `json:"time"`
-	Ignition  *bool            `json:"ignition,omitempty"`
-	EventIO   uint16           `json:"eventIo,omitempty"`
+	DeviceID  string  `json:"deviceId"`
+	CompanyID string  `json:"companyId"`
+	Imei      string  `json:"imei"`
+	Lat       float64 `json:"lat"`
+	Lng       float64 `json:"lng"`
+	Speed     float64 `json:"speed"`
+	Course    float64 `json:"course"`
+	Altitude  float64 `json:"altitude"`
+	Time      int64   `json:"time"`
+	Ignition  *bool   `json:"ignition,omitempty"`
+	EventIO   uint16  `json:"eventIo,omitempty"`
 	// IO is the raw protocol IO map (Teltonika AVL IDs → value). Events-engine
 	// uses it to detect harsh driving, sensor calibration, etc. Kept compact
 	// (int values fit native JSON numbers).
-	IO        map[string]int64 `json:"io,omitempty"`
+	IO map[string]int64 `json:"io,omitempty"`
 }
 
 // lookupDevice resolves a device by IMEI, caching the result for 5 minutes in
@@ -470,12 +461,12 @@ func (s *Store) MarkOnline(ctx context.Context, imei string) error {
 // times in a row.
 func (s *Store) flushSnapshots(ctx context.Context, rows []Row) {
 	type snap struct {
-		t                                 time.Time
-		lat, lng                          float64
-		speed, course, alt                float32
-		ig                                *bool
-		odo, hrs, bat                     *float64
-		vin                               string
+		t                  time.Time
+		lat, lng           float64
+		speed, course, alt float32
+		ig                 *bool
+		odo, hrs, bat      *float64
+		vin                string
 	}
 	latest := make(map[string]snap, len(rows))
 	for _, r := range rows {
@@ -630,7 +621,7 @@ func (s *Store) WriteMetrics(w io.Writer) {
 
 // --- helpers ----------------------------------------------------------------
 
-func isPlausible(r teltonika.Record) bool {
+func isPlausible(r protocol.Record) bool {
 	if r.Lat < -90 || r.Lat > 90 {
 		return false
 	}
@@ -643,7 +634,7 @@ func isPlausible(r teltonika.Record) bool {
 	return true
 }
 
-func buildAttributes(r teltonika.Record) []byte {
+func buildAttributes(r protocol.Record) []byte {
 	if len(r.IO) == 0 && len(r.IOStrings) == 0 {
 		return nil
 	}

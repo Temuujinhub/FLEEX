@@ -25,6 +25,10 @@ class CreateRuleDto {
   @IsOptional() @IsArray() @IsEnum(NotificationChannel, { each: true }) channels?: NotificationChannel[];
   @IsOptional() @IsArray() @IsEmail({}, { each: true, message: 'Each recipientEmails entry must be a valid email' }) recipientEmails?: string[];
   @IsOptional() @IsArray() @Matches(PHONE_RE, { each: true, message: 'Each recipientPhones entry must be 8–15 digits (optional + prefix)' }) recipientPhones?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) recipientTelegram?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) recipientPush?: string[];
+  @IsOptional() @IsArray() @Matches(PHONE_RE, { each: true, message: 'Each recipientWhatsapp entry must be 8–15 digits (optional + prefix)' }) recipientWhatsapp?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) recipientViber?: string[];
   @IsOptional() @IsUrl({ require_protocol: true, protocols: ['http', 'https'] }, { message: 'webhookUrl must be http(s) URL' }) webhookUrl?: string;
   @IsOptional() @IsString() template?: string;
   @IsOptional() @IsBoolean() active?: boolean;
@@ -41,6 +45,10 @@ class UpdateRuleDto {
   @IsOptional() @IsArray() @IsEnum(NotificationChannel, { each: true }) channels?: NotificationChannel[];
   @IsOptional() @IsArray() @IsEmail({}, { each: true, message: 'Each recipientEmails entry must be a valid email' }) recipientEmails?: string[];
   @IsOptional() @IsArray() @Matches(PHONE_RE, { each: true, message: 'Each recipientPhones entry must be 8–15 digits (optional + prefix)' }) recipientPhones?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) recipientTelegram?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) recipientPush?: string[];
+  @IsOptional() @IsArray() @Matches(PHONE_RE, { each: true, message: 'Each recipientWhatsapp entry must be 8–15 digits (optional + prefix)' }) recipientWhatsapp?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) recipientViber?: string[];
   @IsOptional() @IsUrl({ require_protocol: true, protocols: ['http', 'https'] }, { message: 'webhookUrl must be http(s) URL' }) webhookUrl?: string;
   @IsOptional() @IsString() template?: string;
   @IsOptional() @IsBoolean() active?: boolean;
@@ -71,6 +79,10 @@ class NotificationRulesService {
         channels: dto.channels ?? ['IN_APP'],
         recipientEmails: dto.recipientEmails ?? [],
         recipientPhones: dto.recipientPhones ?? [],
+        recipientTelegram: dto.recipientTelegram ?? [],
+        recipientPush: dto.recipientPush ?? [],
+        recipientWhatsapp: dto.recipientWhatsapp ?? [],
+        recipientViber: dto.recipientViber ?? [],
         webhookUrl: dto.webhookUrl ?? null,
         template: dto.template ?? '{DEVICE}: {TYPE} at {LOCATION} ({TIME})',
         active: dto.active ?? true,

@@ -5,6 +5,7 @@ import { Roles } from '../auth/roles.decorator';
 import { Audit } from '../audit/audit.decorator';
 import { ReportsService, REPORT_TEMPLATES, isReportTemplateId, type ReportTemplateId } from './reports.service';
 import { ScorecardCronService } from './scorecard-cron.service';
+import { FuelAnalyticsService } from './fuel-analytics.service';
 
 // Reports expose fleet-wide analytics, personal driver performance and
 // historical location/surveillance data — none of which is "read-only
@@ -17,7 +18,16 @@ export class ReportsController {
   constructor(
     private readonly svc: ReportsService,
     private readonly scorecardCron: ScorecardCronService,
+    private readonly fuel: FuelAnalyticsService,
   ) {}
+
+  // Fuel analytics (R2): refuelling + drain/theft for a device over a window.
+  @Get('fuel/:deviceId')
+  @Audit('report.fuel', { resourceType: 'device', resourceIdParam: 'deviceId' })
+  fuelReport(@Param('deviceId') id: string, @Query('from') from: string, @Query('to') to: string, @Req() req: any) {
+    const r = this.range(from, to);
+    return this.fuel.analyze(id, r.from, r.to, req.user);
+  }
 
   // Manual trigger for the monthly scorecard mailer. SUPER_ADMIN only,
   // used to backfill ("send last month again") and to smoke-test the
