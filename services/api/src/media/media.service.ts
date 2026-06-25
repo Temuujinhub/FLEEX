@@ -69,7 +69,11 @@ export class MediaService {
     if (!img) throw new NotFoundException('Image not found');
     this.ensureTenant(actor, img.companyId);
 
-    const safe = basename(img.fileName); // defense-in-depth vs path traversal
+    // basename() blocks path traversal; the allowlist also strips quotes/CR/LF
+    // so the value can't break out of the Content-Disposition quoting or inject
+    // a response header (audit L4). The media-service already writes sanitized
+    // numeric-IMEI names, so this is belt-and-braces.
+    const safe = basename(img.fileName).replace(/[^\w.\-]/g, '_');
     const abs = join(this.dataDir, safe);
     if (!existsSync(abs)) throw new NotFoundException('Media file missing');
 

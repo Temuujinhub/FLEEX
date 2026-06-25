@@ -1,0 +1,17 @@
+[Unit]
+Description=Fleex Let's Encrypt certificate renewal (audit L7)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/fleex
+# Standalone renew needs port 80, so nginx is stopped only for the brief renew
+# window. certbot is a no-op until the cert is within ~30 days of expiry, so a
+# real renewal (and the few seconds of downtime) happens at most monthly; the
+# rest of the time this is a fast no-op that still keeps nginx running.
+ExecStartPre=-/usr/bin/docker compose -f /opt/fleex/docker-compose.yml stop nginx
+ExecStart=/usr/bin/docker run --rm -p 80:80 \
+  -v /opt/fleex/infra/nginx/certs:/etc/letsencrypt \
+  certbot/certbot renew --standalone --non-interactive --quiet
+ExecStartPost=/usr/bin/docker compose -f /opt/fleex/docker-compose.yml start nginx

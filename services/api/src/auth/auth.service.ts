@@ -11,6 +11,7 @@ import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { RedisService } from '../common/redis.service';
+import { NO_DRIVER_MATCH } from './actor-scope';
 
 const FAIL_THRESHOLD = 5;
 const LOCK_MINUTES = 15;
@@ -32,15 +33,25 @@ export class AuthService {
   // be captured by nginx/proxy access logs and browser history (audit H-7 /
   // R-3). The ticket is stored in Redis and consumed exactly once (GETDEL) by
   // the gateway on connect.
-  async createWsTicket(user: { id: string; role: string; companyId: string | null }) {
+  async createWsTicket(user: { id: string; role: string; companyId: string | null; driverId?: string | null }) {
     const ticket = randomBytes(32).toString('hex');
     const expiresIn = 30;
-    await this.redis.client.set(
-      `ws:ticket:${ticket}`,
-      JSON.stringify({ sub: user.id, role: user.role, companyId: user.companyId }),
-      'EX',
-      expiresIn,
-    );
+    const payload: { sub: string; role: string; companyId: string | null; deviceIds?: string[] } = {
+      sub: user.id,
+      role: user.role,
+      companyId: user.companyId,
+    };
+    // DRIVER least-privilege (audit H3): embed the driver's assigned vehicle
+    // ids so the WS gateway (which has no DB) can scope the live stream to
+    // them. An unlinked driver gets an empty list → receives nothing.
+    if (user.role === 'DRIVER') {
+      const devs = await this.prisma.device.findMany({
+        where: { companyId: user.companyId, driverId: user.driverId ?? NO_DRIVER_MATCH },
+        select: { id: true },
+      });
+      payload.deviceIds = devs.map((d) => d.id);
+    }
+    await this.redis.client.set(`ws:ticket:${ticket}`, JSON.stringify(payload), 'EX', expiresIn);
     return { ticket, expiresIn };
   }
 
@@ -62,6 +73,10 @@ export class AuthService {
     };
 
     if (!user) {
+      // Equalize timing with the known-user path so an attacker can't enumerate
+      // accounts by measuring latency (audit M5): run a real Argon2id verify
+      // against a throwaway hash before returning the identical failure.
+      await dummyVerify(password);
       await auditFail('unknown_user');
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -218,6 +233,18 @@ export class AuthService {
     });
     return { accessToken, refreshToken };
   }
+}
+
+// Lazily-computed throwaway Argon2id hash used to equalize login timing for
+// unknown emails (so the no-such-user path costs ~the same as a wrong-password
+// verify). Computed once on first use; subsequent calls are a plain verify.
+let dummyHashPromise: Promise<string> | null = null;
+async function dummyVerify(password: string): Promise<void> {
+  if (!dummyHashPromise) {
+    dummyHashPromise = argon2.hash('fleex-timing-equalizer', { type: argon2.argon2id });
+  }
+  const h = await dummyHashPromise;
+  await argon2.verify(h, password).catch(() => false);
 }
 
 function sha256(s: string): string {

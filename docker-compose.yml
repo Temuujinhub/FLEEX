@@ -7,6 +7,15 @@ services:
     image: timescale/timescaledb:2.16.1-pg15
     container_name: fleex-postgres
     restart: unless-stopped
+    # Resource caps (audit H5): stop any one container from OOM-ing the host.
+    # Caps are ceilings (not reservations); tuned for the 4 GB / 2 vCPU baseline,
+    # override via .env on bigger hosts. postgres/redis/web/nginx start as root
+    # then drop privileges (gosu/su-exec/setuid workers) or bind :80/:443, so
+    # cap_drop:ALL / no-new-privileges would break them — left to the official
+    # images; our own non-root services get the full cap hardening (H6).
+    mem_limit: ${POSTGRES_MEM_LIMIT:-1500m}
+    cpus: ${POSTGRES_CPUS:-1.5}
+    pids_limit: 512
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -69,6 +78,9 @@ services:
     image: redis:7.4-alpine
     container_name: fleex-redis
     restart: unless-stopped
+    mem_limit: ${REDIS_MEM_LIMIT:-700m}
+    cpus: ${REDIS_CPUS:-0.5}
+    pids_limit: 128
     # maxmemory defaults to 512MB for a 4 GB droplet; override REDIS_MAXMEMORY
     # in .env (e.g. `REDIS_MAXMEMORY=2gb`) on larger production hosts.
     # volatile-lru (not allkeys-lru): only keys with a TTL are eligible for
@@ -100,6 +112,11 @@ services:
     image: fleex/api:latest
     container_name: fleex-api
     restart: unless-stopped
+    mem_limit: ${API_MEM_LIMIT:-700m}
+    cpus: ${API_CPUS:-1.0}
+    pids_limit: 256
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
     env_file: .env
     volumes:
       # Read-only access to the DualCam media blobs the media-service writes,
@@ -139,6 +156,11 @@ services:
     image: fleex/ingestor:latest
     container_name: fleex-ingestor
     restart: unless-stopped
+    mem_limit: ${INGESTOR_MEM_LIMIT:-320m}
+    cpus: ${INGESTOR_CPUS:-0.75}
+    pids_limit: 256
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
     # Give the batcher time to drain its queue + flush the final COPY on
     # SIGTERM before Docker escalates to SIGKILL (default is only 10s). The
     # batcher's shutdown drain is bounded to ~10s + a 15s flush timeout.
@@ -176,6 +198,11 @@ services:
     image: fleex/events-engine:latest
     container_name: fleex-events-engine
     restart: unless-stopped
+    mem_limit: ${EVENTS_MEM_LIMIT:-256m}
+    cpus: ${EVENTS_CPUS:-0.5}
+    pids_limit: 128
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
@@ -209,6 +236,11 @@ services:
     image: fleex/media-service:latest
     container_name: fleex-media-service
     restart: unless-stopped
+    mem_limit: ${MEDIA_MEM_LIMIT:-320m}
+    cpus: ${MEDIA_CPUS:-0.5}
+    pids_limit: 128
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
@@ -245,6 +277,9 @@ services:
     image: fleex/web:latest
     container_name: fleex-web
     restart: unless-stopped
+    mem_limit: ${WEB_MEM_LIMIT:-128m}
+    cpus: ${WEB_CPUS:-0.5}
+    pids_limit: 128
     depends_on:
       - api
     networks: [fleex]
@@ -253,6 +288,9 @@ services:
     image: nginx:1.27-alpine
     container_name: fleex-nginx
     restart: unless-stopped
+    mem_limit: ${NGINX_MEM_LIMIT:-192m}
+    cpus: ${NGINX_CPUS:-0.5}
+    pids_limit: 128
     depends_on:
       - api
       - web

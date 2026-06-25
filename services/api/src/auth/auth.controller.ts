@@ -26,6 +26,10 @@ export class AuthController {
   }
 
   @Public()
+  // Dedicated per-IP cap so refresh-token replay/abuse can't ride the broad
+  // 300/min default bucket (audit L2). Tokens are 48-byte random (unguessable),
+  // so this bounds volume, not guessing.
+  @Throttle({ medium: { limit: 60, ttl: 60_000 } })
   @Post('refresh')
   refresh(@Body() dto: RefreshDto, @Req() req: any) {
     return this.auth.refresh(dto.refreshToken, ipOf(req), req.headers['user-agent']);

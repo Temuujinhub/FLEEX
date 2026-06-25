@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Fleex TLS cert renewal twice daily (audit L7)
+
+[Timer]
+# certbot's recommended cadence; randomized so many hosts don't hit the ACME
+# server at once. Persistent catches up a missed run after downtime.
+OnCalendar=*-*-* 02,14:00:00
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

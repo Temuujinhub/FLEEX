@@ -21,10 +21,14 @@ on:
           - status
           - logs-api
           - logs-ingestor
+          - logs-engine
+          - logs-media
           - logs-web
           - logs-db
           - restart-api
           - restart-ingestor
+          - restart-engine
+          - restart-media
           - restart-web
           - restart-all
           - seed-demo-companies
@@ -80,7 +84,7 @@ jobs:
           # re-validate here in case someone hand-crafts a dispatch via
           # the API with a custom value.
           case "$CMD" in
-            status|logs-api|logs-ingestor|logs-web|logs-db|restart-api|restart-ingestor|restart-web|restart-all|seed-demo-companies|prune-images) ;;
+            status|logs-api|logs-ingestor|logs-engine|logs-media|logs-web|logs-db|restart-api|restart-ingestor|restart-engine|restart-media|restart-web|restart-all|seed-demo-companies|prune-images) ;;
             *) echo "Refusing unknown command: $CMD" >&2; exit 1 ;;
           esac
           if ! [[ "$TAIL" =~ ^[0-9]+$ ]]; then

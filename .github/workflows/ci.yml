@@ -31,6 +31,6 @@ jobs:
       - name: Install, generate Prisma client & test
         working-directory: services/api
         run: |
-          npm install --no-audit --no-fund --legacy-peer-deps
+          npm ci --no-audit --no-fund --legacy-peer-deps
           npx prisma generate
           npm test

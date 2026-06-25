@@ -5,6 +5,11 @@ import { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../common/redis.service';
 import { Actor, applyActorScope, driverMayAccess } from '../auth/actor-scope';
+import { hardenWorkbook } from '../reports/report-exporters';
+
+// Cap rows processed from an uploaded import so a zip-bomb / huge sheet can't
+// monopolise the event loop + a DB connection (audit M3).
+const MAX_IMPORT_ROWS = 5000;
 
 @Injectable()
 export class DevicesService {
@@ -226,6 +231,11 @@ export class DevicesService {
     await wb.xlsx.load(buffer as any);
     const ws = wb.worksheets[0];
     if (!ws) throw new BadRequestException('Excel файл хоосон байна');
+    if (ws.rowCount > MAX_IMPORT_ROWS) {
+      throw new BadRequestException(
+        `Хэт олон мөр (${ws.rowCount}). Нэг удаад дээд тал нь ${MAX_IMPORT_ROWS} мөр оруулна.`,
+      );
+    }
 
     const headers: Record<number, string> = {};
     ws.getRow(1).eachCell((cell, col) => {
@@ -357,6 +367,7 @@ export class DevicesService {
     ws.getRow(1).font = { bold: true };
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="fleex-vehicles-template.xlsx"');
+    hardenWorkbook(wb); // formula-injection guard (audit M2)
     const buf = await wb.xlsx.writeBuffer();
     res.send(Buffer.from(buf));
   }

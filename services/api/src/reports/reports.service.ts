@@ -15,6 +15,7 @@ import {
   engineSessionsPdf,
   eventsExcel,
   eventsPdf,
+  hardenWorkbook,
   idlePeriodsExcel,
   idlePeriodsPdf,
   tripSegmentsExcel,
@@ -380,6 +381,7 @@ export class ReportsService {
     for (const p of data.points) {
       points.addRow({ t: new Date(p.time).toISOString(), lat: p.lat, lng: p.lng, sp: p.speed });
     }
+    hardenWorkbook(wb); // formula-injection guard (audit M2)
     const buf = await wb.xlsx.writeBuffer();
     return Buffer.from(buf);
   }
@@ -595,6 +597,7 @@ export class ReportsService {
       });
     }
 
+    hardenWorkbook(wb); // formula-injection guard (audit M2)
     const buf = await wb.xlsx.writeBuffer();
     return Buffer.from(buf);
   }
@@ -864,6 +867,7 @@ export class ReportsService {
       idleHours: data.totals.idleHours,
       amount: data.totals.amount,
     }).font = { bold: true };
+    hardenWorkbook(wb); // formula-injection guard (audit M2)
     const buf = await wb.xlsx.writeBuffer();
     return Buffer.from(buf);
   }

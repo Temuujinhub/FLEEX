@@ -53,8 +53,24 @@ ufw default allow outgoing
 ufw allow OpenSSH
 ufw allow 80/tcp
 ufw allow 443/tcp
-ufw allow 5027/tcp  comment 'Teltonika TCP'
-ufw allow 5029/tcp  comment 'DualCam camera (media-service)'
+# Device ports (audit L1): the Teltonika / DualCam protocols are cleartext and
+# authenticate only by a spoofable IMEI, so ideally restrict 5027/5029 to the
+# mobile carrier's APN egress ranges. Set DEVICE_ALLOWED_CIDRS (comma-separated)
+# to lock them down; otherwise they stay world-open with a loud warning.
+if [[ -n "${DEVICE_ALLOWED_CIDRS:-}" ]]; then
+  IFS=',' read -ra _cidrs <<< "$DEVICE_ALLOWED_CIDRS"
+  for cidr in "${_cidrs[@]}"; do
+    cidr="$(echo "$cidr" | xargs)"
+    [[ -z "$cidr" ]] && continue
+    ufw allow from "$cidr" to any port 5027 proto tcp comment 'Teltonika TCP (carrier)'
+    ufw allow from "$cidr" to any port 5029 proto tcp comment 'DualCam (carrier)'
+  done
+  log "Device ports 5027/5029 restricted to: $DEVICE_ALLOWED_CIDRS"
+else
+  ufw allow 5027/tcp  comment 'Teltonika TCP'
+  ufw allow 5029/tcp  comment 'DualCam camera (media-service)'
+  log "WARNING: DEVICE_ALLOWED_CIDRS not set — 5027/5029 are world-open. Restrict to the carrier APN ranges for production (audit L1)."
+fi
 ufw --force enable
 
 log "Configuring fail2ban"

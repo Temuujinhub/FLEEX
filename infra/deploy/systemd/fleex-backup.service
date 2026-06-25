@@ -1,0 +1,12 @@
+[Unit]
+Description=Fleex Postgres off-host backup (audit L6)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/fleex
+# Pulls BACKUP_DIR / BACKUP_KEEP_DAYS / BACKUP_REMOTE_CMD / AUDIT_VERIFY_TOKEN
+# from .env if present (the '-' makes a missing file non-fatal).
+EnvironmentFile=-/opt/fleex/.env
+ExecStart=/usr/bin/env bash /opt/fleex/infra/deploy/backup.sh

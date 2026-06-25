@@ -34,6 +34,13 @@ type QueuedCommand struct {
 // elapses. Returns (nil, nil) on timeout — caller is expected to retry.
 func (s *Store) PopCommand(ctx context.Context, imei string, timeout time.Duration) (*QueuedCommand, error) {
 	if s.rdb == nil {
+		// No Redis configured: there are no commands to deliver. Sleep the poll
+		// interval instead of returning instantly so the caller's loop doesn't
+		// busy-spin at 100% CPU per connection (audit L8).
+		select {
+		case <-ctx.Done():
+		case <-time.After(timeout):
+		}
 		return nil, nil
 	}
 	key := "fleex.commands:" + imei

@@ -65,6 +65,15 @@ jobs:
           go build ./...
           go test ./...
 
+      # Fail the build on a KNOWN-reachable Go CVE in any service (audit L9).
+      - name: Go vulnerability scan (govulncheck)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          for d in services/gps-ingestor services/events-engine services/media-service; do
+            echo "== govulncheck $d =="
+            ( cd "$d" && "$(go env GOPATH)/bin/govulncheck" ./... )
+          done
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -73,7 +82,7 @@ jobs:
       - name: API – install & build
         working-directory: services/api
         run: |
-          npm install --no-audit --no-fund --legacy-peer-deps
+          npm ci --no-audit --no-fund --legacy-peer-deps
           npx prisma generate
           npx nest build
 
@@ -87,7 +96,7 @@ jobs:
           VITE_API_URL: /api
           VITE_WS_URL: /ws
         run: |
-          npm install --no-audit --no-fund --legacy-peer-deps
+          npm ci --no-audit --no-fund --legacy-peer-deps
           npx tsc --noEmit -p tsconfig.json
           npm run build
 
@@ -130,6 +139,14 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          # Refuse shell-metacharacter branch names / malformed SHAs before they
+          # are interpolated into the remote command string (audit M8).
+          if ! printf '%s' "$REF" | grep -qE '^[A-Za-z0-9._/-]+$'; then
+            echo "::error::refusing unsafe REF: $REF"; exit 1
+          fi
+          if ! printf '%s' "$SHA" | grep -qE '^[0-9a-fA-F]{7,40}$'; then
+            echo "::error::refusing unsafe SHA: $SHA"; exit 1
+          fi
           PORT="${DEPLOY_SSH_PORT:-22}"
           # `deploy` user is in the `docker` group and owns /opt/fleex, so no
           # sudo is needed for the build+up cycle. If you later add system-
