@@ -1,7 +1,7 @@
 # Multi-stage build for the events engine. Mirrors gps-ingestor for
 # consistency — small Alpine final image, non-root user, ~15 MB.
 
-FROM golang:1.22-alpine AS build
+FROM golang:1.25-alpine AS build
 WORKDIR /src
 
 RUN apk add --no-cache git ca-certificates

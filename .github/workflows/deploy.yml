@@ -39,7 +39,16 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          # Pin the patched 1.25.x toolchain so the build and govulncheck scan
+          # resolve the fixed standard library (the go.mod `toolchain` directive
+          # matches). Bumping this is how stdlib CVEs are cleared.
+          go-version: '1.25.11'
+          # The Go modules live in subdirectories, so point the build cache at
+          # their go.sum files (otherwise setup-go warns it can't find one).
+          cache-dependency-path: |
+            services/gps-ingestor/go.sum
+            services/events-engine/go.sum
+            services/media-service/go.sum
 
       - name: Build, vet & test GPS ingestor
         working-directory: services/gps-ingestor

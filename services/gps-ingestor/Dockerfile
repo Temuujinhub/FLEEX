@@ -1,7 +1,7 @@
 # Multi-stage build for the GPS ingestor.
 # Final image is distroless-ish (scratch + ca-certs) and ~15MB.
 
-FROM golang:1.22-alpine AS build
+FROM golang:1.25-alpine AS build
 WORKDIR /src
 
 RUN apk add --no-cache git ca-certificates
