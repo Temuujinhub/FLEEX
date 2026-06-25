@@ -1,5 +1,5 @@
 import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
-import { IsEmail, IsString, MinLength } from 'class-validator';
+import { Equals, IsBoolean, IsEmail, IsOptional, IsString, Length, MaxLength, MinLength } from 'class-validator';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { Public } from './public.decorator';
@@ -14,6 +14,15 @@ class RefreshDto {
   @IsString() refreshToken!: string;
 }
 
+class RegisterCompanyDto {
+  @IsString() @Length(2, 80) companyName!: string;
+  @IsString() @Length(2, 80) fullName!: string;
+  @IsEmail() email!: string;
+  @IsString() @MinLength(8) @MaxLength(100) password!: string;
+  @IsOptional() @IsString() @MaxLength(20) phone?: string;
+  @IsBoolean() @Equals(true, { message: 'Үйлчилгээний нөхцөл, нууцлалын бодлогыг зөвшөөрнө үү.' }) acceptedTerms!: boolean;
+}
+
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
@@ -23,6 +32,16 @@ export class AuthController {
   @Post('login')
   async login(@Body() dto: LoginDto, @Req() req: any) {
     return this.auth.login(dto.email, dto.password, ipOf(req), req.headers['user-agent']);
+  }
+
+  // Self-serve tenant signup → creates the company, its first COMPANY_ADMIN and
+  // a 14-day Starter trial, and returns tokens (auto-login). Tightly rate-
+  // limited per IP to curb signup spam.
+  @Public()
+  @Throttle({ login: { limit: 5, ttl: 60_000 } })
+  @Post('register-company')
+  async registerCompany(@Body() dto: RegisterCompanyDto, @Req() req: any) {
+    return this.auth.registerCompany(dto, ipOf(req), req.headers['user-agent']);
   }
 
   @Public()

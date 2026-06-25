@@ -412,11 +412,11 @@ export function Landing() {
               {heroSubText}
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <a href="#contact" className="rounded-md bg-white text-brand-900 px-5 py-3 font-semibold hover:bg-brand-50 transition shadow-lg">
-                Үнэгүй демо турших
+              <a href="/signup" className="rounded-md bg-white text-brand-900 px-5 py-3 font-semibold hover:bg-brand-50 transition shadow-lg">
+                14 хоног үнэгүй эхлэх
               </a>
               <a href="#contact" className="rounded-md bg-brand-600 hover:bg-brand-500 text-white px-5 py-3 font-semibold transition shadow-lg">
-                Захиалга өгөх
+                Демо / захиалга өгөх
               </a>
             </div>
             <div className="mt-8 flex flex-wrap gap-x-5 gap-y-2 text-sm text-brand-100/90">
@@ -690,12 +690,12 @@ export function Landing() {
                   ))}
                 </ul>
                 <a
-                  href="#contact"
+                  href={p.price === 'Тусгай' ? '#contact' : '/signup'}
                   className={`mt-6 block text-center rounded-md py-2.5 font-semibold transition ${
                     p.highlight ? 'bg-brand-600 hover:bg-brand-700 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-900'
                   }`}
                 >
-                  Захиалга өгөх
+                  {p.price === 'Тусгай' ? 'Холбогдох' : 'Үнэгүй эхлэх'}
                 </a>
               </div>
             ))}

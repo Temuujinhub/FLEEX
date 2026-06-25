@@ -87,6 +87,8 @@
     "password": "Нууц үг",
     "signIn": "Нэвтрэх",
     "signingIn": "Нэвтэрч байна…",
+    "noAccount": "Бүртгэлгүй юу?",
+    "signUp": "Шинээр бүртгүүлэх",
     "error": "Нэвтрэх явцад алдаа гарлаа",
     "capRealtime": "Real-time",
     "capRetention": "Дата хадгалалт",
