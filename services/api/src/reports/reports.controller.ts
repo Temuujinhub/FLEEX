@@ -6,6 +6,7 @@ import { Audit } from '../audit/audit.decorator';
 import { ReportsService, REPORT_TEMPLATES, isReportTemplateId, type ReportTemplateId } from './reports.service';
 import { ScorecardCronService } from './scorecard-cron.service';
 import { FuelAnalyticsService } from './fuel-analytics.service';
+import { FleetReportsService } from './fleet-reports.service';
 
 // Reports expose fleet-wide analytics, personal driver performance and
 // historical location/surveillance data — none of which is "read-only
@@ -19,7 +20,15 @@ export class ReportsController {
     private readonly svc: ReportsService,
     private readonly scorecardCron: ScorecardCronService,
     private readonly fuel: FuelAnalyticsService,
+    private readonly fleet: FleetReportsService,
   ) {}
+
+  // Streams an Excel buffer as an .xlsx download.
+  private sendXlsx(res: Response, buffer: Buffer, filename: string) {
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  }
 
   // Fuel analytics (R2): refuelling + drain/theft for a device over a window.
   @Get('fuel/:deviceId')
@@ -104,6 +113,73 @@ export class ReportsController {
   fuelConsumption(@Param('deviceId') id: string, @Query('from') from: string, @Query('to') to: string, @Req() req: any) {
     const r = this.range(from, to);
     return this.svc.fuelConsumptionReport(id, r.from, r.to, req.user);
+  }
+
+  // ── Fleet-wide (company-scoped) reports — Wialon-parity batch 2 ──────
+  // Aggregate across the tenant for a window; on-demand JSON + Excel. No
+  // device param — the service filters by the actor's company.
+  private stamp(from: string, to: string): string {
+    return `${new Date(from).toISOString().slice(0, 10)}_${new Date(to).toISOString().slice(0, 10)}`;
+  }
+
+  @Get('maintenance')
+  @Audit('report.maintenance')
+  maintenance(@Query('from') from: string, @Query('to') to: string, @Req() req: any) {
+    const r = this.range(from, to);
+    return this.fleet.maintenance(req.user, r.from, r.to);
+  }
+
+  @Get('maintenance/excel')
+  @Audit('report.maintenance.excel')
+  async maintenanceExcel(@Query('from') from: string, @Query('to') to: string, @Req() req: any, @Res() res: Response) {
+    const r = this.range(from, to);
+    this.sendXlsx(res, await this.fleet.maintenanceExcel(req.user, r.from, r.to), `maintenance-${this.stamp(from, to)}.xlsx`);
+  }
+
+  @Get('fleet-summary')
+  @Audit('report.fleet_summary')
+  fleetSummary(@Query('from') from: string, @Query('to') to: string, @Req() req: any) {
+    const r = this.range(from, to);
+    return this.fleet.fleetSummary(req.user, r.from, r.to);
+  }
+
+  @Get('fleet-summary/excel')
+  @Audit('report.fleet_summary.excel')
+  async fleetSummaryExcel(@Query('from') from: string, @Query('to') to: string, @Req() req: any, @Res() res: Response) {
+    const r = this.range(from, to);
+    this.sendXlsx(res, await this.fleet.fleetSummaryExcel(req.user, r.from, r.to), `fleet-summary-${this.stamp(from, to)}.xlsx`);
+  }
+
+  @Get('gprs')
+  @Audit('report.gprs')
+  gprs(@Query('from') from: string, @Query('to') to: string, @Req() req: any) {
+    const r = this.range(from, to);
+    return this.fleet.gprs(req.user, r.from, r.to);
+  }
+
+  @Get('gprs/excel')
+  @Audit('report.gprs.excel')
+  async gprsExcel(@Query('from') from: string, @Query('to') to: string, @Req() req: any, @Res() res: Response) {
+    const r = this.range(from, to);
+    this.sendXlsx(res, await this.fleet.gprsExcel(req.user, r.from, r.to), `gprs-${this.stamp(from, to)}.xlsx`);
+  }
+
+  // Command log reveals privileged control actions (engine block, etc.) →
+  // raised to FLEET_MANAGER, matching the financial idle-billing floor.
+  @Get('command-log')
+  @Roles(Role.FLEET_MANAGER)
+  @Audit('report.command_log')
+  commandLog(@Query('from') from: string, @Query('to') to: string, @Req() req: any) {
+    const r = this.range(from, to);
+    return this.fleet.commandLog(req.user, r.from, r.to);
+  }
+
+  @Get('command-log/excel')
+  @Roles(Role.FLEET_MANAGER)
+  @Audit('report.command_log.excel')
+  async commandLogExcel(@Query('from') from: string, @Query('to') to: string, @Req() req: any, @Res() res: Response) {
+    const r = this.range(from, to);
+    this.sendXlsx(res, await this.fleet.commandLogExcel(req.user, r.from, r.to), `command-log-${this.stamp(from, to)}.xlsx`);
   }
 
   // Template-aware export. Replaces the old per-format /reports/trip/...
