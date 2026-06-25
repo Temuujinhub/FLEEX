@@ -1,14 +1,17 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Role, Subscription } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { getPlan, isPlanKey, isUnlimited, PLAN_CATALOG, type PlanDef } from './plan-catalog';
+import { getPlan, isPlanKey, isUnlimited, PLAN_CATALOG, suggestPlan, type PlanDef } from './plan-catalog';
 
 type Actor = { id?: string; role: Role; companyId: string | null };
 
 const DAY_MS = 86_400_000;
-const DUE_SOON_DAYS = 7; // warn this many days before the next payment is due
-const NEAR_CAP_RATIO = 0.9; // warn at 90% of the device/user cap
+const DUE_SOON_DAYS = 10; // warn this many days before / into the grace window
+const GRACE_DAYS = 15; // prepaid: after the period ends, warn for ~15 days, then suspend
+const NEAR_CAP_RATIO = 0.9;
+// Allowed invoice durations: 1–11 months, or 1/2/3 years.
+const ALLOWED_MONTHS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 24, 36]);
 
 export interface BillingWarning {
   level: 'info' | 'warning' | 'critical';
@@ -16,8 +19,6 @@ export interface BillingWarning {
   message: string;
 }
 
-// Per-company billing view: plan, lifecycle status, usage vs caps, days until
-// the next payment, and any warnings the UI should surface.
 @Injectable()
 export class BillingService {
   private readonly logger = new Logger(BillingService.name);
@@ -29,7 +30,6 @@ export class BillingService {
     if (actor.role !== 'SUPER_ADMIN' && !actor.companyId) {
       throw new ForbiddenException('No company context');
     }
-    // SUPER_ADMIN with no company context has no single subscription to show.
     if (actor.role === 'SUPER_ADMIN' && !actor.companyId) {
       return { managed: false, superAdmin: true, plans: this.listPlans() };
     }
@@ -43,24 +43,19 @@ export class BillingService {
       this.prisma.user.count({ where: { companyId } }),
     ]);
 
-    // No subscription row → the company is "unmanaged" (grandfathered). We never
-    // block unmanaged companies; the operator opts a company into billing by
-    // assigning a plan.
     if (!sub) {
       return {
         managed: false,
         planKey: null as string | null,
         status: null as string | null,
+        suggestedPlan: suggestPlan(devices).key,
         usage: { devices, users },
-        warnings: [
-          { level: 'info', code: 'unmanaged', message: 'Багц оноогоогүй байна — хязгаарлалт идэвхгүй.' },
-        ] as BillingWarning[],
+        warnings: [{ level: 'info', code: 'unmanaged', message: 'Багц оноогоогүй байна — хязгаарлалт идэвхгүй.' }] as BillingWarning[],
       };
     }
 
     const plan = getPlan(sub.planKey);
     const deviceLimit = this.effectiveDeviceLimit(sub, plan);
-    const userLimit = plan.maxUsers;
     const now = new Date();
     const dueAt = sub.currentPeriodEnd ?? sub.trialEndsAt ?? null;
     const daysUntilDue = dueAt ? Math.ceil((dueAt.getTime() - now.getTime()) / DAY_MS) : null;
@@ -71,33 +66,28 @@ export class BillingService {
       planName: plan.name,
       status: sub.status,
       startedAt: sub.startedAt,
-      trialEndsAt: sub.trialEndsAt,
       currentPeriodEnd: sub.currentPeriodEnd,
       daysUntilDue,
+      graceDays: GRACE_DAYS,
       plan: this.planView(plan, deviceLimit),
       usage: {
-        devices, users,
-        deviceLimit, userLimit,
-        devicePct: pctOf(devices, deviceLimit),
-        userPct: pctOf(users, userLimit),
+        devices, users, deviceLimit, userLimit: plan.maxUsers,
+        devicePct: pctOf(devices, deviceLimit), userPct: pctOf(users, plan.maxUsers),
       },
       warnings: this.warnings(sub, plan, deviceLimit, devices, users, daysUntilDue),
     };
   }
 
   listPlans() {
-    return Object.values(PLAN_CATALOG)
-      .sort((a, b) => a.order - b.order)
-      .map((p) => this.planView(p, p.maxDevices));
+    return Object.values(PLAN_CATALOG).sort((a, b) => a.order - b.order).map((p) => this.planView(p, p.maxDevices));
   }
 
   private planView(p: PlanDef, deviceLimit: number) {
     return {
-      key: p.key, name: p.name, blurb: p.blurb,
+      key: p.key, name: p.name, deviceBand: p.deviceBand, blurb: p.blurb,
       maxDevices: deviceLimit, maxUsers: p.maxUsers, retentionDays: p.retentionDays,
       reports: p.reports, scheduledReports: p.scheduledReports, channels: p.channels,
-      multiProtocol: p.multiProtocol, pricePerDeviceMonth: p.pricePerDeviceMonth,
-      billingPeriodDays: p.billingPeriodDays,
+      multiProtocol: p.multiProtocol, monthlyPrice: p.monthlyPrice, custom: p.custom,
     };
   }
 
@@ -112,20 +102,24 @@ export class BillingService {
   ): BillingWarning[] {
     const out: BillingWarning[] = [];
     if (sub.status === 'SUSPENDED' || sub.status === 'CANCELLED') {
-      out.push({ level: 'critical', code: 'inactive', message: `Захиалга идэвхгүй (${sub.status}).` });
+      out.push({ level: 'critical', code: 'inactive', message: `Захиалга идэвхгүй (${sub.status}) — төлбөрөө төлж сэргээнэ үү.` });
     } else if (sub.status === 'PAST_DUE') {
-      out.push({ level: 'critical', code: 'past_due', message: 'Төлбөр хугацаа хэтэрсэн — багцаа сунгана уу.' });
+      const left = daysUntilDue == null ? null : GRACE_DAYS + daysUntilDue; // daysUntilDue ≤ 0 here
+      out.push({
+        level: 'critical', code: 'past_due',
+        message: left != null && left > 0
+          ? `Төлбөр хугацаа хэтэрсэн — ${left} хоногийн дотор төлөхгүй бол үйлчилгээ хаагдана.`
+          : 'Төлбөр хугацаа хэтэрсэн — багцаа сунгана уу.',
+      });
     } else if (daysUntilDue != null && daysUntilDue <= DUE_SOON_DAYS) {
       out.push({
         level: 'warning', code: 'due_soon',
-        message: sub.status === 'TRIAL'
-          ? `Туршилт ${daysUntilDue <= 0 ? 'дууссан' : `${daysUntilDue} хоногийн дараа дуусна`}.`
-          : `Дараагийн төлбөр ${daysUntilDue <= 0 ? 'өнөөдөр' : `${daysUntilDue} хоногийн дараа`} төлөгдөнө.`,
+        message: `Дараагийн төлбөр ${daysUntilDue <= 0 ? 'өнөөдөр' : `${daysUntilDue} хоногийн дараа`} төлөгдөнө.`,
       });
     }
     if (!isUnlimited(deviceLimit)) {
       if (devices > deviceLimit) {
-        out.push({ level: 'critical', code: 'device_over', message: `Машины тоо багцын хязгаараас (${deviceLimit}) хэтэрсэн (${devices}).` });
+        out.push({ level: 'critical', code: 'device_over', message: `Машины тоо багцын хязгаараас (${deviceLimit}) хэтэрсэн (${devices}). Дээд багц руу шилжинэ үү.` });
       } else if (devices >= deviceLimit * NEAR_CAP_RATIO) {
         out.push({ level: 'warning', code: 'device_near', message: `Машины тоо хязгаарт ойртсон (${devices}/${deviceLimit}).` });
       }
@@ -136,93 +130,137 @@ export class BillingService {
     return out;
   }
 
-  // ── Enforcement ───────────────────────────────────────────────
-  // Called from DevicesService.create. Unmanaged companies (no subscription)
-  // are never blocked; a SUSPENDED/CANCELLED sub blocks new devices; otherwise
-  // the device cap is enforced. PAST_DUE is a soft state (warned, not blocked)
-  // so a billing lapse never strands live vehicles already on the system —
-  // but it does stop the fleet from GROWING until paid.
+  // ── Enforcement (device cap; never hard-blocks live tracking) ──
   async assertCanAddDevice(companyId: string): Promise<void> {
     const sub = await this.prisma.subscription.findUnique({ where: { companyId } }).catch(() => null);
     if (!sub) return; // unmanaged → no cap
     if (sub.status === 'SUSPENDED' || sub.status === 'CANCELLED') {
-      throw new ForbiddenException('Захиалга идэвхгүй байна — шинэ төхөөрөмж нэмэх боломжгүй.');
+      throw new ForbiddenException('Захиалга идэвхгүй байна — шинэ төхөөрөмж нэмэхийн өмнө төлбөрөө сэргээнэ үү.');
     }
     const plan = getPlan(sub.planKey);
     const limit = this.effectiveDeviceLimit(sub, plan);
     if (isUnlimited(limit)) return;
     const count = await this.prisma.device.count({ where: { companyId } });
     if (count >= limit) {
-      const verb = sub.status === 'PAST_DUE' ? 'төлбөрөө төлж ' : '';
-      throw new ForbiddenException(
-        `"${plan.name}" багцын машины хязгаарт (${limit}) хүрсэн. Илүү машин нэмэхийн тулд ${verb}багцаа ахиулна уу.`,
-      );
+      throw new ForbiddenException(`"${plan.name}" багцын машины хязгаарт (${limit}) хүрсэн. Илүү машин нэмэхийн тулд багцаа ахиулна уу.`);
     }
   }
 
-  // ── Admin actions (SUPER_ADMIN) ───────────────────────────────
+  // ── Plan assignment ───────────────────────────────────────────
   async setPlan(actor: Actor, companyId: string, planKey: string, deviceLimitOverride?: number | null) {
     this.requireSuperAdmin(actor);
     if (!isPlanKey(planKey)) throw new BadRequestException(`Unknown plan: ${planKey}`);
-    const plan = PLAN_CATALOG[planKey];
     const existing = await this.prisma.subscription.findUnique({ where: { companyId } });
     const now = new Date();
-    // Activating a paid plan with no period yet → start one billing period.
-    const periodEnd = existing?.currentPeriodEnd ?? new Date(now.getTime() + plan.billingPeriodDays * DAY_MS);
     const data = {
       planKey,
-      status: existing?.status === 'PAST_DUE' || existing?.status === 'SUSPENDED' ? existing.status : ('ACTIVE' as const),
-      currentPeriodEnd: periodEnd,
+      status: existing?.status ?? ('TRIAL' as const),
+      currentPeriodEnd: existing?.currentPeriodEnd ?? null,
       deviceLimitOverride: deviceLimitOverride ?? null,
     };
     return this.prisma.subscription.upsert({
       where: { companyId },
       create: { companyId, ...data, startedAt: now },
-      update: data,
+      update: { planKey, deviceLimitOverride: deviceLimitOverride ?? null },
     });
   }
 
-  // Records a received payment and extends the paid period from the later of
-  // (now, currentPeriodEnd), so paying early doesn't lose remaining days.
-  async recordPayment(
+  // ── Invoices (нэхэмжлэх) ──────────────────────────────────────
+  // Issue an invoice for a plan + duration. Its number is the bank-transfer
+  // memo the customer pays with. Does NOT change the live subscription — that
+  // happens on markInvoicePaid.
+  async createInvoice(
     actor: Actor, companyId: string,
-    body: { amount?: number; method?: string; reference?: string; planKey?: string; periods?: number },
+    body: { planKey?: string; months: number; amount?: number; note?: string },
   ) {
     this.requireSuperAdmin(actor);
-    const existing = await this.prisma.subscription.findUnique({ where: { companyId } });
-    const planKey = body.planKey && isPlanKey(body.planKey) ? body.planKey : existing?.planKey ?? 'basic';
-    const plan = getPlan(planKey);
-    const now = new Date();
-    const periods = Math.max(1, Math.min(36, Math.floor(body.periods ?? 1)));
-    const base = existing?.currentPeriodEnd && existing.currentPeriodEnd > now ? existing.currentPeriodEnd : now;
-    const periodEnd = new Date(base.getTime() + periods * plan.billingPeriodDays * DAY_MS);
+    const months = Math.floor(body.months);
+    if (!ALLOWED_MONTHS.has(months)) {
+      throw new BadRequestException('Хугацаа 1–11 сар эсвэл 1/2/3 жил байх ёстой.');
+    }
+    const company = await this.prisma.company.findUnique({ where: { id: companyId }, select: { id: true } });
+    if (!company) throw new NotFoundException('Company not found');
 
-    const [sub] = await this.prisma.$transaction([
+    const sub = await this.prisma.subscription.findUnique({ where: { companyId } });
+    const deviceCount = await this.prisma.device.count({ where: { companyId } });
+    const planKey = body.planKey && isPlanKey(body.planKey) ? body.planKey : sub?.planKey ?? suggestPlan(deviceCount).key;
+    const plan = getPlan(planKey);
+
+    const now = new Date();
+    const periodStart = sub?.currentPeriodEnd && sub.currentPeriodEnd > now ? sub.currentPeriodEnd : now;
+    const periodEnd = addMonths(periodStart, months);
+    // Custom/enterprise (or an explicit override) take the supplied amount;
+    // otherwise the flat monthly price × months.
+    const amount = body.amount != null && body.amount >= 0
+      ? body.amount
+      : plan.custom ? 0 : plan.monthlyPrice * months;
+
+    const invoiceNumber = await this.nextInvoiceNumber(now);
+    return this.prisma.invoice.create({
+      data: {
+        invoiceNumber, companyId, planKey, months, deviceCount, amount,
+        status: 'SENT', periodStart, periodEnd,
+        dueAt: new Date(now.getTime() + 7 * DAY_MS),
+        note: body.note ?? null, createdByUserId: actor.id ?? null,
+      },
+    });
+  }
+
+  // Reconciled against the bank by invoiceNumber → mark paid, which extends the
+  // subscription through the invoice's period and activates it.
+  async markInvoicePaid(actor: Actor, invoiceId: string, body: { bankReference?: string }) {
+    this.requireSuperAdmin(actor);
+    const inv = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
+    if (!inv) throw new NotFoundException('Invoice not found');
+    if (inv.status !== 'SENT') throw new BadRequestException(`Нэхэмжлэх аль хэдийн "${inv.status}" төлөвтэй.`);
+
+    const now = new Date();
+    const [, sub] = await this.prisma.$transaction([
+      this.prisma.invoice.update({
+        where: { id: invoiceId },
+        data: { status: 'PAID', paidAt: now, bankReference: body.bankReference ?? null },
+      }),
       this.prisma.subscription.upsert({
-        where: { companyId },
-        create: { companyId, planKey, status: 'ACTIVE', startedAt: now, currentPeriodEnd: periodEnd },
-        update: { planKey, status: 'ACTIVE', currentPeriodEnd: periodEnd },
+        where: { companyId: inv.companyId },
+        create: { companyId: inv.companyId, planKey: inv.planKey, status: 'ACTIVE', startedAt: now, currentPeriodEnd: inv.periodEnd },
+        update: { planKey: inv.planKey, status: 'ACTIVE', currentPeriodEnd: inv.periodEnd },
       }),
       this.prisma.subscriptionPayment.create({
         data: {
-          companyId, planKey,
-          amount: body.amount ?? 0,
-          periodStart: base, periodEnd,
-          method: body.method ?? 'manual',
-          reference: body.reference ?? null,
-          recordedByUserId: actor.id ?? null,
+          companyId: inv.companyId, planKey: inv.planKey, amount: inv.amount,
+          periodStart: inv.periodStart, periodEnd: inv.periodEnd,
+          method: 'bank', reference: inv.invoiceNumber, recordedByUserId: actor.id ?? null,
         },
       }),
     ]);
-    this.logger.log(`Payment recorded: company=${companyId} plan=${planKey} until=${periodEnd.toISOString()}`);
+    this.logger.log(`Invoice ${inv.invoiceNumber} paid → company=${inv.companyId} until=${inv.periodEnd.toISOString()}`);
     return sub;
+  }
+
+  async cancelInvoice(actor: Actor, invoiceId: string) {
+    this.requireSuperAdmin(actor);
+    const inv = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
+    if (!inv) throw new NotFoundException('Invoice not found');
+    if (inv.status === 'PAID') throw new BadRequestException('Төлөгдсөн нэхэмжлэхийг цуцлах боломжгүй.');
+    return this.prisma.invoice.update({ where: { id: invoiceId }, data: { status: 'CANCELLED' } });
+  }
+
+  async listInvoices(actor: Actor, companyId: string) {
+    if (actor.role !== 'SUPER_ADMIN' && actor.companyId !== companyId) throw new ForbiddenException();
+    return this.prisma.invoice.findMany({ where: { companyId }, orderBy: { issuedAt: 'desc' }, take: 200 });
+  }
+
+  // FLX-YYMM-#### — monotonic within the month; retried on the unique clash.
+  private async nextInvoiceNumber(now: Date): Promise<string> {
+    const yymm = `${String(now.getUTCFullYear()).slice(2)}${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    const prefix = `FLX-${yymm}-`;
+    const count = await this.prisma.invoice.count({ where: { invoiceNumber: { startsWith: prefix } } });
+    return `${prefix}${String(count + 1).padStart(4, '0')}`;
   }
 
   async payments(actor: Actor, companyId: string) {
     if (actor.role !== 'SUPER_ADMIN' && actor.companyId !== companyId) throw new ForbiddenException();
-    return this.prisma.subscriptionPayment.findMany({
-      where: { companyId }, orderBy: { createdAt: 'desc' }, take: 200,
-    });
+    return this.prisma.subscriptionPayment.findMany({ where: { companyId }, orderBy: { createdAt: 'desc' }, take: 200 });
   }
 
   private requireSuperAdmin(actor: Actor) {
@@ -230,25 +268,39 @@ export class BillingService {
   }
 
   // ── Cron: lifecycle transitions ───────────────────────────────
-  // Daily: move ACTIVE/TRIAL subscriptions whose period/trial has ended into
-  // PAST_DUE so the UI nags and new-device adds get the past-due message.
+  // Daily: ACTIVE/TRIAL whose period has ended → PAST_DUE (grace, warned, not
+  // blocked from tracking); PAST_DUE past the grace window → SUSPENDED.
   @Cron(CronExpression.EVERY_DAY_AT_2AM)
-  async markPastDue() {
+  async runLifecycle() {
     const now = new Date();
-    const res = await this.prisma.subscription.updateMany({
-      where: {
-        status: { in: ['ACTIVE', 'TRIAL'] },
-        currentPeriodEnd: { not: null, lt: now },
-      },
-      data: { status: 'PAST_DUE' },
-    });
-    if (res.count > 0) this.logger.log(`Subscriptions moved to PAST_DUE: ${res.count}`);
-    return res.count;
+    const graceCutoff = new Date(now.getTime() - GRACE_DAYS * DAY_MS);
+    const [pastDue, suspended] = await this.prisma.$transaction([
+      this.prisma.subscription.updateMany({
+        where: { status: { in: ['ACTIVE', 'TRIAL'] }, currentPeriodEnd: { not: null, lt: now } },
+        data: { status: 'PAST_DUE' },
+      }),
+      this.prisma.subscription.updateMany({
+        where: { status: 'PAST_DUE', currentPeriodEnd: { not: null, lt: graceCutoff } },
+        data: { status: 'SUSPENDED' },
+      }),
+    ]);
+    if (pastDue.count || suspended.count) {
+      this.logger.log(`Lifecycle: ${pastDue.count} → PAST_DUE, ${suspended.count} → SUSPENDED`);
+    }
+    return { pastDue: pastDue.count, suspended: suspended.count };
   }
 }
 
 function pctOf(count: number, limit: number): number | null {
-  if (limit < 0) return null; // unlimited
+  if (limit < 0) return null;
   if (limit === 0) return 100;
   return Math.round((count / limit) * 100);
+}
+
+// Add calendar months to a date (handles year rollover; clamps day overflow via
+// the Date API's own normalisation).
+function addMonths(d: Date, months: number): Date {
+  const r = new Date(d.getTime());
+  r.setUTCMonth(r.getUTCMonth() + months);
+  return r;
 }

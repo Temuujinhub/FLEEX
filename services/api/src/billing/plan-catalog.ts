@@ -1,73 +1,88 @@
-// Subscription plan catalogue. Lives in code (not the DB) so limits/features
-// can be tuned without a migration — the DB only records which plan key a
-// company is on (Subscription.planKey). Prices are operator-tunable placeholders
-// (0 = "set by sales / contact"); the enforcement logic never depends on price.
-//
-// UNLIMITED (-1) means "no cap" for device/user counts.
+// Subscription plan catalogue — kept in sync with the public pricing on the
+// landing page (services/web/src/pages/Landing.tsx PRICING). Lives in code (not
+// the DB) so limits/prices can be tuned without a migration; the DB only stores
+// which plan key a company is on. Pricing is a FLAT monthly fee per tier (not
+// per-device); the device count determines which tier a company must be on and
+// is the enforced limit. UNLIMITED (-1) = no cap.
 
-export type PlanKey = 'trial' | 'basic' | 'pro' | 'enterprise';
+export type PlanKey = 'starter' | 'business' | 'pro' | 'enterprise';
 
 export const UNLIMITED = -1;
 
 export interface PlanDef {
   key: PlanKey;
-  name: string; // Mongolian display name
+  name: string;
+  deviceBand: string; // display, e.g. "1–10 машин"
   blurb: string;
   maxDevices: number; // -1 = unlimited
   maxUsers: number; // -1 = unlimited
-  retentionDays: number; // position-history retention the tier promises
-  reports: 'basic' | 'all'; // 'basic' = trip/events only; 'all' = full catalogue
-  scheduledReports: boolean; // R1 scheduled/email reports
+  retentionDays: number;
+  reports: 'basic' | 'all';
+  scheduledReports: boolean;
   channels: string[]; // allowed NotificationChannel values
-  multiProtocol: boolean; // Queclink / API access
-  pricePerDeviceMonth: number; // ₮, operator-tunable; 0 = contact sales / free
-  billingPeriodDays: number; // length of one paid period (trial uses trial days)
+  multiProtocol: boolean; // CAN/OBD, Queclink/API
+  monthlyPrice: number; // ₮ per month, flat per tier (0 = custom/contact)
+  custom: boolean; // enterprise — price negotiated
   order: number;
 }
 
 const ALL_CHANNELS = ['IN_APP', 'EMAIL', 'SMS', 'WEBHOOK', 'TELEGRAM', 'PUSH', 'WHATSAPP', 'VIBER'];
 
 export const PLAN_CATALOG: Record<PlanKey, PlanDef> = {
-  trial: {
-    key: 'trial', name: 'Туршилт', blurb: '14 хоног үнэгүй туршина',
-    maxDevices: 3, maxUsers: 2, retentionDays: 7,
-    reports: 'basic', scheduledReports: false, channels: ['IN_APP'],
-    multiProtocol: false, pricePerDeviceMonth: 0, billingPeriodDays: 14, order: 0,
+  starter: {
+    key: 'starter', name: 'Starter', deviceBand: '1–10 машин',
+    blurb: 'Жижиг флот — үндсэн хяналт',
+    maxDevices: 10, maxUsers: 5, retentionDays: 180,
+    reports: 'basic', scheduledReports: false, channels: ['IN_APP', 'EMAIL'],
+    multiProtocol: false, monthlyPrice: 200_000, custom: false, order: 0,
   },
-  basic: {
-    key: 'basic', name: 'Basic', blurb: 'Жижиг флот — үндсэн хяналт',
-    maxDevices: 25, maxUsers: 10, retentionDays: 90,
-    reports: 'basic', scheduledReports: false, channels: ['IN_APP', 'EMAIL', 'SMS'],
-    multiProtocol: false, pricePerDeviceMonth: 0, billingPeriodDays: 30, order: 1,
+  business: {
+    key: 'business', name: 'Business', deviceBand: '11–50 машин',
+    blurb: 'Бүх тайлан, AI оноо, API, RFID',
+    maxDevices: 50, maxUsers: 20, retentionDays: 365,
+    reports: 'all', scheduledReports: true, channels: ['IN_APP', 'EMAIL', 'SMS', 'TELEGRAM'],
+    multiProtocol: false, monthlyPrice: 800_000, custom: false, order: 1,
   },
   pro: {
-    key: 'pro', name: 'Pro', blurb: 'Бүх тайлан + бүх мэдэгдлийн суваг',
+    key: 'pro', name: 'Pro', deviceBand: '51–100 машин',
+    blurb: 'CAN/OBD, алсын асаалт, видео, бүх суваг',
     maxDevices: 100, maxUsers: 50, retentionDays: 365,
     reports: 'all', scheduledReports: true, channels: ALL_CHANNELS,
-    multiProtocol: false, pricePerDeviceMonth: 0, billingPeriodDays: 30, order: 2,
+    multiProtocol: true, monthlyPrice: 1_500_000, custom: false, order: 2,
   },
   enterprise: {
-    key: 'enterprise', name: 'Enterprise', blurb: 'Хязгааргүй + API/Queclink',
+    key: 'enterprise', name: 'Enterprise', deviceBand: '100+ машин',
+    blurb: 'Хязгааргүй + on-premise/white-label/SLA',
     maxDevices: UNLIMITED, maxUsers: UNLIMITED, retentionDays: 730,
     reports: 'all', scheduledReports: true, channels: ALL_CHANNELS,
-    multiProtocol: true, pricePerDeviceMonth: 0, billingPeriodDays: 30, order: 3,
+    multiProtocol: true, monthlyPrice: 0, custom: true, order: 3,
   },
 };
+
+export const PLAN_KEYS: PlanKey[] = ['starter', 'business', 'pro', 'enterprise'];
 
 export function isPlanKey(s: string): s is PlanKey {
   return Object.prototype.hasOwnProperty.call(PLAN_CATALOG, s);
 }
 
-// Resolve a plan, falling back to trial for an unknown/legacy key.
+// Resolve a plan, falling back to starter for an unknown/legacy key.
 export function getPlan(key: string | null | undefined): PlanDef {
-  return key && isPlanKey(key) ? PLAN_CATALOG[key] : PLAN_CATALOG.trial;
+  return key && isPlanKey(key) ? PLAN_CATALOG[key] : PLAN_CATALOG.starter;
 }
 
 export function isUnlimited(n: number): boolean {
   return n < 0;
 }
 
-// True when `count` is allowed under `limit` (-1 = unlimited).
 export function withinLimit(count: number, limit: number): boolean {
   return isUnlimited(limit) || count <= limit;
+}
+
+// Smallest tier whose device cap fits `deviceCount` — used to suggest a plan.
+export function suggestPlan(deviceCount: number): PlanDef {
+  for (const k of PLAN_KEYS) {
+    const p = PLAN_CATALOG[k];
+    if (isUnlimited(p.maxDevices) || deviceCount <= p.maxDevices) return p;
+  }
+  return PLAN_CATALOG.enterprise;
 }

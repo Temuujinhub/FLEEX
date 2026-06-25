@@ -1,48 +1,57 @@
 import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
-import { IsIn, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { Role } from '@prisma/client';
 import { Roles } from '../auth/roles.decorator';
 import { Audit } from '../audit/audit.decorator';
 import { BillingService } from './billing.service';
 
+const PLAN_KEYS = ['starter', 'business', 'pro', 'enterprise'];
+
 class SetPlanDto {
-  @IsIn(['trial', 'basic', 'pro', 'enterprise']) planKey!: string;
+  @IsIn(PLAN_KEYS) planKey!: string;
   @IsOptional() @IsInt() @Min(0) @Max(100000) deviceLimitOverride?: number;
 }
 
-class RecordPaymentDto {
-  @IsOptional() @IsNumber() @Min(0) amount?: number;
-  @IsOptional() @IsString() method?: string;
-  @IsOptional() @IsString() reference?: string;
-  @IsOptional() @IsIn(['trial', 'basic', 'pro', 'enterprise']) planKey?: string;
-  @IsOptional() @IsInt() @Min(1) @Max(36) periods?: number;
+class CreateInvoiceDto {
+  @IsOptional() @IsIn(PLAN_KEYS) planKey?: string;
+  @IsInt() @Min(1) @Max(36) months!: number; // UI offers 1–11 + 12/24/36
+  @IsOptional() @IsNumber() @Min(0) amount?: number; // override for custom/discount
+  @IsOptional() @IsString() @MaxLength(500) note?: string;
 }
 
-// Billing is admin content — floor is COMPANY_ADMIN (a manager sees their own
-// plan/usage); company assignment and payments are SUPER_ADMIN-only.
+class PayInvoiceDto {
+  @IsOptional() @IsString() @MaxLength(200) bankReference?: string;
+}
+
+// Billing is admin content — floor COMPANY_ADMIN (own plan/usage/invoices);
+// plan assignment, invoice issuing and marking-paid are SUPER_ADMIN-only.
 @Controller('billing')
 @Roles(Role.COMPANY_ADMIN)
 export class BillingController {
   constructor(private readonly svc: BillingService) {}
 
-  // The caller's own company subscription + usage + warnings.
   @Get('me')
   @Audit('billing.me')
   me(@Req() req: any) {
     return this.svc.summary(req.user);
   }
 
-  // Plan catalogue (limits/features per tier) — drives the pricing/compare UI.
   @Get('plans')
   plans() {
     return this.svc.listPlans();
   }
 
-  // The caller's own payment history.
   @Get('payments')
   @Audit('billing.payments')
   myPayments(@Req() req: any) {
     return this.svc.payments(req.user, req.user.companyId);
+  }
+
+  // The caller's own invoices (so they can see the number to pay with).
+  @Get('invoices')
+  @Audit('billing.invoices')
+  myInvoices(@Req() req: any) {
+    return this.svc.listInvoices(req.user, req.user.companyId);
   }
 
   // ── SUPER_ADMIN management ────────────────────────────────────
@@ -60,11 +69,35 @@ export class BillingController {
     return this.svc.setPlan(req.user, id, dto.planKey, dto.deviceLimitOverride ?? null);
   }
 
-  @Post('companies/:id/payment')
+  @Get('companies/:id/invoices')
   @Roles(Role.SUPER_ADMIN)
-  @Audit('billing.company.record_payment', { resourceType: 'company', resourceIdParam: 'id', captureResult: true })
-  recordPayment(@Param('id') id: string, @Body() dto: RecordPaymentDto, @Req() req: any) {
-    return this.svc.recordPayment(req.user, id, dto);
+  @Audit('billing.company.invoices', { resourceType: 'company', resourceIdParam: 'id' })
+  companyInvoices(@Param('id') id: string, @Req() req: any) {
+    return this.svc.listInvoices(req.user, id);
+  }
+
+  // Issue an invoice (нэхэмжлэх) for a company.
+  @Post('companies/:id/invoices')
+  @Roles(Role.SUPER_ADMIN)
+  @Audit('billing.invoice.create', { resourceType: 'company', resourceIdParam: 'id', captureResult: true })
+  createInvoice(@Param('id') id: string, @Body() dto: CreateInvoiceDto, @Req() req: any) {
+    return this.svc.createInvoice(req.user, id, dto);
+  }
+
+  // Mark an invoice paid (reconciled against the bank by its number) → extends
+  // the subscription.
+  @Post('invoices/:invoiceId/pay')
+  @Roles(Role.SUPER_ADMIN)
+  @Audit('billing.invoice.pay', { resourceType: 'invoice', resourceIdParam: 'invoiceId', captureResult: true })
+  payInvoice(@Param('invoiceId') invoiceId: string, @Body() dto: PayInvoiceDto, @Req() req: any) {
+    return this.svc.markInvoicePaid(req.user, invoiceId, dto);
+  }
+
+  @Post('invoices/:invoiceId/cancel')
+  @Roles(Role.SUPER_ADMIN)
+  @Audit('billing.invoice.cancel', { resourceType: 'invoice', resourceIdParam: 'invoiceId' })
+  cancelInvoice(@Param('invoiceId') invoiceId: string, @Req() req: any) {
+    return this.svc.cancelInvoice(req.user, invoiceId);
   }
 
   @Get('companies/:id/payments')
