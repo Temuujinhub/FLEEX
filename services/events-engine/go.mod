@@ -2,9 +2,11 @@ module github.com/temuujinhub/fleex/services/events-engine
 
 go 1.25.0
 
+toolchain go1.25.11
+
 require (
 	github.com/jackc/pgx/v5 v5.6.0
-	github.com/redis/go-redis/v9 v9.6.1
+	github.com/redis/go-redis/v9 v9.6.3
 	github.com/rs/zerolog v1.33.0
 )
 
