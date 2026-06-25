@@ -12,6 +12,32 @@
 
 ---
 
+## ✅ Хэрэгжүүлэлтийн төлөв (R3)
+
+§6-ын migration алхмууд **хэрэгжсэн** (per-port abstraction, Queclink decoder):
+
+| Алхам | Файл | Төлөв |
+|---|---|---|
+| `internal/protocol` (Decoder/Record/Command/registry) | `services/gps-ingestor/internal/protocol/protocol.go` | ✅ |
+| Teltonika adapter (Session-ийг дахин ашиглав) | `internal/teltonika/adapter.go` + `adapter_test.go` | ✅ |
+| `store` batch → `protocol.Record` (vendor-neutral) | `internal/store/store.go`, `commands.go` | ✅ |
+| Per-port routing + `INGESTOR_PROTOCOL_PORTS` | `cmd/ingestor/main.go`, `internal/config` (+test) | ✅ |
+| Queclink @Track decoder + тест | `internal/queclink/queclink.go` + `_test.go` | ✅ |
+| docker-compose + UFW (:5028) | `docker-compose.yml`, `infra/deploy/setup-server.sh` | ✅ |
+| Device `protocol` талбар (API + UI) | `devices.controller.ts`, `web/.../Devices.tsx` | ✅ |
+
+**P4 IMEI allowlist хадгалагдсан:** `Decoder.Handshake(ctx, accept)` callback нь
+протокол бүрд бүртгэлгүй төхөөрөмжийг татгалздаг (Teltonika 0x00, Queclink
+холболт таслах). Teltonika hot path регрессгүй — adapter нь хуучин codec parser-
+ийг дуудаж, шинэ end-to-end тест баталсан.
+
+> **Үлдсэн (bench, phase 5):** Queclink-ийн талбарын яг байрлал, DR102 RFID
+> report layout, `AT+GT…` командын password/serial-ийг **бодит GV350CEU дээр**
+> баталгаажуулна (decoder нь stable invariant дээр anchor хийдэг тул firmware-
+> ийн талбар нэмэгдэлд тэсвэртэй, гэхдээ hardware баталгаа хэвээр шаардлагатай).
+
+---
+
 ## 1. Одоогийн төлөв ба холболтын цэг
 
 Холболт боловсруулалт `services/gps-ingestor/cmd/ingestor/main.go`
