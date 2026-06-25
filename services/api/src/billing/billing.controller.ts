@@ -4,6 +4,7 @@ import { Role } from '@prisma/client';
 import { Roles } from '../auth/roles.decorator';
 import { Audit } from '../audit/audit.decorator';
 import { BillingService } from './billing.service';
+import { RetentionEnforcementService } from './retention-enforcement.service';
 
 const PLAN_KEYS = ['starter', 'business', 'pro', 'enterprise'];
 
@@ -28,7 +29,10 @@ class PayInvoiceDto {
 @Controller('billing')
 @Roles(Role.COMPANY_ADMIN)
 export class BillingController {
-  constructor(private readonly svc: BillingService) {}
+  constructor(
+    private readonly svc: BillingService,
+    private readonly retention: RetentionEnforcementService,
+  ) {}
 
   @Get('me')
   @Audit('billing.me')
@@ -52,6 +56,15 @@ export class BillingController {
   @Audit('billing.invoices')
   myInvoices(@Req() req: any) {
     return this.svc.listInvoices(req.user, req.user.companyId);
+  }
+
+  // Self-serve: a COMPANY_ADMIN issues an invoice for their OWN company (to
+  // renew/upgrade and get a number to pay by). The service forces the catalogue
+  // price and blocks the negotiated Enterprise plan for non-admins.
+  @Post('invoices')
+  @Audit('billing.invoice.self_create', { captureResult: true })
+  createMyInvoice(@Body() dto: CreateInvoiceDto, @Req() req: any) {
+    return this.svc.createInvoice(req.user, req.user.companyId, dto);
   }
 
   // ── SUPER_ADMIN management ────────────────────────────────────
@@ -105,5 +118,15 @@ export class BillingController {
   @Audit('billing.company.payments', { resourceType: 'company', resourceIdParam: 'id' })
   companyPayments(@Param('id') id: string, @Req() req: any) {
     return this.svc.payments(req.user, id);
+  }
+
+  // Per-plan data-retention preview (read-only): how many positions sit beyond
+  // each managed tenant's plan window, and whether deletion is enabled. The
+  // daily job is dry-run until RETENTION_ENFORCE is turned on.
+  @Get('retention/preview')
+  @Roles(Role.SUPER_ADMIN)
+  @Audit('billing.retention.preview')
+  retentionPreview() {
+    return this.retention.preview();
   }
 }

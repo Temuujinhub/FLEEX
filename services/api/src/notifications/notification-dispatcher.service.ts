@@ -3,6 +3,7 @@ import type Redis from 'ioredis';
 import { EventType, NotificationChannel, NotificationRule } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../common/redis.service';
+import { BillingService } from '../billing/billing.service';
 import { EmailService } from './email.service';
 import { SmsService } from './sms.service';
 import { WebhookService } from './webhook.service';
@@ -45,12 +46,17 @@ export class NotificationDispatcherService implements OnModuleInit, OnModuleDest
   // entries are reclaimed on restart.
   private readonly consumerName = process.env.HOSTNAME || 'dispatcher';
   private rulesByCompany = new Map<string, NotificationRule[]>();
+  // Per-company set of plan-allowed channels. A `null` value means the tenant is
+  // unmanaged (no subscription) → ungated; a Set means restrict to its members.
+  // Refreshed alongside the rules every 30s so the hot path stays query-free.
+  private allowedChannels = new Map<string, Set<string> | null>();
   private deviceNames = new Map<string, string>();
   private refreshTimer?: NodeJS.Timeout;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly billing: BillingService,
     private readonly email: EmailService,
     private readonly sms: SmsService,
     private readonly webhook: WebhookService,
@@ -138,6 +144,18 @@ export class NotificationDispatcherService implements OnModuleInit, OnModuleDest
       grouped.set(r.companyId, list);
     }
     this.rulesByCompany = grouped;
+
+    // Resolve each rule-owning company's plan-allowed channels once per refresh
+    // (not per event). Failures fall back to ungated so a billing hiccup can
+    // never silence alerts.
+    const channelMap = new Map<string, Set<string> | null>();
+    await Promise.all(
+      [...grouped.keys()].map(async (companyId) => {
+        const allowed = await this.billing.allowedChannels(companyId).catch(() => null);
+        channelMap.set(companyId, allowed ? new Set(allowed) : null);
+      }),
+    );
+    this.allowedChannels = channelMap;
   }
 
   private async handle(ev: EventEnvelope) {
@@ -165,19 +183,29 @@ export class NotificationDispatcherService implements OnModuleInit, OnModuleDest
     if (matched.length === 0) return;
 
     const deviceName = await this.lookupDeviceName(ev.deviceId);
+    // Plan gate: restrict to the channels the company's plan permits. A rule may
+    // have been authored on a higher tier (or before a downgrade); we honour the
+    // current plan here. null = unmanaged tenant → no restriction.
+    const planChannels = this.allowedChannels.get(ev.companyId) ?? null;
 
     await Promise.all(
       matched.map(async (rule) => {
         const message = renderTemplate(rule.template, ev, deviceName);
         const subject = `[Fleex] ${rule.name}`;
-        const channels = new Set(rule.channels);
+        const channels = new Set(
+          planChannels ? rule.channels.filter((c) => planChannels.has(c)) : rule.channels,
+        );
 
         const jobs: Promise<unknown>[] = [];
         if (channels.has(NotificationChannel.EMAIL) && rule.recipientEmails.length > 0) {
           jobs.push(this.email.send(rule.recipientEmails, subject, message));
         }
         if (channels.has(NotificationChannel.SMS) && rule.recipientPhones.length > 0) {
-          jobs.push(this.sms.send(rule.recipientPhones, message));
+          // Meter + cap: blocks once the company's monthly SMS quota is hit
+          // (other channels still fire). PANIC broadcast bypasses this.
+          if (await this.billing.consumeSmsQuota(ev.companyId, rule.recipientPhones.length)) {
+            jobs.push(this.sms.send(rule.recipientPhones, message));
+          }
         }
         if (channels.has(NotificationChannel.WEBHOOK) && rule.webhookUrl) {
           jobs.push(this.webhook.send(rule.webhookUrl, ev, message));

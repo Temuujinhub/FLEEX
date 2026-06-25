@@ -6,7 +6,11 @@ const DAY = 86_400_000;
 const superAdmin = { id: 'u0', role: 'SUPER_ADMIN' as const, companyId: null };
 const admin = { id: 'u1', role: 'COMPANY_ADMIN' as const, companyId: 'c1' };
 
-const svcWith = (prisma: any) => new BillingService(prisma as any);
+const stubMeter = (used = 0) => {
+  let total = used;
+  return { smsUsed: async () => total, addSms: async (_c: string, n: number) => (total += n) };
+};
+const svcWith = (prisma: any, meter: any = stubMeter()) => new BillingService(prisma as any, meter as any);
 
 describe('plan-catalog', () => {
   it('falls back to starter for an unknown key', () => {
@@ -105,14 +109,102 @@ describe('BillingService.createInvoice', () => {
     }
   });
 
-  it('honours an explicit amount override (custom/discount)', async () => {
+  it('honours an explicit amount override from an admin (custom/discount)', async () => {
     const cap: any = {};
     await mock(cap).createInvoice(superAdmin, 'c1', { planKey: 'enterprise', months: 12, amount: 9_000_000 });
     expect(cap.create.amount).toBe(9_000_000);
   });
 
-  it('rejects a non-super actor', async () => {
-    await expect(mock({}).createInvoice(admin, 'c1', { months: 1 })).rejects.toThrow();
+  // ── Self-serve (COMPANY_ADMIN issues their own invoice) ──────────
+  it('lets a COMPANY_ADMIN self-create for their OWN company at the catalogue price', async () => {
+    const cap: any = {};
+    const inv: any = await mock(cap).createInvoice(admin, 'c1', { planKey: 'business', months: 3 });
+    expect(cap.create.amount).toBe(2_400_000); // 800k × 3
+    expect(cap.create.companyId).toBe('c1');
+    expect(inv.invoiceNumber).toMatch(/^FLX-\d{4}-0001$/);
+  });
+
+  it('ignores an amount override from a self-serving COMPANY_ADMIN', async () => {
+    const cap: any = {};
+    await mock(cap).createInvoice(admin, 'c1', { planKey: 'business', months: 1, amount: 1 });
+    expect(cap.create.amount).toBe(800_000); // forced to catalogue, override ignored
+  });
+
+  it('blocks a COMPANY_ADMIN from self-creating the negotiated Enterprise plan', async () => {
+    await expect(mock({}).createInvoice(admin, 'c1', { planKey: 'enterprise', months: 12 })).rejects.toThrow();
+  });
+
+  it('rejects a COMPANY_ADMIN issuing for a DIFFERENT company', async () => {
+    await expect(mock({}).createInvoice(admin, 'c2', { months: 1 })).rejects.toThrow();
+  });
+
+  it('rejects a low-privilege role outright', async () => {
+    const viewer = { id: 'u9', role: 'VIEWER' as const, companyId: 'c1' };
+    await expect(mock({}).createInvoice(viewer as any, 'c1', { months: 1 })).rejects.toThrow();
+  });
+});
+
+describe('BillingService feature-gates', () => {
+  const gate = (sub: any) => svcWith({ subscription: { findUnique: async () => sub } });
+
+  it('allowedChannels: returns the plan set for a managed tenant', async () => {
+    const ch = await gate({ planKey: 'starter' }).allowedChannels('c1');
+    expect(ch).toEqual(['IN_APP', 'EMAIL']);
+  });
+
+  it('allowedChannels: null (ungated) for an unmanaged tenant', async () => {
+    expect(await gate(null).allowedChannels('c1')).toBeNull();
+  });
+
+  it('reportsTier: basic for starter, all for business, null for unmanaged', async () => {
+    expect(await gate({ planKey: 'starter' }).reportsTier('c1')).toBe('basic');
+    expect(await gate({ planKey: 'business' }).reportsTier('c1')).toBe('all');
+    expect(await gate(null).reportsTier('c1')).toBeNull();
+  });
+
+  it('assertReportsAll: blocks a managed starter plan', async () => {
+    await expect(gate({ planKey: 'starter' }).assertReportsAll(admin)).rejects.toThrow();
+  });
+
+  it('assertReportsAll: allows business+, SUPER_ADMIN, and unmanaged (grandfathered)', async () => {
+    await expect(gate({ planKey: 'business' }).assertReportsAll(admin)).resolves.toBeUndefined();
+    await expect(gate({ planKey: 'starter' }).assertReportsAll(superAdmin)).resolves.toBeUndefined();
+    await expect(gate(null).assertReportsAll(admin)).resolves.toBeUndefined();
+  });
+});
+
+describe('BillingService SMS metering', () => {
+  const make = (planKey: string | null, meter: any) =>
+    svcWith({ subscription: { findUnique: async () => (planKey ? { planKey } : null) } }, meter);
+
+  it('blocks once a managed plan hits its monthly SMS quota', async () => {
+    const meter = stubMeter(1_000); // business quota = 1000, already used up
+    const svc = make('business', meter);
+    expect(await svc.consumeSmsQuota('c1', 5)).toBe(false); // over → blocked
+  });
+
+  it('allows and meters under the quota', async () => {
+    const meter = stubMeter(10);
+    const svc = make('business', meter);
+    expect(await svc.consumeSmsQuota('c1', 3)).toBe(true);
+    expect(await meter.smsUsed()).toBe(13); // 10 + 3 recorded
+  });
+
+  it('never blocks unlimited (pro/enterprise) or unmanaged tenants', async () => {
+    expect(await make('enterprise', stubMeter(99_999)).consumeSmsQuota('c1', 50)).toBe(true);
+    expect(await make(null, stubMeter(99_999)).consumeSmsQuota('c1', 50)).toBe(true);
+  });
+
+  it('surfaces an SMS-over warning in the summary', async () => {
+    const svc = svcWith({
+      subscription: { findUnique: async () => ({ planKey: 'business', status: 'ACTIVE', deviceLimitOverride: null, startedAt: new Date(), trialEndsAt: null, currentPeriodEnd: new Date(Date.now() + 20 * DAY) }) },
+      device: { count: async () => 5 },
+      user: { count: async () => 2 },
+    }, stubMeter(1_000));
+    const out: any = await svc.getForCompany('c1');
+    expect(out.usage.smsUsed).toBe(1_000);
+    expect(out.usage.smsQuota).toBe(1_000);
+    expect(out.warnings.some((w: any) => w.code === 'sms_over')).toBe(true);
   });
 });
 

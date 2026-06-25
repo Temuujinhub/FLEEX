@@ -20,6 +20,7 @@ export interface PlanDef {
   reports: 'basic' | 'all';
   scheduledReports: boolean;
   channels: string[]; // allowed NotificationChannel values
+  monthlySmsQuota: number; // outbound SMS per calendar month (-1 = unlimited, 0 = none)
   multiProtocol: boolean; // CAN/OBD, Queclink/API
   monthlyPrice: number; // ₮ per month, flat per tier (0 = custom/contact)
   custom: boolean; // enterprise — price negotiated
@@ -34,6 +35,7 @@ export const PLAN_CATALOG: Record<PlanKey, PlanDef> = {
     blurb: 'Жижиг флот — үндсэн хяналт',
     maxDevices: 10, maxUsers: 5, retentionDays: 180,
     reports: 'basic', scheduledReports: false, channels: ['IN_APP', 'EMAIL'],
+    monthlySmsQuota: 0, // no SMS channel on starter
     multiProtocol: false, monthlyPrice: 200_000, custom: false, order: 0,
   },
   business: {
@@ -41,6 +43,7 @@ export const PLAN_CATALOG: Record<PlanKey, PlanDef> = {
     blurb: 'Бүх тайлан, AI оноо, API, RFID',
     maxDevices: 50, maxUsers: 20, retentionDays: 365,
     reports: 'all', scheduledReports: true, channels: ['IN_APP', 'EMAIL', 'SMS', 'TELEGRAM'],
+    monthlySmsQuota: 1_000,
     multiProtocol: false, monthlyPrice: 800_000, custom: false, order: 1,
   },
   pro: {
@@ -48,6 +51,7 @@ export const PLAN_CATALOG: Record<PlanKey, PlanDef> = {
     blurb: 'CAN/OBD, алсын асаалт, видео, бүх суваг',
     maxDevices: 100, maxUsers: 50, retentionDays: 365,
     reports: 'all', scheduledReports: true, channels: ALL_CHANNELS,
+    monthlySmsQuota: 5_000,
     multiProtocol: true, monthlyPrice: 1_500_000, custom: false, order: 2,
   },
   enterprise: {
@@ -55,6 +59,7 @@ export const PLAN_CATALOG: Record<PlanKey, PlanDef> = {
     blurb: 'Хязгааргүй + on-premise/white-label/SLA',
     maxDevices: UNLIMITED, maxUsers: UNLIMITED, retentionDays: 730,
     reports: 'all', scheduledReports: true, channels: ALL_CHANNELS,
+    monthlySmsQuota: UNLIMITED,
     multiProtocol: true, monthlyPrice: 0, custom: true, order: 3,
   },
 };

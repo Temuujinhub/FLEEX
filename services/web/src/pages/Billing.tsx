@@ -13,7 +13,7 @@ interface PlanView {
   key: string; name: string; deviceBand: string; blurb: string;
   maxDevices: number; maxUsers: number; retentionDays: number;
   reports: 'basic' | 'all'; scheduledReports: boolean; channels: string[];
-  multiProtocol: boolean; monthlyPrice: number; custom: boolean;
+  monthlySmsQuota: number; multiProtocol: boolean; monthlyPrice: number; custom: boolean;
 }
 interface Warning { level: 'info' | 'warning' | 'critical'; code: string; message: string }
 interface Summary {
@@ -21,7 +21,7 @@ interface Summary {
   planKey: string | null; planName?: string; status: string | null;
   currentPeriodEnd?: string | null; daysUntilDue?: number | null; suggestedPlan?: string;
   plan?: PlanView;
-  usage: { devices: number; users: number; deviceLimit?: number; userLimit?: number; devicePct?: number | null; userPct?: number | null };
+  usage: { devices: number; users: number; deviceLimit?: number; userLimit?: number; devicePct?: number | null; userPct?: number | null; smsUsed?: number; smsQuota?: number; smsPct?: number | null };
   warnings: Warning[];
 }
 interface Invoice {
@@ -52,7 +52,7 @@ export function Billing() {
         <p className="text-sm text-slate-500 mt-0.5">Захиалгын багц, ашиглалт, нэхэмжлэх ба дараагийн төлбөрийн огноо.</p>
       </header>
       <div className="p-4 md:p-6 space-y-6 max-w-5xl">
-        {isSuper ? <SuperAdminBilling plans={plans.data ?? []} /> : <CompanyBilling />}
+        {isSuper ? <SuperAdminBilling plans={plans.data ?? []} /> : <CompanyBilling plans={plans.data ?? []} />}
         <PlanComparison plans={plans.data ?? []} />
       </div>
     </div>
@@ -60,7 +60,7 @@ export function Billing() {
 }
 
 // ── Company admin's own view ──────────────────────────────────
-function CompanyBilling() {
+function CompanyBilling({ plans }: { plans: PlanView[] }) {
   const me = useQuery({ queryKey: ['billing', 'me'], queryFn: () => api.get<Summary>('/billing/me').then((r) => r.data) });
   const invoices = useQuery({ queryKey: ['billing', 'invoices'], queryFn: () => api.get<Invoice[]>('/billing/invoices').then((r) => r.data) });
   if (me.isLoading) return <Card><div className="text-sm text-slate-500">Татаж байна…</div></Card>;
@@ -68,8 +68,61 @@ function CompanyBilling() {
   return (
     <div className="space-y-6">
       <SummaryView s={me.data} />
+      <SelfInvoiceForm plans={plans} current={me.data} />
       <InvoiceList invoices={invoices.data ?? []} />
     </div>
+  );
+}
+
+// Self-serve invoice: the company admin picks a plan + duration and gets an
+// invoice number to pay by bank transfer. Price is the catalogue rate × months
+// (server-enforced — no override here); Enterprise is "contact sales", not
+// self-serve.
+function SelfInvoiceForm({ plans, current }: { plans: PlanView[]; current: Summary }) {
+  const qc = useQueryClient();
+  const selectable = plans.filter((p) => !p.custom);
+  const initial = current.planKey && selectable.some((p) => p.key === current.planKey)
+    ? current.planKey
+    : (current.suggestedPlan && selectable.some((p) => p.key === current.suggestedPlan) ? current.suggestedPlan : selectable[0]?.key ?? 'starter');
+  const [planKey, setPlanKey] = useState(initial);
+  const [months, setMonths] = useState('1');
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const create = useMutation({
+    mutationFn: () => api.post('/billing/invoices', { planKey, months: Number(months) }).then((r) => r.data),
+    onSuccess: (inv: any) => { setMsg(`✓ Нэхэмжлэх үүслээ: ${inv.invoiceNumber}. Гүйлгээний утга дээр энэ дугаарыг бичиж шилжүүлнэ үү.`); qc.invalidateQueries({ queryKey: ['billing'] }); },
+    onError: (e: any) => setMsg(e?.response?.data?.message ?? 'Алдаа гарлаа.'),
+  });
+
+  const selected = selectable.find((p) => p.key === planKey);
+  const estimate = selected ? selected.monthlyPrice * Number(months || 0) : 0;
+
+  return (
+    <Card>
+      <div className="text-sm font-semibold mb-1">Багц сунгах / шинэчлэх</div>
+      <p className="text-xs text-slate-500 mb-3">Багц, хугацаагаа сонгоод нэхэмжлэх үүсгэнэ. Дугаараар нь банкаар төлсний дараа админ баталгаажуулж, багц сунгагдана.</p>
+      <div className="grid sm:grid-cols-[1fr_8rem_auto] gap-2 items-end">
+        <div>
+          <label className="block text-[11px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">Багц</label>
+          <select value={planKey} onChange={(e) => setPlanKey(e.target.value)} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
+            {selectable.map((p) => <option key={p.key} value={p.key}>{p.name} — {fmt(p.monthlyPrice)}₮/сар</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-[11px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">Хугацаа</label>
+          <select value={months} onChange={(e) => setMonths(e.target.value)} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
+            {DURATIONS.map((d) => <option key={d.v} value={d.v}>{d.label}</option>)}
+          </select>
+        </div>
+        <button onClick={() => create.mutate()} disabled={create.isPending}
+          className="rounded-md bg-brand-600 hover:bg-brand-500 text-white text-sm py-2 px-4 disabled:opacity-50 whitespace-nowrap">
+          Нэхэмжлэх үүсгэх
+        </button>
+      </div>
+      <div className="mt-2 text-sm text-slate-600">Нийт дүн: <strong className="tabular-nums">{fmt(estimate)}₮</strong> <span className="text-xs text-slate-400">({months} сар × {fmt(selected?.monthlyPrice ?? 0)}₮)</span></div>
+      <p className="mt-2 text-[11px] text-slate-400">Enterprise багцыг борлуулалтын багтай тохиролцоно — <a href="/#contact" className="underline">холбоо барих</a>.</p>
+      {msg && <div className={clsx('mt-3 rounded-lg border px-3 py-2 text-sm', msg.startsWith('✓') ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800')}>{msg}</div>}
+    </Card>
   );
 }
 
@@ -99,6 +152,9 @@ function SummaryView({ s }: { s: Summary }) {
         <div className="mt-5 grid sm:grid-cols-2 gap-4">
           <UsageBar label="Машин" used={s.usage.devices} limit={s.usage.deviceLimit} pct={s.usage.devicePct ?? null} />
           <UsageBar label="Хэрэглэгч" used={s.usage.users} limit={s.usage.userLimit} pct={s.usage.userPct ?? null} />
+          {s.usage.smsQuota != null && s.usage.smsQuota !== 0 && (
+            <UsageBar label="SMS (энэ сар)" used={s.usage.smsUsed ?? 0} limit={s.usage.smsQuota} pct={s.usage.smsPct ?? null} />
+          )}
         </div>
         {!s.managed && (
           <p className="mt-4 text-xs text-slate-500">
@@ -228,6 +284,7 @@ function PlanComparison({ plans }: { plans: PlanView[] }) {
               <th className="text-left px-3 py-2">Машин</th>
               <th className="text-right px-3 py-2">Үнэ/сар</th>
               <th className="text-right px-3 py-2">Хадгалалт</th>
+              <th className="text-right px-3 py-2">SMS/сар</th>
               <th className="text-left px-3 py-2">Тайлан</th>
             </tr>
           </thead>
@@ -238,6 +295,7 @@ function PlanComparison({ plans }: { plans: PlanView[] }) {
                 <td className="px-3 py-2">{p.deviceBand}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{p.custom ? 'Тусгай' : `${fmt(p.monthlyPrice)}₮`}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{p.retentionDays} хон.</td>
+                <td className="px-3 py-2 text-right tabular-nums">{p.monthlySmsQuota < 0 ? '∞' : p.monthlySmsQuota === 0 ? '—' : fmt(p.monthlySmsQuota)}</td>
                 <td className="px-3 py-2">{p.reports === 'all' ? 'Бүх тайлан' : 'Үндсэн'}{p.scheduledReports ? ' + имэйл' : ''}</td>
               </tr>
             ))}
@@ -322,7 +380,53 @@ function SuperAdminBilling({ plans }: { plans: PlanView[] }) {
           <InvoiceList invoices={invoices.data ?? []} admin companyId={companyId} />
         </div>
       )}
+      <RetentionPreview />
     </Card>
+  );
+}
+
+// Read-only per-plan retention status. The daily trim is dry-run until
+// RETENTION_ENFORCE is set server-side, so this shows what WOULD be removed.
+interface RetentionView {
+  enforcing: boolean; floorDays: number;
+  tenants: { companyId: string; planKey: string; retentionDays: number; rows: number }[];
+}
+function RetentionPreview() {
+  const q = useQuery({
+    queryKey: ['billing', 'retention'],
+    queryFn: () => api.get<RetentionView>('/billing/retention/preview').then((r) => r.data),
+  });
+  if (!q.data) return null;
+  const overdue = q.data.tenants.filter((t) => t.rows > 0);
+  return (
+    <div className="mt-6 border-t border-slate-100 pt-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-sm font-semibold">Дата хадгалалт (per-plan retention)</div>
+        <span className={clsx('text-[10px] uppercase tracking-widest font-semibold rounded-full px-2 py-1', q.data.enforcing ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-600')}>
+          {q.data.enforcing ? 'Идэвхтэй (устгана)' : 'Туршилт (устгахгүй)'}
+        </span>
+      </div>
+      <p className="text-[11px] text-slate-500 mt-1">Хязгаараас хэтэрсэн хуучин байршлын тоо. Жинхэнэ устгал нь сервер дээр RETENTION_ENFORCE=on болсон үед ажиллана (доод хязгаар: {q.data.floorDays} хоног).</p>
+      {overdue.length === 0 ? (
+        <div className="mt-2 text-xs text-slate-400">Хязгаараас хэтэрсэн дата алга.</div>
+      ) : (
+        <table className="mt-2 w-full text-sm">
+          <thead className="text-xs uppercase tracking-widest text-slate-500 border-b border-slate-100">
+            <tr><th className="text-left px-3 py-1.5">Компани</th><th className="text-left px-3 py-1.5">Багц</th><th className="text-right px-3 py-1.5">Хадгалах хоног</th><th className="text-right px-3 py-1.5">Хэтэрсэн мөр</th></tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {overdue.map((t) => (
+              <tr key={t.companyId}>
+                <td className="px-3 py-1.5 font-mono text-[11px]">{t.companyId.slice(0, 8)}…</td>
+                <td className="px-3 py-1.5">{t.planKey}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">{t.retentionDays}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">{fmt(t.rows)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }
 
