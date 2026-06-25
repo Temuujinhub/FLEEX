@@ -58,6 +58,7 @@ model Company {
   customFields      CustomField[]
   tickets           SupportTicket[]
   deviceImages      DeviceImage[]
+  scheduledReports  ScheduledReport[]
 
   @@map("companies")
 }
@@ -422,6 +423,7 @@ model Device {
   health       DeviceHealthStatus?
   gprsCounters GprsCounter[]
   images       DeviceImage[]
+  scheduledReports ScheduledReport[]
 
   @@index([companyId])
   @@index([groupId])
@@ -901,6 +903,36 @@ model Trip {
   @@index([companyId, startedAt(sort: Desc)])
   @@index([deviceId, startedAt(sort: Desc)])
   @@map("trips")
+}
+
+// Scheduled report subscription (R1). A cron generates the chosen report
+// template for the cadence's period and emails it to `recipients`. Per-device
+// for now (matches the template export signature); group/fleet is a follow-up.
+enum ReportCadence {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+model ScheduledReport {
+  id         String        @id @default(uuid()) @db.Uuid
+  companyId  String        @db.Uuid
+  company    Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name       String
+  templateId String                              // a REPORT_TEMPLATES key
+  deviceId   String?       @db.Uuid
+  device     Device?       @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  cadence    ReportCadence
+  format     String        @default("excel")     // excel | pdf
+  recipients String[]                            // email addresses
+  active     Boolean       @default(true)
+  lastRunAt  DateTime?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@index([companyId])
+  @@index([active])
+  @@map("scheduled_reports")
 }
 
 // ---- Device health ---------------------------------------------------------
