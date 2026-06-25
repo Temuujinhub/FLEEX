@@ -59,8 +59,112 @@ model Company {
   tickets           SupportTicket[]
   deviceImages      DeviceImage[]
   scheduledReports  ScheduledReport[]
+  subscription         Subscription?
+  subscriptionPayments SubscriptionPayment[]
+  invoices             Invoice[]
 
   @@map("companies")
+}
+
+// ---- Billing / subscription plans ------------------------------------------
+//
+// The plan CATALOGUE (limits + included features per tier) lives in code
+// (services/api/src/billing/plan-catalog.ts) so it can be tuned without a
+// migration — like REPORT_TEMPLATES. The DB only stores which plan a company
+// is on, its lifecycle status, and when the next payment is due. A monthly
+// cron flips ACTIVE → PAST_DUE when currentPeriodEnd passes.
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  SUSPENDED
+  CANCELLED
+}
+
+model Subscription {
+  id          String  @id @default(uuid()) @db.Uuid
+  companyId   String  @unique @db.Uuid
+  company     Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Plan identifier — a key in the in-code PLAN_CATALOG (starter/business/pro/enterprise).
+  planKey     String             @default("starter")
+  status      SubscriptionStatus @default(TRIAL)
+
+  startedAt       DateTime  @default(now())
+  trialEndsAt     DateTime?
+  // Next payment due date — when this passes the cron moves the sub to PAST_DUE.
+  currentPeriodEnd DateTime?
+  // Per-company override of the plan's device cap (0/null = use the plan default).
+  deviceLimitOverride Int?
+  notes       String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("subscriptions")
+}
+
+// Manual payment ledger — a SUPER_ADMIN records a received payment, which
+// extends the subscription's currentPeriodEnd. (Online gateway integration —
+// QPay/etc. — is a later workstream that would write the same rows.)
+model SubscriptionPayment {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @db.Uuid
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  planKey     String
+  amount      Float    @default(0)
+  currency    String   @default("MNT")
+  periodStart DateTime
+  periodEnd   DateTime
+  method      String   @default("manual") // manual | qpay | card | bank
+  reference   String?  // external txn id / receipt no
+  recordedByUserId String? @db.Uuid
+  createdAt   DateTime @default(now())
+
+  @@index([companyId, createdAt])
+  @@map("subscription_payments")
+}
+
+// Invoice (нэхэмжлэх). The admin issues one for a plan + period; its
+// invoiceNumber is what the customer writes in the bank-transfer memo. The
+// admin reconciles against the bank by that number and marks the invoice PAID,
+// which extends the subscription by the invoiced period. Prepaid model.
+enum InvoiceStatus {
+  SENT      // issued / awaiting payment
+  PAID
+  CANCELLED
+}
+
+model Invoice {
+  id            String        @id @default(uuid()) @db.Uuid
+  // Human-readable, unique — used as the bank transfer reference (memo).
+  invoiceNumber String        @unique
+  companyId     String        @db.Uuid
+  company       Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  planKey       String
+  months        Int           // 1–11 or 12/24/36
+  deviceCount   Int           @default(0) // snapshot at issue time
+  amount        Float         @default(0)
+  currency      String        @default("MNT")
+  status        InvoiceStatus @default(SENT)
+
+  periodStart   DateTime
+  periodEnd     DateTime
+  issuedAt      DateTime      @default(now())
+  dueAt         DateTime?
+  paidAt        DateTime?
+  bankReference String?       // bank txn id the admin matched
+  note          String?
+  createdByUserId String?     @db.Uuid
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([companyId, status])
+  @@index([status])
+  @@map("invoices")
 }
 
 model User {
