@@ -14,6 +14,7 @@ const Legal = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Legal
 const Dashboard = lazy(() => import('./pages/Dashboard').then((m) => ({ default: m.Dashboard })));
 const MobileSummary = lazy(() => import('./pages/MobileSummary').then((m) => ({ default: m.MobileSummary })));
 const Devices = lazy(() => import('./pages/Devices').then((m) => ({ default: m.Devices })));
+const Onboarding = lazy(() => import('./pages/Onboarding').then((m) => ({ default: m.Onboarding })));
 const Drivers = lazy(() => import('./pages/Drivers').then((m) => ({ default: m.Drivers })));
 const EcoDriving = lazy(() => import('./pages/EcoDriving').then((m) => ({ default: m.EcoDriving })));
 const Places = lazy(() => import('./pages/Places').then((m) => ({ default: m.Places })));
@@ -93,6 +94,7 @@ export function App() {
           <Route path="/app/map" element={<LiveMap />} />
           <Route path="/app/dispatch" element={<Dispatch />} />
           <Route path="/app/devices" element={<Devices />} />
+          <Route path="/app/onboarding" element={<Onboarding />} />
           <Route path="/app/drivers" element={<Drivers />} />
           <Route path="/app/org" element={<OrgStructure />} />
           {/* Kept for deep links / bookmarks; the nav points at /app/org. */}

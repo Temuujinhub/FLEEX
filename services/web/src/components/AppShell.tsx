@@ -30,6 +30,7 @@ const SECTIONS: {
     titleKey: 'section.fleet',
     items: [
       { to: '/app/devices',       labelKey: 'nav.devices',      min: 'VIEWER', icon: <IconTruck /> },
+      { to: '/app/onboarding',    labelKey: 'nav.onboarding',   min: 'FLEET_MANAGER', icon: <Smartphone /> },
       { to: '/app/drivers',       labelKey: 'nav.drivers',      min: 'VIEWER', icon: <IconDriver /> },
       { to: '/app/service-tasks', labelKey: 'nav.serviceTasks', min: 'VIEWER', icon: <IconWrench /> },
       { to: '/app/history',       labelKey: 'nav.history',      min: 'VIEWER', icon: <IconRoute /> },
