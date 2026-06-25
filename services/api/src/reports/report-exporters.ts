@@ -11,7 +11,7 @@
 import * as ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import type { Event } from '@prisma/client';
-import type { EngineSession, TripSegment, IdlePeriod } from './report-builders';
+import type { EngineSession, TripSegment, IdlePeriod, DailySummary, FuelConsumptionDay } from './report-builders';
 
 export interface DeviceHeader {
   name: string;
@@ -459,6 +459,239 @@ export function eventsPdf(
     }
     if (events.length > 80) {
       doc.moveDown(0.5).fillColor('gray').text(`… бүгд ${events.length} мөр — бүтнээр Excel татна уу.`);
+    }
+  });
+}
+
+// ── Daily summary totals (shared by Mileage + Utilization) ────
+export interface DailyTotals {
+  distanceKm: number;
+  movingMin: number;
+  idleMin: number;
+  engineOnMin: number;
+  maxSpeed: number;
+}
+
+// ── Mileage (Гүйлт) — per-day distance ────────────────────────
+export async function mileageExcel(
+  device: DeviceHeader,
+  range: ReportRange,
+  days: DailySummary[],
+  totals: DailyTotals,
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const summary = wb.addWorksheet('Хураангуй');
+  attachHeader(summary, 'Гүйлт (Mileage)', device, range);
+  const activeDays = days.filter((d) => d.distanceKm >= 0.1).length;
+  summary.addRows([
+    ['Нийт зам',            totals.distanceKm.toFixed(1) + ' км'],
+    ['Хөдөлгөөнтэй цаг',    (totals.movingMin / 60).toFixed(1) + ' ц'],
+    ['Дээд хурд',           totals.maxSpeed.toFixed(1) + ' км/ц'],
+    ['Идэвхтэй өдөр',       `${activeDays} / ${days.length}`],
+    ['Өдрийн дундаж зам',   activeDays > 0 ? (totals.distanceKm / activeDays).toFixed(1) + ' км' : '—'],
+  ]);
+  summary.getColumn(1).width = 26;
+  summary.getColumn(2).width = 18;
+
+  const sheet = wb.addWorksheet('Mileage');
+  sheet.columns = [
+    { header: 'Огноо',            key: 'date', width: 14 },
+    { header: 'Зам (км)',         key: 'km',   width: 12 },
+    { header: 'Хөдөлгөөнд',       key: 'mov',  width: 14 },
+    { header: 'Дээд хурд (км/ц)', key: 'spd',  width: 16 },
+    { header: 'Эхэлсэн',          key: 'first', width: 21 },
+    { header: 'Дууссан',          key: 'last',  width: 21 },
+  ];
+  sheet.getRow(1).font = { bold: true };
+  for (const d of days) {
+    sheet.addRow({
+      date: d.date,
+      km: Number(d.distanceKm.toFixed(2)),
+      mov: fmtMin(d.movingMin),
+      spd: Number(d.maxSpeed.toFixed(1)),
+      first: fmtDt(d.firstAt),
+      last: fmtDt(d.lastAt),
+    });
+  }
+  return workbookToBuffer(wb);
+}
+
+export function mileagePdf(
+  device: DeviceHeader,
+  range: ReportRange,
+  days: DailySummary[],
+  totals: DailyTotals,
+): Promise<Buffer> {
+  return pdfToBuffer((doc) => {
+    pdfHeader(doc, 'Гүйлт (Mileage)', device, range);
+    const activeDays = days.filter((d) => d.distanceKm >= 0.1).length;
+    kvList(doc, [
+      ['Нийт зам',          `${totals.distanceKm.toFixed(1)} км`],
+      ['Хөдөлгөөнтэй цаг',  `${(totals.movingMin / 60).toFixed(1)} ц`],
+      ['Дээд хурд',         `${totals.maxSpeed.toFixed(1)} км/ц`],
+      ['Идэвхтэй өдөр',     `${activeDays} / ${days.length}`],
+    ]);
+    doc.moveDown(0.5);
+    doc.font('Helvetica-Bold').fontSize(12).text('Өдрийн задаргаа');
+    doc.font('Helvetica').fontSize(9);
+    for (const d of days.slice(0, 80)) {
+      doc.text(`${d.date}  ·  ${d.distanceKm.toFixed(1)} км  ·  хөдөлгөөнд ${fmtMin(d.movingMin)}  ·  max ${d.maxSpeed.toFixed(0)} км/ц`);
+    }
+    if (days.length > 80) {
+      doc.moveDown(0.5).fillColor('gray').text(`… бүгд ${days.length} өдөр — бүтнээр Excel татна уу.`);
+    }
+  });
+}
+
+// ── Utilization (Ашиглалт) — engine-on vs moving vs idle ──────
+function utilPct(d: DailySummary | DailyTotals): number {
+  return d.engineOnMin > 0 ? (d.movingMin / d.engineOnMin) * 100 : 0;
+}
+
+export async function utilizationExcel(
+  device: DeviceHeader,
+  range: ReportRange,
+  days: DailySummary[],
+  totals: DailyTotals,
+  hasIgnition: boolean,
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const summary = wb.addWorksheet('Хураангуй');
+  attachHeader(summary, 'Ашиглалт (Utilization)', device, range);
+  summary.addRows([
+    ['Хөдөлгүүр асаалттай', (totals.engineOnMin / 60).toFixed(1) + ' ц'],
+    ['Хөдөлгөөнд',          (totals.movingMin / 60).toFixed(1) + ' ц'],
+    ['Сул зогсолт',         (totals.idleMin / 60).toFixed(1) + ' ц'],
+    ['Ашиглалт (хөдөлгөөн / асаалттай)', utilPct(totals).toFixed(0) + '%'],
+    ['Туулсан зам',         totals.distanceKm.toFixed(1) + ' км'],
+    ['Илрүүлэлт',           hasIgnition ? 'ignition signal' : 'хөдөлгөөн (ignition алга — idle тооцоогүй)'],
+  ]);
+  summary.getColumn(1).width = 36;
+  summary.getColumn(2).width = 20;
+
+  const sheet = wb.addWorksheet('Utilization');
+  sheet.columns = [
+    { header: 'Огноо',         key: 'date', width: 14 },
+    { header: 'Асаалттай',     key: 'eng',  width: 14 },
+    { header: 'Хөдөлгөөнд',    key: 'mov',  width: 14 },
+    { header: 'Сул зогсолт',   key: 'idle', width: 14 },
+    { header: 'Ашиглалт %',    key: 'pct',  width: 12 },
+    { header: 'Зам (км)',      key: 'km',   width: 12 },
+  ];
+  sheet.getRow(1).font = { bold: true };
+  for (const d of days) {
+    sheet.addRow({
+      date: d.date,
+      eng: fmtMin(d.engineOnMin),
+      mov: fmtMin(d.movingMin),
+      idle: fmtMin(d.idleMin),
+      pct: Math.round(utilPct(d)) + '%',
+      km: Number(d.distanceKm.toFixed(2)),
+    });
+  }
+  return workbookToBuffer(wb);
+}
+
+export function utilizationPdf(
+  device: DeviceHeader,
+  range: ReportRange,
+  days: DailySummary[],
+  totals: DailyTotals,
+  hasIgnition: boolean,
+): Promise<Buffer> {
+  return pdfToBuffer((doc) => {
+    pdfHeader(doc, 'Ашиглалт (Utilization)', device, range);
+    kvList(doc, [
+      ['Хөдөлгүүр асаалттай', `${(totals.engineOnMin / 60).toFixed(1)} ц`],
+      ['Хөдөлгөөнд',          `${(totals.movingMin / 60).toFixed(1)} ц`],
+      ['Сул зогсолт',         `${(totals.idleMin / 60).toFixed(1)} ц`],
+      ['Ашиглалт',            `${utilPct(totals).toFixed(0)}%`],
+      ['Туулсан зам',         `${totals.distanceKm.toFixed(1)} км`],
+    ]);
+    if (!hasIgnition) {
+      doc.moveDown(0.3).fontSize(9).fillColor('gray').text(
+        'Тэмдэглэл: энэ төхөөрөмж ignition signal илгээгээгүй тул сул зогсолтыг тооцоогүй.',
+      ).fillColor('black');
+    }
+    doc.moveDown(0.5);
+    doc.font('Helvetica-Bold').fontSize(12).text('Өдрийн задаргаа');
+    doc.font('Helvetica').fontSize(9);
+    for (const d of days.slice(0, 80)) {
+      doc.text(`${d.date}  ·  асаалттай ${fmtMin(d.engineOnMin)}  ·  хөдөлгөөнд ${fmtMin(d.movingMin)}  ·  сул ${fmtMin(d.idleMin)}  ·  ${Math.round(utilPct(d))}%`);
+    }
+    if (days.length > 80) {
+      doc.moveDown(0.5).fillColor('gray').text(`… бүгд ${days.length} өдөр — бүтнээр Excel татна уу.`);
+    }
+  });
+}
+
+// ── Fuel consumption (Шатхууны зарцуулалт — нормоор) ──────────
+export interface FuelConsumptionData {
+  rateL100Km: number;
+  tankCapacityL: number | null;
+  totals: { distanceKm: number; estLiters: number };
+  days: FuelConsumptionDay[];
+}
+
+export async function fuelConsumptionExcel(
+  device: DeviceHeader,
+  range: ReportRange,
+  data: FuelConsumptionData,
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const summary = wb.addWorksheet('Хураангуй');
+  attachHeader(summary, 'Шатхууны зарцуулалт (нормоор)', device, range);
+  summary.addRows([
+    ['Норм (L/100км)',     data.rateL100Km > 0 ? data.rateL100Km.toFixed(1) : 'тохируулаагүй'],
+    ['Багийн багтаамж (L)', data.tankCapacityL != null ? String(data.tankCapacityL) : '—'],
+    ['Нийт зам',           data.totals.distanceKm.toFixed(1) + ' км'],
+    ['Тооцоолсон зарцуулалт', data.totals.estLiters.toFixed(1) + ' L'],
+  ]);
+  summary.getColumn(1).width = 28;
+  summary.getColumn(2).width = 20;
+  if (data.rateL100Km <= 0) {
+    summary.addRow([]);
+    summary.addRow(['Анхаар: машины "Шатахууны зарцуулалт (L/100км)" талбарыг бөглөнө үү.']);
+  }
+
+  const sheet = wb.addWorksheet('Fuel');
+  sheet.columns = [
+    { header: 'Огноо',                key: 'date', width: 14 },
+    { header: 'Зам (км)',             key: 'km',   width: 12 },
+    { header: 'Тооцоолсон зарцуулалт (L)', key: 'l', width: 24 },
+  ];
+  sheet.getRow(1).font = { bold: true };
+  for (const d of data.days) {
+    sheet.addRow({ date: d.date, km: Number(d.distanceKm.toFixed(2)), l: Number(d.estLiters.toFixed(2)) });
+  }
+  return workbookToBuffer(wb);
+}
+
+export function fuelConsumptionPdf(
+  device: DeviceHeader,
+  range: ReportRange,
+  data: FuelConsumptionData,
+): Promise<Buffer> {
+  return pdfToBuffer((doc) => {
+    pdfHeader(doc, 'Шатхууны зарцуулалт (нормоор)', device, range);
+    kvList(doc, [
+      ['Норм (L/100км)',        data.rateL100Km > 0 ? data.rateL100Km.toFixed(1) : 'тохируулаагүй'],
+      ['Нийт зам',              `${data.totals.distanceKm.toFixed(1)} км`],
+      ['Тооцоолсон зарцуулалт', `${data.totals.estLiters.toFixed(1)} L`],
+    ]);
+    if (data.rateL100Km <= 0) {
+      doc.moveDown(0.3).fontSize(9).fillColor('#b45309').text(
+        'Машины "Шатахууны зарцуулалт (L/100км)" талбар хоосон тул тооцоо 0. Машины тохиргоонд нормоо оруулна уу.',
+      ).fillColor('black');
+    }
+    doc.moveDown(0.5);
+    doc.font('Helvetica-Bold').fontSize(12).text('Өдрийн задаргаа');
+    doc.font('Helvetica').fontSize(9);
+    for (const d of data.days.slice(0, 80)) {
+      doc.text(`${d.date}  ·  ${d.distanceKm.toFixed(1)} км  ·  ${d.estLiters.toFixed(1)} L`);
+    }
+    if (data.days.length > 80) {
+      doc.moveDown(0.5).fillColor('gray').text(`… бүгд ${data.days.length} өдөр — бүтнээр Excel татна уу.`);
     }
   });
 }

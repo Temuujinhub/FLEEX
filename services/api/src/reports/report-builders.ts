@@ -298,6 +298,94 @@ export function buildTripSegments(rows: RawPosition[]): TripSegment[] {
   return out;
 }
 
+// One calendar day (UTC) of aggregated activity for a device. Powers the
+// Mileage (Гүйлт), Utilization (Ашиглалт) and Fuel-consumption reports — all
+// three are per-day rollups of the same windowed positions, so we compute the
+// buckets once and let each exporter pick the columns it needs.
+export interface DailySummary {
+  date: string; // YYYY-MM-DD (UTC)
+  distanceKm: number;
+  movingMin: number; // time at speed > MOTION_THRESHOLD_KMH
+  idleMin: number; // engine on but not moving (only when an ignition signal exists)
+  engineOnMin: number; // movingMin + idleMin
+  maxSpeed: number;
+  firstAt: Date;
+  lastAt: Date;
+  samples: number;
+}
+
+// Buckets the windowed positions into per-UTC-day summaries. Distance/time of
+// each segment is attributed to the day of its later point. Idle time is only
+// counted when the device actually reports ignition — for motion-only devices
+// we can't prove "engine on while parked", so idleMin stays 0 and the caller
+// is told via hasIgnition.
+export function buildDailySummary(rows: RawPosition[]): { days: DailySummary[]; hasIgnition: boolean } {
+  const hasIgn = hasIgnitionSignal(rows);
+  const byDate = new Map<string, DailySummary>();
+  let lastIgn: boolean | null = null;
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const date = r.time.toISOString().slice(0, 10);
+    let d = byDate.get(date);
+    if (!d) {
+      d = {
+        date, distanceKm: 0, movingMin: 0, idleMin: 0, engineOnMin: 0,
+        maxSpeed: 0, firstAt: r.time, lastAt: r.time, samples: 0,
+      };
+      byDate.set(date, d);
+    }
+    const speed = Number(r.speed ?? 0);
+    const ign = r.ignition === true ? true : r.ignition === false ? false : lastIgn;
+    const dtSec = i > 0 ? (r.time.getTime() - rows[i - 1].time.getTime()) / 1000 : 0;
+
+    d.distanceKm += Number(r.meters ?? 0) / 1000;
+    d.maxSpeed = Math.max(d.maxSpeed, speed);
+    d.samples += 1;
+    if (r.time < d.firstAt) d.firstAt = r.time;
+    if (r.time > d.lastAt) d.lastAt = r.time;
+
+    if (dtSec > 0 && dtSec < TIME_GAP_BREAK_SEC) {
+      if (speed > MOTION_THRESHOLD_KMH) {
+        d.movingMin += dtSec / 60;
+      } else if (hasIgn ? ign === true : false) {
+        d.idleMin += dtSec / 60;
+      }
+    }
+    lastIgn = ign;
+  }
+
+  for (const d of byDate.values()) d.engineOnMin = d.movingMin + d.idleMin;
+  return {
+    days: [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)),
+    hasIgnition: hasIgn,
+  };
+}
+
+// Nominal fuel consumption: estimated litres = distance(km)/100 × rate(L/100km).
+// Pure so it's unit-testable; the service supplies the device's configured rate.
+export interface FuelConsumptionDay {
+  date: string;
+  distanceKm: number;
+  estLiters: number;
+}
+
+export function computeFuelConsumption(
+  days: Array<{ date: string; distanceKm: number }>,
+  rateL100Km: number,
+): { rows: FuelConsumptionDay[]; totalDistanceKm: number; totalEstLiters: number } {
+  const rows = days.map((d) => ({
+    date: d.date,
+    distanceKm: d.distanceKm,
+    estLiters: (d.distanceKm / 100) * rateL100Km,
+  }));
+  return {
+    rows,
+    totalDistanceKm: rows.reduce((s, r) => s + r.distanceKm, 0),
+    totalEstLiters: rows.reduce((s, r) => s + r.estLiters, 0),
+  };
+}
+
 // Idle periods. We only consider engine-on idle (ignition===true OR no
 // ignition signal at all but speed < threshold between two trips —
 // labelled STOP_BETWEEN_TRIPS to set caller expectations).

@@ -90,6 +90,22 @@ export class ReportsController {
     return this.svc.idlePeriodsReport(id, r.from, r.to, req.user);
   }
 
+  // Daily rollup — backs the Mileage (Гүйлт) and Utilization (Ашиглалт) panels.
+  @Get('daily-summary/:deviceId')
+  @Audit('report.daily_summary', { resourceType: 'device', resourceIdParam: 'deviceId' })
+  dailySummary(@Param('deviceId') id: string, @Query('from') from: string, @Query('to') to: string, @Req() req: any) {
+    const r = this.range(from, to);
+    return this.svc.dailySummaryReport(id, r.from, r.to, req.user);
+  }
+
+  // Nominal fuel consumption (distance × configured L/100km).
+  @Get('fuel-consumption/:deviceId')
+  @Audit('report.fuel_consumption', { resourceType: 'device', resourceIdParam: 'deviceId' })
+  fuelConsumption(@Param('deviceId') id: string, @Query('from') from: string, @Query('to') to: string, @Req() req: any) {
+    const r = this.range(from, to);
+    return this.svc.fuelConsumptionReport(id, r.from, r.to, req.user);
+  }
+
   // Template-aware export. Replaces the old per-format /reports/trip/...
   // endpoints for UI-driven downloads — each template now gets a workbook
   // shaped to match what the user saw on screen (engine sessions, trip
