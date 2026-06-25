@@ -31,6 +31,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../common/redis.service';
 import { EmailService } from '../notifications/email.service';
 import { SmsService } from '../notifications/sms.service';
+import { TelegramService } from '../notifications/telegram.service';
+import { PushService } from '../notifications/push.service';
+import { WhatsAppService } from '../notifications/whatsapp.service';
+import { ViberService } from '../notifications/viber.service';
 import {
   INTEGRATION_ENV,
   IntegrationKey,
@@ -63,6 +67,10 @@ class SystemAdminService {
     private readonly redis: RedisService,
     private readonly email: EmailService,
     private readonly sms: SmsService,
+    private readonly telegram: TelegramService,
+    private readonly push: PushService,
+    private readonly whatsapp: WhatsAppService,
+    private readonly viber: ViberService,
     private readonly config: ConfigService,
     private readonly integrations: IntegrationSettingsService,
   ) {}
@@ -321,12 +329,20 @@ class SystemAdminService {
       throw new BadRequestException(`Unknown integration key: ${key}`);
     }
     await this.integrations.set(key as IntegrationKey, value, userId);
-    // Swap the new value into the live transports so the next test send
-    // uses it without a process restart.
+    // Swap the new value into the live transports so the next send uses it
+    // without a process restart.
     if (key === 'brevo_api_key') {
       await this.email.reload();
     } else if (key === 'sms_api_key') {
       await this.sms.reload();
+    } else if (key === 'telegram_bot_token') {
+      await this.telegram.reload();
+    } else if (key === 'fcm_server_key') {
+      await this.push.reload();
+    } else if (key === 'whatsapp_token' || key === 'whatsapp_phone_id') {
+      await this.whatsapp.reload();
+    } else if (key === 'viber_bot_token') {
+      await this.viber.reload();
     }
     return { ok: true, key };
   }

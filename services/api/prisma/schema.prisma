@@ -1022,6 +1022,10 @@ enum NotificationChannel {
   EMAIL
   SMS
   WEBHOOK
+  TELEGRAM
+  PUSH
+  WHATSAPP
+  VIBER
 }
 
 model NotificationRule {
@@ -1041,6 +1045,13 @@ model NotificationRule {
   channels        NotificationChannel[]
   recipientEmails String[]
   recipientPhones String[]
+  // Per-channel recipient lists for the chat/push integrations. Telegram =
+  // chat IDs, Push = device/FCM tokens, WhatsApp = E.164 numbers, Viber =
+  // subscriber receiver IDs. Vendor credentials live in IntegrationSetting.
+  recipientTelegram String[]
+  recipientPush     String[]
+  recipientWhatsapp String[]
+  recipientViber    String[]
   webhookUrl      String?
   template        String                @default("{DEVICE}: {TYPE} at {LOCATION} ({TIME})")
   active          Boolean               @default(true)

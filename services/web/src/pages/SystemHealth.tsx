@@ -107,7 +107,14 @@ export function SystemHealth() {
 }
 
 interface Integration {
-  key: 'brevo_api_key' | 'sms_api_key';
+  key:
+    | 'brevo_api_key'
+    | 'sms_api_key'
+    | 'telegram_bot_token'
+    | 'fcm_server_key'
+    | 'whatsapp_token'
+    | 'whatsapp_phone_id'
+    | 'viber_bot_token';
   envVar: string;
   configured: boolean;
   source: 'db' | 'env' | 'none';
@@ -125,6 +132,31 @@ const INTEGRATION_LABEL: Record<Integration['key'], { title: string; hint: strin
     title: 'CallPro Text API key',
     hint: 'api-text.callpro.mn-аас өгсөн x-api-key. SMS_FROM (lime number, жнь 72xxxxxx)-той хамт ажиллана.',
     placeholder: 'callpro-...',
+  },
+  telegram_bot_token: {
+    title: 'Telegram bot token',
+    hint: '@BotFather → /newbot. Дүрэм бүрт chat ID-уудаа оруулна. Хамгийн хялбар, үнэгүй суваг.',
+    placeholder: '123456:ABC-DEF...',
+  },
+  fcm_server_key: {
+    title: 'Push (FCM) server key',
+    hint: 'Firebase Console → Project settings → Cloud Messaging server key. Мобайл апп push token-уудтай ажиллана.',
+    placeholder: 'AAAA...',
+  },
+  whatsapp_token: {
+    title: 'WhatsApp Cloud API token',
+    hint: 'Meta for Developers → WhatsApp → API setup. Доорх phone-number ID-тэй хамт ажиллана.',
+    placeholder: 'EAAB...',
+  },
+  whatsapp_phone_id: {
+    title: 'WhatsApp phone-number ID',
+    hint: 'Meta WhatsApp API setup дахь "Phone number ID" (токен биш, дугаарын тоон ID).',
+    placeholder: '1234567890',
+  },
+  viber_bot_token: {
+    title: 'Viber bot token',
+    hint: 'partners.viber.com → public account → Auth token. Хэрэглэгч public account-д бүртгүүлсэн байх шаардлагатай.',
+    placeholder: '4f3...-...-...',
   },
 };
 
