@@ -380,7 +380,53 @@ function SuperAdminBilling({ plans }: { plans: PlanView[] }) {
           <InvoiceList invoices={invoices.data ?? []} admin companyId={companyId} />
         </div>
       )}
+      <RetentionPreview />
     </Card>
+  );
+}
+
+// Read-only per-plan retention status. The daily trim is dry-run until
+// RETENTION_ENFORCE is set server-side, so this shows what WOULD be removed.
+interface RetentionView {
+  enforcing: boolean; floorDays: number;
+  tenants: { companyId: string; planKey: string; retentionDays: number; rows: number }[];
+}
+function RetentionPreview() {
+  const q = useQuery({
+    queryKey: ['billing', 'retention'],
+    queryFn: () => api.get<RetentionView>('/billing/retention/preview').then((r) => r.data),
+  });
+  if (!q.data) return null;
+  const overdue = q.data.tenants.filter((t) => t.rows > 0);
+  return (
+    <div className="mt-6 border-t border-slate-100 pt-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-sm font-semibold">Дата хадгалалт (per-plan retention)</div>
+        <span className={clsx('text-[10px] uppercase tracking-widest font-semibold rounded-full px-2 py-1', q.data.enforcing ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-600')}>
+          {q.data.enforcing ? 'Идэвхтэй (устгана)' : 'Туршилт (устгахгүй)'}
+        </span>
+      </div>
+      <p className="text-[11px] text-slate-500 mt-1">Хязгаараас хэтэрсэн хуучин байршлын тоо. Жинхэнэ устгал нь сервер дээр RETENTION_ENFORCE=on болсон үед ажиллана (доод хязгаар: {q.data.floorDays} хоног).</p>
+      {overdue.length === 0 ? (
+        <div className="mt-2 text-xs text-slate-400">Хязгаараас хэтэрсэн дата алга.</div>
+      ) : (
+        <table className="mt-2 w-full text-sm">
+          <thead className="text-xs uppercase tracking-widest text-slate-500 border-b border-slate-100">
+            <tr><th className="text-left px-3 py-1.5">Компани</th><th className="text-left px-3 py-1.5">Багц</th><th className="text-right px-3 py-1.5">Хадгалах хоног</th><th className="text-right px-3 py-1.5">Хэтэрсэн мөр</th></tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {overdue.map((t) => (
+              <tr key={t.companyId}>
+                <td className="px-3 py-1.5 font-mono text-[11px]">{t.companyId.slice(0, 8)}…</td>
+                <td className="px-3 py-1.5">{t.planKey}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">{t.retentionDays}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">{fmt(t.rows)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }
 
