@@ -10,7 +10,18 @@ import { api, API_BASE, getToken } from '../lib/api';
 // derived from those (event filters, idle / engine slices of trip) or
 // flagged "удахгүй" so we don't pretend something is wired up.
 
-type Kind = 'trip' | 'trip-idle' | 'trip-engine' | 'events' | 'idle-billing' | 'mileage' | 'utilization' | 'fuel-consumption' | 'coming-soon';
+type Kind = 'trip' | 'trip-idle' | 'trip-engine' | 'events' | 'idle-billing' | 'mileage' | 'utilization' | 'fuel-consumption' | 'maintenance' | 'fleet-summary' | 'gprs' | 'command-log' | 'coming-soon';
+
+// Company-scoped (fleet-wide) report kinds: no device/tariff config, Excel-only
+// export, rendered by the generic FleetReportResult below.
+const FLEET_KINDS: Kind[] = ['maintenance', 'fleet-summary', 'gprs', 'command-log'];
+// Template id → API route segment (used for both the JSON preview and Excel).
+const FLEET_ENDPOINT: Record<string, string> = {
+  maintenance: 'maintenance',
+  'fleet-summary': 'fleet-summary',
+  gprs: 'gprs',
+  'command-log': 'command-log',
+};
 
 interface Template {
   id: string;
@@ -48,6 +59,10 @@ const I = {
   Lock:     () => svg(<><rect x="5" y="11" width="14" height="9" rx="1.5" /><path d="M8 11V8a4 4 0 018 0v3" /></>),
   Calendar: () => svg(<><rect x="4" y="5" width="16" height="16" rx="2" /><path d="M4 9h16M8 3v4M16 3v4" /></>),
   Chart:    () => svg(<><path d="M4 20V4M4 20h16" /><rect x="7" y="12" width="3" height="5" /><rect x="12" y="9" width="3" height="8" /><rect x="17" y="6" width="3" height="11" /></>),
+  Wrench:   () => svg(<><path d="M14 7a4 4 0 01-5 5L5 16a2 2 0 102 2l4-4a4 4 0 015-5l-2 2-2-2 2-2z" /></>),
+  Fleet:    () => svg(<><rect x="3" y="6" width="18" height="12" rx="2" /><path d="M3 10h18M9 6v12" /></>),
+  Antenna:  () => svg(<><path d="M12 12v8" /><path d="M8.5 8.5a5 5 0 017 0M5.5 5.5a9 9 0 0113 0" /><circle cx="12" cy="12" r="1.5" /></>),
+  Terminal: () => svg(<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 9l3 3-3 3M13 15h4" /></>),
 };
 
 const TEMPLATES: Template[] = [
@@ -109,9 +124,23 @@ const TEMPLATES: Template[] = [
   { id: 'tamper',   cat: 'Төхөөрөмж', name: 'Хөндөлт (Tamper)',
     description: 'Төхөөрөмжийг хөндөх оролдлого.',
     kind: 'events', filter: ['TAMPER'], icon: <I.Lock /> },
+  { id: 'gprs',     cat: 'Төхөөрөмж', name: 'Дата урсгал (GPRS)',
+    description: 'Машин тус бүрийн мобайл дата хэрэглээ (MB), пакет.',
+    kind: 'gprs', icon: <I.Antenna /> },
+  { id: 'command-log', cat: 'Төхөөрөмж', name: 'Командын түүх',
+    description: 'Төхөөрөмж рүү илгээсэн командууд ба хүргэлтийн төлөв.',
+    kind: 'command-log', icon: <I.Terminal /> },
+
+  // ── Флот / удирдлага ─────────────────────────────────────
+  { id: 'fleet-summary', cat: 'Флот / удирдлага', name: 'Флотын нэгдсэн дүн',
+    description: 'Бүх машины зам, хөдөлгөөн, сул зогсолт нэг хүснэгтэд.',
+    kind: 'fleet-summary', icon: <I.Fleet /> },
+  { id: 'maintenance', cat: 'Флот / удирдлага', name: 'Засвар үйлчилгээ',
+    description: 'Товлосон / хийгдсэн / хугацаа хэтэрсэн засвар, зардал.',
+    kind: 'maintenance', icon: <I.Wrench /> },
 ];
 
-const CATS = ['Жолоодлогын тайлан', 'Аюулгүй байдал', 'Ашиглалт', 'Төхөөрөмж'];
+const CATS = ['Жолоодлогын тайлан', 'Аюулгүй байдал', 'Ашиглалт', 'Төхөөрөмж', 'Флот / удирдлага'];
 
 // Authenticated file download. If the server returned a Content-Disposition
 // header with a filename, we use that (the template export endpoint does);
@@ -196,11 +225,14 @@ export function Reports() {
   };
 
   const isIdleBilling = tpl.kind === 'idle-billing';
+  const isCompanyScoped = FLEET_KINDS.includes(tpl.kind);
   const canRun = tpl.kind === 'coming-soon'
     ? false
     : isIdleBilling
       ? Number(tariff) > 0
-      : Boolean(deviceId);
+      : isCompanyScoped
+        ? true
+        : Boolean(deviceId);
 
   const run = () => {
     if (!canRun) return;
@@ -219,6 +251,16 @@ export function Reports() {
         `&tariff=${encodeURIComponent(generated.tariff)}` +
         (generated.shiftId ? `&shiftId=${encodeURIComponent(generated.shiftId)}` : '');
       downloadFromUrl(url, `idle-billing-${generated.from}_${generated.to}.xlsx`);
+      return;
+    }
+    // Company-scoped (fleet-wide) reports: Excel-only, no device param.
+    const fleetPath = FLEET_ENDPOINT[generated.tplId];
+    if (fleetPath) {
+      if (fmt !== 'excel') return;
+      const url =
+        `${API_BASE}/reports/${fleetPath}/excel` +
+        `?from=${new Date(generated.from).toISOString()}&to=${new Date(generated.to).toISOString()}`;
+      downloadFromUrl(url, `${fleetPath}-${generated.from}_${generated.to}.xlsx`);
       return;
     }
     // Template-aware export. The backend picks the right shaper + filename
@@ -359,6 +401,11 @@ export function Reports() {
                   </div>
                 </Field>
               </>
+            ) : isCompanyScoped ? (
+              <div className="rounded-md bg-sky-50 border border-sky-200 px-3 py-2 text-xs text-sky-900">
+                Энэ тайлан <strong>бүх флотыг</strong> хамарна — машин сонгох шаардлагагүй. Зөвхөн
+                хугацааны хүрээгээ сонгоод "Тайлан үүсгэх" дарна уу.
+              </div>
             ) : (
               <Field label="Машин">
                 <select
@@ -447,8 +494,8 @@ export function Reports() {
               </button>
               <button
                 onClick={() => download('pdf')}
-                disabled={!generated || tpl.kind === 'coming-soon' || isIdleBilling}
-                title={isIdleBilling ? 'PDF удахгүй гарна — одоохондоо Excel ашиглана уу' : ''}
+                disabled={!generated || tpl.kind === 'coming-soon' || isIdleBilling || isCompanyScoped}
+                title={isIdleBilling || isCompanyScoped ? 'Энэ тайланг одоогоор зөвхөн Excel-ээр татна' : ''}
                 className="flex-1 rounded-md bg-rose-600 hover:bg-rose-500 text-white text-sm py-2 disabled:opacity-50 transition"
               >
                 PDF
@@ -467,6 +514,12 @@ export function Reports() {
               to={generated.to}
               tariff={Number(generated.tariff)}
               shiftId={generated.shiftId}
+            />
+          ) : FLEET_ENDPOINT[generated.tplId] ? (
+            <FleetReportResult
+              tplId={generated.tplId}
+              from={generated.from}
+              to={generated.to}
             />
           ) : (
             <ReportResult
@@ -1270,6 +1323,190 @@ function IdleBillingResult({ from, to, tariff, shiftId }: { from: string; to: st
             )}
           </table>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Company-scoped (fleet-wide) reports ───────────────────────
+// One generic, config-driven renderer for maintenance / fleet-summary / gprs /
+// command-log — each declares its KPIs + columns; the component fetches the
+// matching /reports/<path> endpoint and draws a KPI row + table.
+type FleetCol = { header: string; key: string; right?: boolean; fmt?: 'datetime' | 'date' | 'num1' | 'int' | 'status' | 'money' };
+interface FleetView {
+  cat: string;
+  title: string;
+  kpis: (totals: any) => Array<{ label: string; value: string; accent: 'brand' | 'emerald' | 'amber' | 'rose' | 'slate' }>;
+  columns: FleetCol[];
+}
+
+const FLEET_VIEW: Record<string, FleetView> = {
+  'fleet-summary': {
+    cat: 'Флот / удирдлага', title: 'Флотын нэгдсэн дүн',
+    kpis: (t) => [
+      { label: 'Машин', value: fmtNum(t.vehicles ?? 0), accent: 'brand' },
+      { label: 'Нийт зам', value: km(t.distanceKm), accent: 'emerald' },
+      { label: 'Хөдөлгөөн', value: hours(t.movingHours), accent: 'slate' },
+      { label: 'Сул зогсолт', value: hours(t.idleHours), accent: 'amber' },
+    ],
+    columns: [
+      { header: 'Машин', key: 'device' },
+      { header: 'Улсын дугаар', key: 'plateNumber' },
+      { header: 'Зам (км)', key: 'distanceKm', right: true, fmt: 'num1' },
+      { header: 'Хөдөлгөөн (ц)', key: 'movingHours', right: true, fmt: 'num1' },
+      { header: 'Сул (ц)', key: 'idleHours', right: true, fmt: 'num1' },
+      { header: 'Дээд хурд', key: 'maxSpeed', right: true, fmt: 'int' },
+      { header: 'Сүүлд', key: 'lastSeen', fmt: 'datetime' },
+    ],
+  },
+  maintenance: {
+    cat: 'Флот / удирдлага', title: 'Засвар үйлчилгээ',
+    kpis: (t) => [
+      { label: 'Нийт ажил', value: fmtNum(t.total ?? 0), accent: 'brand' },
+      { label: 'Хийгдсэн', value: fmtNum(t.completed ?? 0), accent: 'emerald' },
+      { label: 'Хугацаа хэтэрсэн', value: fmtNum(t.overdue ?? 0), accent: 'rose' },
+      { label: 'Зардал (₮)', value: fmtNum(t.totalCost ?? 0), accent: 'slate' },
+    ],
+    columns: [
+      { header: 'Машин', key: 'device' },
+      { header: 'Улсын дугаар', key: 'plateNumber' },
+      { header: 'Ажил', key: 'title' },
+      { header: 'Төрөл', key: 'kind' },
+      { header: 'Төлөв', key: 'effectiveStatus', fmt: 'status' },
+      { header: 'Товлосон', key: 'scheduledAt', fmt: 'date' },
+      { header: 'Хийгдсэн', key: 'completedAt', fmt: 'date' },
+      { header: 'Зардал (₮)', key: 'cost', right: true, fmt: 'money' },
+    ],
+  },
+  gprs: {
+    cat: 'Төхөөрөмж', title: 'Дата урсгал (GPRS)',
+    kpis: (t) => [
+      { label: 'Машин', value: fmtNum(t.devices ?? 0), accent: 'brand' },
+      { label: 'Нийт дата', value: `${fmtNum(Math.round(t.mb ?? 0))} MB`, accent: 'emerald' },
+      { label: 'Нийт пакет', value: fmtNum(t.packets ?? 0), accent: 'slate' },
+    ],
+    columns: [
+      { header: 'Машин', key: 'device' },
+      { header: 'Улсын дугаар', key: 'plateNumber' },
+      { header: 'Дата (MB)', key: 'mb', right: true, fmt: 'num1' },
+      { header: 'Пакет', key: 'packets', right: true, fmt: 'int' },
+      { header: 'Сар', key: 'months', right: true, fmt: 'int' },
+    ],
+  },
+  'command-log': {
+    cat: 'Төхөөрөмж', title: 'Командын түүх',
+    kpis: (t) => [
+      { label: 'Нийт команд', value: fmtNum(t.total ?? 0), accent: 'brand' },
+      { label: 'Хүргэгдсэн', value: fmtNum(t.delivered ?? 0), accent: 'emerald' },
+      { label: 'Амжилтгүй', value: fmtNum(t.failed ?? 0), accent: 'rose' },
+      { label: 'Хүлээгдэж буй', value: fmtNum(t.pending ?? 0), accent: 'amber' },
+    ],
+    columns: [
+      { header: 'Огноо', key: 'createdAt', fmt: 'datetime' },
+      { header: 'Машин', key: 'device' },
+      { header: 'Команд', key: 'type' },
+      { header: 'Төлөв', key: 'status', fmt: 'status' },
+      { header: 'Оролд.', key: 'attempts', right: true, fmt: 'int' },
+      { header: 'Хүргэгдсэн', key: 'deliveredAt', fmt: 'datetime' },
+      { header: 'Хариу', key: 'result' },
+    ],
+  },
+};
+
+function fleetCellValue(row: any, col: FleetCol): ReactNode {
+  const v = row[col.key];
+  switch (col.fmt) {
+    case 'datetime': return v ? new Date(v).toLocaleString('mn-MN') : '—';
+    case 'date':     return v ? new Date(v).toLocaleDateString('mn-MN') : '—';
+    case 'num1':     return (Number(v) || 0).toFixed(1);
+    case 'int':      return fmtNum(Number(v) || 0);
+    case 'money':    return fmtNum(Math.round(Number(v) || 0));
+    case 'status':   return <FleetStatusChip s={String(v ?? '')} />;
+    default:         return v == null || v === '' ? '—' : String(v);
+  }
+}
+
+function FleetStatusChip({ s }: { s: string }) {
+  const m: Record<string, string> = {
+    COMPLETED: 'bg-emerald-100 text-emerald-800',
+    DELIVERED: 'bg-emerald-100 text-emerald-800',
+    SENT: 'bg-sky-100 text-sky-800',
+    IN_PROGRESS: 'bg-sky-100 text-sky-800',
+    PLANNED: 'bg-slate-100 text-slate-700',
+    PENDING: 'bg-amber-100 text-amber-800',
+    OVERDUE: 'bg-rose-100 text-rose-800',
+    FAILED: 'bg-rose-100 text-rose-800',
+    CANCELLED: 'bg-slate-100 text-slate-500',
+  };
+  return (
+    <span className={`text-[10px] uppercase tracking-widest font-semibold rounded-full px-2 py-1 ${m[s] ?? 'bg-slate-100 text-slate-600'}`}>
+      {s || '—'}
+    </span>
+  );
+}
+
+function FleetReportResult({ tplId, from, to }: { tplId: string; from: string; to: string }) {
+  const view = FLEET_VIEW[tplId];
+  const path = FLEET_ENDPOINT[tplId];
+  const q = useQuery({
+    queryKey: ['reports', path, from, to],
+    queryFn: () =>
+      api.get(`/reports/${path}?from=${new Date(from).toISOString()}&to=${new Date(to).toISOString()}`).then((r) => r.data),
+  });
+
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <header className="px-6 py-4 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <div className="text-xs uppercase tracking-widest text-brand-700/80 font-semibold">{view.cat}</div>
+          <h2 className="text-lg font-bold mt-0.5">{view.title}</h2>
+        </div>
+        <div className="text-right text-xs text-slate-500">
+          {new Date(from).toLocaleDateString('mn-MN')} → {new Date(to).toLocaleDateString('mn-MN')}
+        </div>
+      </header>
+
+      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {q.isLoading && <SkeletonResult />}
+        {q.isError && <div className="text-sm text-rose-700">Алдаа гарлаа.</div>}
+        {!q.isLoading && !q.isError && q.data && (() => {
+          const rows: any[] = q.data.rows ?? [];
+          const kpis = view.kpis(q.data.totals ?? {});
+          return (
+            <>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                {kpis.map((k) => <Kpi key={k.label} label={k.label} value={k.value} accent={k.accent} />)}
+              </div>
+              <Panel title="Дэлгэрэнгүй" subtitle={rows.length === 0 ? 'Сонгосон хугацаанд мэдээ алга' : `Нийт ${rows.length} мөр`}>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="text-xs uppercase tracking-widest text-slate-500 border-b border-slate-100">
+                      <tr>
+                        {view.columns.map((c) => (
+                          <th key={c.key} className={clsx('px-3 py-2', c.right ? 'text-right' : 'text-left')}>{c.header}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {rows.map((row, i) => (
+                        <tr key={row.id ?? row.deviceId ?? i} className="hover:bg-slate-50">
+                          {view.columns.map((c) => (
+                            <td key={c.key} className={clsx('px-3 py-2', c.right && 'text-right tabular-nums', c.fmt === 'datetime' && 'whitespace-nowrap')}>
+                              {fleetCellValue(row, c)}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                      {rows.length === 0 && (
+                        <tr><td colSpan={view.columns.length} className="px-3 py-10 text-center text-sm text-slate-400">Хоосон</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </Panel>
+            </>
+          );
+        })()}
       </div>
     </div>
   );
